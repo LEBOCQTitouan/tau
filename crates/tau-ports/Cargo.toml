@@ -1,0 +1,9 @@
+[package]
+name = "tau-ports"
+description = "Port (trait) definitions for tau's hexagonal architecture."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true

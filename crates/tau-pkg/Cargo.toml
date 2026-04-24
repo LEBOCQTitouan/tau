@@ -1,0 +1,9 @@
+[package]
+name = "tau-pkg"
+description = "Tau package manager: install, resolve, and manage extension packages."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
