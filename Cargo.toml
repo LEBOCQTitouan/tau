@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tau-domain",
+    "crates/tau-ports",
+    "crates/tau-infra",
+    "crates/tau-app",
+    "crates/tau-pkg",
+    "crates/tau-observe",
+    "crates/tau-runtime",
+    "crates/tau-cli",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.91"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/LEBOCQTitouan/tau"
+authors = ["Titouan Lebocq <75916953+LEBOCQTitouan@users.noreply.github.com>"]
