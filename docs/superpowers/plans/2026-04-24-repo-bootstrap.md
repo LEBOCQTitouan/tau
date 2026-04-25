@@ -57,7 +57,7 @@ Each crate's `lib.rs` (or `main.rs` for the binary) is the only Rust file in Pla
 - Already present: `/Users/titouanlebocq/code/tau/docs/superpowers/specs/2026-04-24-repo-bootstrap-design.md`
 - Already present: `/Users/titouanlebocq/code/tau/docs/superpowers/plans/2026-04-24-repo-bootstrap.md` (this file)
 
-- [ ] **Step 1.1: Initialize git with `main` as the default branch**
+- [x] **Step 1.1: Initialize git with `main` as the default branch**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -66,7 +66,7 @@ git init -b main
 
 Expected: `Initialized empty Git repository in /Users/titouanlebocq/code/tau/.git/`.
 
-- [ ] **Step 1.2: Verify there is no `user.email` / `user.name` issue locally**
+- [x] **Step 1.2: Verify there is no `user.email` / `user.name` issue locally**
 
 ```bash
 git config user.email && git config user.name
@@ -79,7 +79,7 @@ git config --local user.name "Titouan Lebocq"
 git config --local user.email "75916953+LEBOCQTitouan@users.noreply.github.com"
 ```
 
-- [ ] **Step 1.3: Write `.gitignore`**
+- [x] **Step 1.3: Write `.gitignore`**
 
 ```
 # Rust
@@ -104,7 +104,7 @@ tarpaulin-report.html
 
 Note: `Cargo.lock` is intentionally untracked at workspace root because tau is primarily a library distribution surface (`tau-runtime` is a published crate). The `tau-cli` binary is built downstream, not redistributed pre-built in Phase 0. If we add release artifacts later, this decision is revisited via ADR.
 
-- [ ] **Step 1.4: Copy constitution and cheatsheet from the input directory**
+- [x] **Step 1.4: Copy constitution and cheatsheet from the input directory**
 
 ```bash
 cp /Users/titouanlebocq/Downloads/instructions/CONSTITUTION.md /Users/titouanlebocq/code/tau/CONSTITUTION.md
@@ -119,7 +119,7 @@ ls -la /Users/titouanlebocq/code/tau/CONSTITUTION.md /Users/titouanlebocq/code/t
 
 Note: `CLAUDE_PROMPT.md` is *not* copied — it is meta-guidance for the assistant, not a project artifact. (If you disagree, copy it too — adding it later is one commit.)
 
-- [ ] **Step 1.5: Stage and commit**
+- [x] **Step 1.5: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -138,7 +138,7 @@ Refs: G1, G11, PG1"
 
 Expected: one commit, files listed above included.
 
-- [ ] **Step 1.6: Verify the commit looks right**
+- [x] **Step 1.6: Verify the commit looks right**
 
 ```bash
 git log --stat -1
@@ -154,7 +154,7 @@ Expected: 5 files added, no `Cargo.toml` yet.
 - Create: `/Users/titouanlebocq/code/tau/LICENSE-MIT`
 - Create: `/Users/titouanlebocq/code/tau/LICENSE-APACHE`
 
-- [ ] **Step 2.1: Write `LICENSE-MIT`**
+- [x] **Step 2.1: Write `LICENSE-MIT`**
 
 ```
 MIT License
@@ -180,7 +180,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-- [ ] **Step 2.2: Fetch the canonical Apache 2.0 license text**
+- [x] **Step 2.2: Fetch the canonical Apache 2.0 license text**
 
 ```bash
 curl -fsSL https://www.apache.org/licenses/LICENSE-2.0.txt -o /Users/titouanlebocq/code/tau/LICENSE-APACHE
@@ -197,7 +197,7 @@ wc -l /Users/titouanlebocq/code/tau/LICENSE-APACHE
 
 Expected first line includes `Apache License`. Line count is approximately 202.
 
-- [ ] **Step 2.3: Stage and commit**
+- [x] **Step 2.3: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -221,7 +221,7 @@ Refs: QG10"
 - Create: `/Users/titouanlebocq/code/tau/rustfmt.toml`
 - Create: `/Users/titouanlebocq/code/tau/clippy.toml`
 
-- [ ] **Step 3.1: Write workspace `Cargo.toml`**
+- [x] **Step 3.1: Write workspace `Cargo.toml`**
 
 Path: `/Users/titouanlebocq/code/tau/Cargo.toml`
 
@@ -250,7 +250,7 @@ authors = ["Titouan Lebocq <75916953+LEBOCQTitouan@users.noreply.github.com>"]
 
 Note: members are listed explicitly (no glob) so PR diffs visibly track every workspace addition. `version = "0.0.0"` because nothing is published yet; the first published version in any sub-project becomes `0.1.0` per QG11 SemVer.
 
-- [ ] **Step 3.2: Write `rust-toolchain.toml`**
+- [x] **Step 3.2: Write `rust-toolchain.toml`**
 
 Path: `/Users/titouanlebocq/code/tau/rust-toolchain.toml`
 
@@ -263,7 +263,7 @@ profile = "minimal"
 
 This pins local development to whatever stable is currently installed (1.93.1 today). CI overrides per matrix entry.
 
-- [ ] **Step 3.3: Write `rustfmt.toml`**
+- [x] **Step 3.3: Write `rustfmt.toml`**
 
 Path: `/Users/titouanlebocq/code/tau/rustfmt.toml`
 
@@ -274,7 +274,7 @@ max_width = 100
 
 Two settings only. Anything beyond defaults is justified individually via ADR.
 
-- [ ] **Step 3.4: Write `clippy.toml`**
+- [x] **Step 3.4: Write `clippy.toml`**
 
 Path: `/Users/titouanlebocq/code/tau/clippy.toml`
 
@@ -283,7 +283,7 @@ Path: `/Users/titouanlebocq/code/tau/clippy.toml`
 # Lint denial level is set per-crate in lib.rs / main.rs and via CI flags.
 ```
 
-- [ ] **Step 3.5: Verify the workspace declaration parses**
+- [x] **Step 3.5: Verify the workspace declaration parses**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -294,7 +294,7 @@ Expected: an error of the form `error: failed to load manifest for workspace mem
 
 If you instead see `error: virtual manifests must be configured with [workspace]`, your `[workspace]` block is malformed — fix it.
 
-- [ ] **Step 3.6: Stage and commit**
+- [x] **Step 3.6: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -319,7 +319,7 @@ Refs: G6, QG7, QG10, QG11"
 - Create: `/Users/titouanlebocq/code/tau/crates/{tau-domain,tau-ports,tau-infra,tau-app,tau-pkg,tau-observe,tau-runtime}/Cargo.toml`
 - Create: `/Users/titouanlebocq/code/tau/crates/{tau-domain,tau-ports,tau-infra,tau-app,tau-pkg,tau-observe,tau-runtime}/src/lib.rs`
 
-- [ ] **Step 4.1: Create directory structure**
+- [x] **Step 4.1: Create directory structure**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -331,7 +331,7 @@ ls crates/
 
 Expected: `tau-app  tau-domain  tau-infra  tau-observe  tau-pkg  tau-ports  tau-runtime`.
 
-- [ ] **Step 4.2: Write Cargo.toml for each library crate**
+- [x] **Step 4.2: Write Cargo.toml for each library crate**
 
 Each library `Cargo.toml` follows this template (only `name` and `description` differ between crates):
 
@@ -379,7 +379,7 @@ authors.workspace = true
 
 Repeat for the other six, substituting `name` and `description`.
 
-- [ ] **Step 4.3: Write `src/lib.rs` for each library crate**
+- [x] **Step 4.3: Write `src/lib.rs` for each library crate**
 
 Each library `src/lib.rs` follows this template (only the module doc differs):
 
@@ -418,7 +418,7 @@ Path: `/Users/titouanlebocq/code/tau/crates/tau-domain/src/lib.rs`
 
 Repeat for the other six. **Important:** `tau-runtime/src/lib.rs` contains an intra-doc link to a non-existent type (`tau-domain::Message`) — do NOT add such a link in Plan 1, since `broken_intra_doc_links` is denied. The doc-strings above are link-free; keep them that way.
 
-- [ ] **Step 4.4: Verify the workspace builds**
+- [x] **Step 4.4: Verify the workspace builds**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -429,7 +429,7 @@ Expected: every library crate compiles (will report 0 warnings). Output ends wit
 
 If you see `error: cannot find macro` or `error: unresolved import`, the `lib.rs` template was edited incorrectly — restore it.
 
-- [ ] **Step 4.5: Verify the workspace tests run**
+- [x] **Step 4.5: Verify the workspace tests run**
 
 ```bash
 cargo test --workspace --all-targets
@@ -438,7 +438,7 @@ cargo test --workspace --doc
 
 Expected: zero tests, all "ok" results, exit code 0. Doc-test pass is critical because `#![deny(missing_docs)]` is on; the module `//!` doc satisfies it.
 
-- [ ] **Step 4.6: Verify clippy is clean**
+- [x] **Step 4.6: Verify clippy is clean**
 
 ```bash
 cargo clippy --workspace --all-targets -- -D warnings
@@ -446,7 +446,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 Expected: no warnings, exit code 0.
 
-- [ ] **Step 4.7: Verify rustfmt is satisfied**
+- [x] **Step 4.7: Verify rustfmt is satisfied**
 
 ```bash
 cargo fmt --all -- --check
@@ -454,7 +454,7 @@ cargo fmt --all -- --check
 
 Expected: no output, exit code 0.
 
-- [ ] **Step 4.8: Stage and commit**
+- [x] **Step 4.8: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -486,13 +486,13 @@ Refs: G1, G6, QG3, QG4, QG9"
 - Create: `/Users/titouanlebocq/code/tau/crates/tau-cli/Cargo.toml`
 - Create: `/Users/titouanlebocq/code/tau/crates/tau-cli/src/main.rs`
 
-- [ ] **Step 5.1: Create directory**
+- [x] **Step 5.1: Create directory**
 
 ```bash
 mkdir -p /Users/titouanlebocq/code/tau/crates/tau-cli/src
 ```
 
-- [ ] **Step 5.2: Write `Cargo.toml`**
+- [x] **Step 5.2: Write `Cargo.toml`**
 
 Path: `/Users/titouanlebocq/code/tau/crates/tau-cli/Cargo.toml`
 
@@ -514,7 +514,7 @@ path = "src/main.rs"
 
 Note: the binary is named `tau` (not `tau-cli`) so users invoke `tau install`, not `tau-cli install`.
 
-- [ ] **Step 5.3: Write `src/main.rs`**
+- [x] **Step 5.3: Write `src/main.rs`**
 
 Path: `/Users/titouanlebocq/code/tau/crates/tau-cli/src/main.rs`
 
@@ -532,7 +532,7 @@ fn main() {
 
 Note: `#![deny(missing_docs)]` is *not* set on the binary because there are no public items to document — the binary's stable surface is its CLI flags (QG12), governed separately. `#![forbid(unsafe_code)]` still applies (QG4).
 
-- [ ] **Step 5.4: Verify the binary builds and runs**
+- [x] **Step 5.4: Verify the binary builds and runs**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -542,7 +542,7 @@ cargo run -p tau-cli
 
 Expected: `Finished ...` then `tau` printed on its own line.
 
-- [ ] **Step 5.5: Verify clippy + fmt**
+- [x] **Step 5.5: Verify clippy + fmt**
 
 ```bash
 cargo clippy --workspace --all-targets -- -D warnings
@@ -551,7 +551,7 @@ cargo fmt --all -- --check
 
 Expected: both exit 0 silently.
 
-- [ ] **Step 5.6: Stage and commit**
+- [x] **Step 5.6: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -582,14 +582,14 @@ Refs: G3"
 - Create: `/Users/titouanlebocq/code/tau/docs/decisions/README.md`
 - Create: `/Users/titouanlebocq/code/tau/docs/decisions/template.md`
 
-- [ ] **Step 6.1: Create directories**
+- [x] **Step 6.1: Create directories**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
 mkdir -p docs/tutorials docs/how-to docs/reference docs/explanation docs/decisions
 ```
 
-- [ ] **Step 6.2: Write `docs/README.md`**
+- [x] **Step 6.2: Write `docs/README.md`**
 
 ````markdown
 # Tau documentation
@@ -625,7 +625,7 @@ not end-user documentation — kept in-repo so reviewers see how decisions
 were made.
 ````
 
-- [ ] **Step 6.3: Write the four Diátaxis section READMEs**
+- [x] **Step 6.3: Write the four Diátaxis section READMEs**
 
 Each follows this minimal pattern. Save these one at a time.
 
@@ -676,7 +676,7 @@ into ADRs.
 Empty in Phase 0 — see the [ROADMAP](../../ROADMAP.md) for status.
 ```
 
-- [ ] **Step 6.4: Write `docs/decisions/README.md`**
+- [x] **Step 6.4: Write `docs/decisions/README.md`**
 
 ````markdown
 # Architecture Decision Records (ADRs)
@@ -716,7 +716,7 @@ require ADRs and are recorded in commit messages and PR discussion (PG3).
 | [0001](0001-bootstrap.md) | Bootstrap decisions | Accepted |
 ````
 
-- [ ] **Step 6.5: Write `docs/decisions/template.md`**
+- [x] **Step 6.5: Write `docs/decisions/template.md`**
 
 ```markdown
 # ADR-NNNN: <title>
@@ -748,7 +748,7 @@ ADRs).>
 "Easier" or "preference" is not a reason — name the trade-off.>
 ```
 
-- [ ] **Step 6.6: Stage and commit**
+- [x] **Step 6.6: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -773,7 +773,7 @@ Refs: QG8, QG18"
 **Files:**
 - Create: `/Users/titouanlebocq/code/tau/docs/decisions/0001-bootstrap.md`
 
-- [ ] **Step 7.1: Write ADR-0001**
+- [x] **Step 7.1: Write ADR-0001**
 
 Path: `/Users/titouanlebocq/code/tau/docs/decisions/0001-bootstrap.md`
 
@@ -886,7 +886,7 @@ specific items without ambiguity.
   referent for amendment.
 ````
 
-- [ ] **Step 7.2: Verify the link from `decisions/README.md` works**
+- [x] **Step 7.2: Verify the link from `decisions/README.md` works**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -895,7 +895,7 @@ test -f docs/decisions/0001-bootstrap.md && echo OK
 
 Expected: `OK`.
 
-- [ ] **Step 7.3: Stage and commit**
+- [x] **Step 7.3: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -921,7 +921,7 @@ Refs: QG7, QG8, QG9, QG10, QG11, QG18"
 **Files:**
 - Create: `/Users/titouanlebocq/code/tau/README.md`
 
-- [ ] **Step 8.1: Write `README.md`**
+- [x] **Step 8.1: Write `README.md`**
 
 ````markdown
 # tau
@@ -1000,7 +1000,7 @@ additional terms or conditions, per the Apache 2.0 §5 inbound=outbound
 norm.
 ````
 
-- [ ] **Step 8.2: Verify links resolve to local files**
+- [x] **Step 8.2: Verify links resolve to local files**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1011,7 +1011,7 @@ done
 
 Expected: only `ROADMAP.md` and `CONTRIBUTING.md` print as `MISSING:` — both land in later tasks. README links to them in anticipation.
 
-- [ ] **Step 8.3: Stage and commit**
+- [x] **Step 8.3: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1033,7 +1033,7 @@ Refs: QG10, G1, G11"
 **Files:**
 - Create: `/Users/titouanlebocq/code/tau/CHANGELOG.md`
 
-- [ ] **Step 9.1: Write `CHANGELOG.md`**
+- [x] **Step 9.1: Write `CHANGELOG.md`**
 
 ```markdown
 # Changelog
@@ -1084,7 +1084,7 @@ changes bump the minor (`0.X.Y` → `0.(X+1).0`) per QG11.
 [Unreleased]: https://github.com/LEBOCQTitouan/tau/commits/main
 ```
 
-- [ ] **Step 9.2: Stage and commit**
+- [x] **Step 9.2: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1105,7 +1105,7 @@ Refs: QG21, QG11"
 **Files:**
 - Create: `/Users/titouanlebocq/code/tau/CONTRIBUTING.md`
 
-- [ ] **Step 10.1: Write `CONTRIBUTING.md`**
+- [x] **Step 10.1: Write `CONTRIBUTING.md`**
 
 ````markdown
 # Contributing to tau
@@ -1208,7 +1208,7 @@ MIT or Apache-2.0 at the project's option, per the Apache 2.0 §5
 inbound=outbound norm.
 ````
 
-- [ ] **Step 10.2: Stage and commit**
+- [x] **Step 10.2: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1232,7 +1232,7 @@ Refs: PG2, PG3, QG3, QG4, QG5, QG9, QG17, QG18, QG22, QG24, QG25"
 **Files:**
 - Create: `/Users/titouanlebocq/code/tau/SECURITY.md`
 
-- [ ] **Step 11.1: Write `SECURITY.md`**
+- [x] **Step 11.1: Write `SECURITY.md`**
 
 ```markdown
 # Security policy
@@ -1283,7 +1283,7 @@ then, dependency vulnerabilities may be reported through this channel
 even if they would normally be flagged by automation.
 ```
 
-- [ ] **Step 11.2: Stage and commit**
+- [x] **Step 11.2: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1305,7 +1305,7 @@ Refs: QG15, NG4, NG7, NG8"
 **Files:**
 - Create: `/Users/titouanlebocq/code/tau/CODE_OF_CONDUCT.md`
 
-- [ ] **Step 12.1: Fetch the canonical Contributor Covenant 2.1**
+- [x] **Step 12.1: Fetch the canonical Contributor Covenant 2.1**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1321,7 +1321,7 @@ grep -c "Contributor Covenant" CODE_OF_CONDUCT.md
 
 Expected: title is `# Contributor Covenant Code of Conduct`. The grep finds at least 3 mentions.
 
-- [ ] **Step 12.2: Insert the contact email**
+- [x] **Step 12.2: Insert the contact email**
 
 The downloaded file contains a placeholder line `[INSERT CONTACT METHOD]`. Replace it with the project's noreply address.
 
@@ -1340,7 +1340,7 @@ grep -c "INSERT CONTACT" CODE_OF_CONDUCT.md || echo "no placeholders remaining"
 
 Expected output: `no placeholders remaining` (the `|| echo` handles the grep-zero-matches exit code).
 
-- [ ] **Step 12.3: Stage and commit**
+- [x] **Step 12.3: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1361,7 +1361,7 @@ Refs: QG10"
 **Files:**
 - Create: `/Users/titouanlebocq/code/tau/GOVERNANCE.md`
 
-- [ ] **Step 13.1: Write `GOVERNANCE.md`**
+- [x] **Step 13.1: Write `GOVERNANCE.md`**
 
 ````markdown
 # Governance
@@ -1431,7 +1431,7 @@ trademark — to the extent one exists — is held by the maintainer; forks
 should choose a different name to avoid downstream confusion.
 ````
 
-- [ ] **Step 13.2: Stage and commit**
+- [x] **Step 13.2: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1454,7 +1454,7 @@ Refs: QG10, QG18, QG22, Constitution §4"
 **Files:**
 - Create: `/Users/titouanlebocq/code/tau/ROADMAP.md`
 
-- [ ] **Step 14.1: Write `ROADMAP.md`**
+- [x] **Step 14.1: Write `ROADMAP.md`**
 
 ````markdown
 # Tau roadmap
@@ -1528,7 +1528,7 @@ Adjacent ideas may belong in plugins or downstream projects (such as
 project).
 ````
 
-- [ ] **Step 14.2: Stage and commit**
+- [x] **Step 14.2: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1553,13 +1553,13 @@ Refs: PG1, PG4, NG1-NG12"
 **Files:**
 - Create: `/Users/titouanlebocq/code/tau/.github/workflows/ci.yml`
 
-- [ ] **Step 15.1: Create directory**
+- [x] **Step 15.1: Create directory**
 
 ```bash
 mkdir -p /Users/titouanlebocq/code/tau/.github/workflows
 ```
 
-- [ ] **Step 15.2: Write `ci.yml`**
+- [x] **Step 15.2: Write `ci.yml`**
 
 Path: `/Users/titouanlebocq/code/tau/.github/workflows/ci.yml`
 
@@ -1634,7 +1634,7 @@ Notes:
 - No `actions/cache` step. Caching lands as a Phase 2 ADR if CI time
   becomes painful.
 
-- [ ] **Step 15.3: Verify the YAML parses (syntactic check only)**
+- [x] **Step 15.3: Verify the YAML parses (syntactic check only)**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1643,7 +1643,7 @@ python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))" 2>&1 
 
 Expected: no output (success) or a clear pyyaml error if the file is malformed. `python3` and PyYAML are commonly available on macOS; if PyYAML is missing, install it (`pip3 install pyyaml`) or skip this step — the next push will validate the file via GitHub Actions itself.
 
-- [ ] **Step 15.4: Stage and commit**
+- [x] **Step 15.4: Stage and commit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1669,7 +1669,7 @@ Refs: QG1, QG5, QG6, QG7, G15"
 satisfies every "Done when" criterion from the spec before pushing to
 GitHub.
 
-- [ ] **Step 16.1: Confirm all governance files exist**
+- [x] **Step 16.1: Confirm all governance files exist**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1681,7 +1681,7 @@ echo "governance check complete"
 
 Expected: only the final `governance check complete` line — no `MISSING:` lines.
 
-- [ ] **Step 16.2: Confirm all crates exist with `Cargo.toml` and source**
+- [x] **Step 16.2: Confirm all crates exist with `Cargo.toml` and source**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1697,7 +1697,7 @@ echo "crate check complete"
 
 Expected: only `crate check complete` — no `MISSING:` lines.
 
-- [ ] **Step 16.3: Confirm Diátaxis tree exists**
+- [x] **Step 16.3: Confirm Diátaxis tree exists**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1711,7 +1711,7 @@ echo "docs check complete"
 
 Expected: only `docs check complete`.
 
-- [ ] **Step 16.4: Run the full local CI equivalent**
+- [x] **Step 16.4: Run the full local CI equivalent**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1733,7 +1733,7 @@ issue and re-run before proceeding to Task 17. Common failure modes:
 - `test --doc` fails with `missing_docs`: confirm each `lib.rs` has a
   `//!` module doc.
 
-- [ ] **Step 16.5: Verify the git log shows clean Conventional Commits**
+- [x] **Step 16.5: Verify the git log shows clean Conventional Commits**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1759,7 +1759,7 @@ before push, so amending is safe.)
 github.com/LEBOCQTitouan/tau. Make sure the working directory contains
 only what you intend to publish.
 
-- [ ] **Step 17.1: Confirm the working directory is what you want public**
+- [x] **Step 17.1: Confirm the working directory is what you want public**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1775,7 +1775,7 @@ Listing contains exactly the files documented in the spec (no
 If anything unexpected appears (especially anything with credentials),
 **stop**. Investigate and clean up before proceeding.
 
-- [ ] **Step 17.2: Create the remote (will fail if it already exists, which is fine)**
+- [x] **Step 17.2: Create the remote (will fail if it already exists, which is fine)**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1807,7 +1807,7 @@ git remote -v
 Expected: two lines, both for `origin`, both pointing at
 `https://github.com/LEBOCQTitouan/tau.git`.
 
-- [ ] **Step 17.3: Push `main` and set upstream**
+- [x] **Step 17.3: Push `main` and set upstream**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1817,7 +1817,7 @@ git push -u origin main
 Expected: branch `main` pushed, upstream set to `origin/main`. CI
 starts automatically on the push.
 
-- [ ] **Step 17.4: Watch the CI run**
+- [x] **Step 17.4: Watch the CI run**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1831,7 +1831,7 @@ matrix has 6 entries; the 4 Linux + macOS entries must succeed (block
 the green badge), the 2 Windows entries report independently
 (`continue-on-error`, do not block).
 
-- [ ] **Step 17.5: Confirm green status**
+- [x] **Step 17.5: Confirm green status**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -1857,7 +1857,7 @@ QG22 requires that work waits overnight before final acceptance. Plan 1
 finishes the bootstrap; the "acceptance" point is *after* the overnight
 delay, not at the moment Task 17 turns CI green.
 
-- [ ] **Step 18.1: Note the time and stop**
+- [x] **Step 18.1: Note the time and stop**
 
 Note the timestamp of the last commit (or the merge to `main`):
 
@@ -1881,7 +1881,7 @@ If you find something that should change, file an issue tagged
 `bootstrap-followup` rather than amending the bootstrap commits — the
 bootstrap is now part of repo history.
 
-- [ ] **Step 18.2: Sign off Plan 1**
+- [x] **Step 18.2: Sign off Plan 1**
 
 When you have completed the overnight delay and have no findings (or
 have filed issues for findings):
