@@ -22,7 +22,10 @@ Land the public type surface of `tau-domain`: messages, agents, packages, capabi
 - `cargo fmt --all -- --check` succeeds.
 - `cargo test -p tau-domain --all-targets --all-features` succeeds (proptest, doctests, integration, golden).
 - `cargo test -p tau-domain --doc --all-features` succeeds — every public item has an example.
-- ADR-0002 (manifest format + capability evolution rules) is filed in `docs/decisions/` and accepted.
+- ADR-0002 (manifest format + capability evolution rules + escape-hatch policy) is filed in `docs/decisions/` and accepted.
+- `docs/explanation/escape-hatches.md` exists with seeded entries for every v0.1 escape hatch (`Capability::Custom`, `MessagePayload::Custom`, `PackageKind::Custom`, `FailureKind::InternalError`).
+- `crates/tau-domain/tests/escape_hatch_registry.rs` passes — every escape-hatch variant in the workspace has a matching registry entry, and no registry entry is stale.
+- `.github/pull_request_template.md` includes the escape-hatch checklist.
 - The git log on `main` contains a clean per-sub-task series of Conventional Commits (one commit per task in the implementation plan).
 - CI green on Linux + macOS (Windows non-blocking per G15) for both `--no-default-features` and `--all-features` build modes.
 
@@ -195,6 +198,7 @@ pub enum MessagePayload {
     ToolResult { body: Value },
     ToolError  { kind: String, message: String, details: Option<Value> },
     Lifecycle(AgentStatus),
+    /// Plugin-specific message kind. See: [escape-hatches.md#messagepayload-custom](../explanation/escape-hatches.md#messagepayload-custom).
     Custom     { kind: String, body: Vec<u8> },
 }
 ```
@@ -235,7 +239,9 @@ pub enum FailureKind {
     BackendError,                            // LLM backend returned error or unreachable
     PolicyDenied,                            // capability check rejected an operation
     OutOfResources,                          // memory cap, message-rate cap, timeout
-    InternalError,                           // catch-all; ADR-0002 records the "promote to typed variant if collected ≥2 distinct shapes" rule
+    /// Catch-all for failures that don't match the named kinds.
+    /// See: [escape-hatches.md#failurekind-internalerror](../explanation/escape-hatches.md#failurekind-internalerror).
+    InternalError,
 }
 ```
 
@@ -348,7 +354,9 @@ pub struct PackageId {
 
 #[non_exhaustive]
 pub enum PackageKind {
-    Custom { kind: String },                 // structural at v0.1; typed variants later
+    /// Structural package kind at v0.1; typed variants land later.
+    /// See: [escape-hatches.md#packagekind-custom](../explanation/escape-hatches.md#packagekind-custom).
+    Custom { kind: String },
 }
 
 /// Canonical kind strings — recommended convention, not mandated.
@@ -374,6 +382,8 @@ pub enum Capability {
     Network(NetCapability),
     Process(ProcessCapability),
     Agent(AgentCapability),
+    /// Plugin-specific capability not yet typed in core.
+    /// See: [escape-hatches.md#capability-custom](../explanation/escape-hatches.md#capability-custom).
     Custom { name: String, params: BTreeMap<String, Value> },
 }
 
@@ -524,6 +534,21 @@ For each: read file → deserialize → re-serialize → byte-compare.
 
 One CI job: `cargo build -p tau-domain --no-default-features` (and optionally `cargo test` on the non-serde paths). Proves the off-by-default `serde` feature claim.
 
+### Escape-hatch registry coverage test (`tests/escape_hatch_registry.rs`)
+
+A workspace-level integration test that mechanically enforces the rule from ADR-0002 (§6 bullets 5 + 7): every escape-hatch variant in the source must have a corresponding entry in `docs/explanation/escape-hatches.md`, and every registry entry with status `active` must point at a real source variant.
+
+Implementation:
+1. Walk `crates/**/*.rs` (workspace-relative). Find every `enum` variant whose name is `Custom` or `InternalError` (the agreed escape-hatch naming convention).
+2. For each variant, parse its rustdoc comment for a link of the form `escape-hatches.md#<anchor>`.
+3. Read `docs/explanation/escape-hatches.md`. Parse the anchors (HTML `<a id="...">` tags inside the table).
+4. Assert: every source variant has a rustdoc link with an anchor that matches a registry row.
+5. Assert: every registry row with status `active` points to an anchor that resolves to a live source variant (catches stale entries).
+
+Test failures are CI-blocking. Adds `walkdir` and `pulldown-cmark` (or a tiny hand-rolled parser) as dev-dependencies of tau-domain.
+
+**Why this lives in tau-domain:** at v0.1, tau-domain is the only crate with escape hatches. As tau-ports / tau-runtime / tau-pkg add them, the test scans the whole workspace via `..` so it stays in tau-domain. If the workspace grows enough to warrant a dedicated tooling crate, migrate the test to `xtask/`.
+
 ### `test-fixtures` feature
 
 ```toml
@@ -567,8 +592,9 @@ ADR-0002 is filed in `docs/decisions/0002-manifest-format.md` as part of this su
 2. **Hierarchical Capability shape (β).** Filesystem / Network / Process / Agent / Custom at the top level; per-namespace verb enums underneath. Per-variant `#[non_exhaustive]` for additive field evolution.
 3. **Canonicalization-at-deserialization commitment.** Manifest TOML uses flat dot-namespaced `kind = "fs.read"` form; a custom `Deserialize` impl for `Capability` maps it to the variant tree. New typed variants in v0.X auto-promote existing `Custom { name: "...", params }` manifests via the same canonicalization — plugin authors never have to update manifests when typed variants land.
 4. **Dot-namespaced naming convention** as **recommended, not mandated**. The convention (`<domain>.<verb>`, e.g., `fs.read`, `net.http`) is documented in ADR-0002 and rustdoc; tau-domain validates only "non-empty" — plugin authors who want a non-conforming name (e.g., `myorg/special-cap`) can use `Custom`.
-5. **`InternalError` promotion rule.** If `FailureKind::InternalError` collects ≥2 distinct failure shapes in tau-runtime telemetry, an ADR proposes a new typed `FailureKind` variant. Prevents `InternalError` from becoming a permanent grab-bag.
+5. **Escape-hatch policy (typed-vs-Custom).** Prefer typed variants for known shapes; allow `Custom` / `InternalError` escape hatches with documented rationale. **Every escape hatch in tau core is tracked in `docs/explanation/escape-hatches.md`** with location, reason, promotion trigger, and status (`active` / `promoted` / `removed`). PRs that introduce, promote, or remove an escape hatch update the registry in the same commit. Each escape-hatch variant's rustdoc carries a link to its registry anchor. Applies uniformly to `Capability::Custom`, `MessagePayload::Custom`, `PackageKind::Custom`, `FailureKind::InternalError`, and any future escape hatches added in tau core.
 6. **Required `llm_backend`.** Recorded with the rationale (Constitution Appendix C; G4) and the loosen-later-via-minor-bump escape if needed.
+7. **Mechanical enforcement of the registry.** A CI-blocking integration test (`crates/tau-domain/tests/escape_hatch_registry.rs`, see §5) scans every `.rs` file in the workspace for variants named `Custom` or `InternalError`, parses their rustdoc for a link to the registry, and verifies each anchor exists in the registry file. Stale registry entries (rows whose anchor no longer maps to a live source variant) also fail the test. Combined with a PR template checkbox and the rustdoc convention, this enforces the policy in three layers: documentation (CONTRIBUTING.md + rustdoc), PR-time prompt (template), and CI gate (test).
 
 ### Status timeline
 
@@ -596,8 +622,10 @@ The implementation plan derived from this spec follows the same one-commit-per-t
 13. Integration tests (`manifest_roundtrip`, `manifest_validation_table`, `message_envelope_serde`, `package_source_grammar`).
 14. Wire-format golden tests.
 15. CI: add `--no-default-features` job.
-16. ADR-0002 — manifest format & capability evolution.
-17. Final local verification + ADR sign-off.
+16. Seed escape-hatch registry (`docs/explanation/escape-hatches.md`) with v0.1 entries (`Capability::Custom`, `MessagePayload::Custom`, `PackageKind::Custom`, `FailureKind::InternalError`).
+17. Implement registry-coverage test (`crates/tau-domain/tests/escape_hatch_registry.rs`) + PR template (`.github/pull_request_template.md`) + CONTRIBUTING.md note on the escape-hatch policy.
+18. ADR-0002 — manifest format & capability evolution (incorporates the escape-hatch policy + registry reference).
+19. Final local verification + ADR sign-off.
 
 The plan-writing skill (writing-plans) decomposes each into discrete, individually-committable steps.
 
