@@ -14,10 +14,11 @@ semver    = { workspace = true }
 uuid      = { workspace = true }
 url       = { workspace = true }
 serde     = { workspace = true, optional = true }
+base64    = { workspace = true, optional = true }
 
 [features]
 default       = []
-serde         = ["dep:serde", "uuid/serde", "semver/serde", "url/serde"]
+serde         = ["dep:serde", "dep:base64", "uuid/serde", "semver/serde", "url/serde"]
 test-fixtures = []
 
 [dev-dependencies]
