@@ -3,6 +3,11 @@
 //! tau-domain holds the *vocabulary* (identity, definition, status enum).
 //! State-machine *transitions* live in tau-runtime — see G2 / spec §3.4.
 
+use crate::id::{AgentId, PackageName};
+use crate::package::PackageId;
+use crate::value::Value;
+use std::collections::BTreeMap;
+
 /// Agent lifecycle status. Carries diagnostic data only on `Failed`;
 /// transition rules live in tau-runtime.
 ///
@@ -93,5 +98,102 @@ mod tests {
             }
             _ => panic!(),
         }
+    }
+}
+
+/// Static description of an agent. Holds what the runtime needs to
+/// instantiate one; richer config lives in skills / plugin packages
+/// per G2.
+///
+/// # Example
+///
+/// ```ignore
+/// // `PackageId` is `#[non_exhaustive]`; constructing one externally
+/// // requires manifest validation. Example shows shape only.
+/// use tau_domain::{AgentDefinition, AgentId, PackageId, PackageName, Version};
+/// use std::str::FromStr;
+///
+/// let def = AgentDefinition::new(
+///     AgentId::from_str("researcher").unwrap(),
+///     "Researcher".into(),
+///     PackageId {
+///         name: PackageName::from_str("research-pkg").unwrap(),
+///         version: Version::parse("0.1.0").unwrap(),
+///     },
+///     PackageName::from_str("claude-anthropic").unwrap(),
+/// );
+/// assert_eq!(def.id.as_str(), "researcher");
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AgentDefinition {
+    /// Canonical identifier for this definition.
+    pub id: AgentId,
+    /// Human-readable display name (free-form, unvalidated).
+    pub display_name: String,
+    /// Which package this agent ships from.
+    pub package: PackageId,
+    /// Reference to an installed LLM-backend plugin package.
+    /// Required at v0.1 (see ADR-0002 escape clause).
+    pub llm_backend: PackageName,
+    /// Optional system prompt.
+    pub system_prompt: Option<String>,
+    /// Free-form per-agent config (validated by plugins, not by tau-domain).
+    pub config: BTreeMap<String, Value>,
+}
+
+impl AgentDefinition {
+    /// Construct an `AgentDefinition` with empty `system_prompt` and
+    /// `config`. Use the `with_*` builders to fill them in.
+    pub fn new(
+        id: AgentId,
+        display_name: String,
+        package: PackageId,
+        llm_backend: PackageName,
+    ) -> Self {
+        Self {
+            id,
+            display_name,
+            package,
+            llm_backend,
+            system_prompt: None,
+            config: BTreeMap::new(),
+        }
+    }
+
+    /// Set `system_prompt`.
+    pub fn with_system_prompt(mut self, prompt: String) -> Self {
+        self.system_prompt = Some(prompt);
+        self
+    }
+
+    /// Set `config`.
+    pub fn with_config(mut self, config: BTreeMap<String, Value>) -> Self {
+        self.config = config;
+        self
+    }
+}
+
+#[cfg(test)]
+mod definition_tests {
+    use super::*;
+    use crate::version::Version;
+    use std::str::FromStr;
+
+    #[test]
+    fn builder_chain_sets_fields() {
+        let def = AgentDefinition::new(
+            AgentId::from_str("a").unwrap(),
+            "A".into(),
+            PackageId {
+                name: PackageName::from_str("p").unwrap(),
+                version: Version::parse("0.0.1").unwrap(),
+            },
+            PackageName::from_str("b").unwrap(),
+        )
+        .with_system_prompt("hi".into());
+
+        assert_eq!(def.system_prompt.as_deref(), Some("hi"));
     }
 }
