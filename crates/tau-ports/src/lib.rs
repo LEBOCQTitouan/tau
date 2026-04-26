@@ -16,6 +16,8 @@
 //! See `docs/decisions/0003-tau-ports.md` for the design rationale.
 
 pub mod error;
+#[cfg(any(test, feature = "test-fixtures"))]
+pub mod fixtures;
 pub mod llm;
 pub mod sandbox;
 pub mod storage;
