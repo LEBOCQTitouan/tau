@@ -13,6 +13,9 @@ pub mod package;
 pub mod value;
 pub mod version;
 
+#[cfg(any(test, feature = "test-fixtures"))]
+pub mod fixtures;
+
 pub use agent::{AgentDefinition, AgentStatus, FailureKind};
 pub use error::{
     AgentIdError, PackageKindError, PackageManifestError, PackageNameError, PackageSourceError,
