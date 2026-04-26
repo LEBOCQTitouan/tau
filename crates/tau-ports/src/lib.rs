@@ -17,6 +17,7 @@
 
 pub mod error;
 pub mod llm;
+pub mod sandbox;
 pub mod storage;
 pub mod tool;
 
@@ -26,5 +27,6 @@ pub use llm::{
     CompletionStream, ContentBlock, LlmBackend, LlmProviderMessage, StopReason, TokenUsage,
     ToolChoice, ToolSpec, ToolUse, ToolUseAccumulator,
 };
+pub use sandbox::{ResourceLimits, SandboxPlan, WorkingContext};
 pub use storage::{Key, Namespace, Storage};
 pub use tool::{SessionContext, StatelessAdapter, StatelessTool, Tool, ToolContent, ToolResult};
