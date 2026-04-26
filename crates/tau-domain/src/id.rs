@@ -231,3 +231,160 @@ mod agent_id_tests {
         ));
     }
 }
+
+/// A runtime instance identifier for a spawned agent. UUID v7 (monotonic,
+/// time-ordered). Two instances of the same `AgentDefinition` share an
+/// `AgentId` but differ in `AgentInstanceId`.
+///
+/// # Example
+///
+/// ```
+/// use tau_domain::AgentInstanceId;
+///
+/// let a = AgentInstanceId::new();
+/// let b = AgentInstanceId::new();
+/// assert_ne!(a, b);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AgentInstanceId(uuid::Uuid);
+
+impl AgentInstanceId {
+    /// Generate a fresh UUID v7.
+    pub fn new() -> Self {
+        Self(uuid::Uuid::now_v7())
+    }
+
+    /// Wrap an existing `Uuid`.
+    pub fn from_uuid(u: uuid::Uuid) -> Self {
+        Self(u)
+    }
+
+    /// Underlying `Uuid`.
+    pub fn as_uuid(&self) -> uuid::Uuid {
+        self.0
+    }
+}
+
+impl Default for AgentInstanceId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for AgentInstanceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for AgentInstanceId {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<uuid::Uuid>().map(Self)
+    }
+}
+
+/// A message identifier. UUID v7 (monotonic, time-ordered). Acts as the
+/// reply target for `Message.parent_id`.
+///
+/// # Example
+///
+/// ```
+/// use tau_domain::MessageId;
+///
+/// let id = MessageId::new();
+/// let parsed: MessageId = id.to_string().parse().unwrap();
+/// assert_eq!(id, parsed);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MessageId(uuid::Uuid);
+
+impl MessageId {
+    /// Generate a fresh UUID v7.
+    pub fn new() -> Self {
+        Self(uuid::Uuid::now_v7())
+    }
+
+    /// Wrap an existing `Uuid`.
+    pub fn from_uuid(u: uuid::Uuid) -> Self {
+        Self(u)
+    }
+
+    /// Underlying `Uuid`.
+    pub fn as_uuid(&self) -> uuid::Uuid {
+        self.0
+    }
+}
+
+impl Default for MessageId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for MessageId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for MessageId {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<uuid::Uuid>().map(Self)
+    }
+}
+
+#[cfg(feature = "serde")]
+mod uuid_id_serde {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    impl Serialize for AgentInstanceId {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            self.0.serialize(s)
+        }
+    }
+    impl<'de> Deserialize<'de> for AgentInstanceId {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            uuid::Uuid::deserialize(d).map(Self)
+        }
+    }
+    impl Serialize for MessageId {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            self.0.serialize(s)
+        }
+    }
+    impl<'de> Deserialize<'de> for MessageId {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            uuid::Uuid::deserialize(d).map(Self)
+        }
+    }
+}
+
+#[cfg(test)]
+mod uuid_id_tests {
+    use super::*;
+
+    #[test]
+    fn agent_instance_round_trips() {
+        let a = AgentInstanceId::new();
+        let parsed: AgentInstanceId = a.to_string().parse().unwrap();
+        assert_eq!(a, parsed);
+    }
+
+    #[test]
+    fn message_id_round_trips() {
+        let m = MessageId::new();
+        let parsed: MessageId = m.to_string().parse().unwrap();
+        assert_eq!(m, parsed);
+    }
+
+    #[test]
+    fn fresh_ids_differ() {
+        assert_ne!(MessageId::new(), MessageId::new());
+        assert_ne!(AgentInstanceId::new(), AgentInstanceId::new());
+    }
+}
