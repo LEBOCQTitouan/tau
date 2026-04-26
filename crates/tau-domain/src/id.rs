@@ -362,6 +362,30 @@ mod uuid_id_serde {
             uuid::Uuid::deserialize(d).map(Self)
         }
     }
+
+    impl Serialize for PackageName {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            self.0.serialize(s)
+        }
+    }
+    impl<'de> Deserialize<'de> for PackageName {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            let raw = String::deserialize(d)?;
+            raw.parse::<PackageName>().map_err(serde::de::Error::custom)
+        }
+    }
+
+    impl Serialize for AgentId {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            self.0.serialize(s)
+        }
+    }
+    impl<'de> Deserialize<'de> for AgentId {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            let raw = String::deserialize(d)?;
+            raw.parse::<AgentId>().map_err(serde::de::Error::custom)
+        }
+    }
 }
 
 #[cfg(test)]
