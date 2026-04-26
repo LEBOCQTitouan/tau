@@ -1,10 +1,13 @@
 //! Mechanical enforcement of the escape-hatch registry rule from ADR-0002.
 //!
-//! Walks every `.rs` file in `crates/`. For each variant named `Custom`
-//! or `InternalError`, requires its preceding rustdoc to contain a link
-//! to `escape-hatches.md#<anchor>`. Verifies the registry file contains
-//! a matching anchor for each. Stale anchors (in registry but not in
-//! source) also fail the test.
+//! Walks every `.rs` file in `crates/`. For each variant named `Custom`,
+//! `InternalError`, or `Internal`, requires its preceding rustdoc to
+//! contain a link to `escape-hatches.md#<anchor>`. Verifies the registry
+//! file contains a matching anchor for each. Stale anchors (in registry
+//! but not in source) also fail the test — except anchors that appear in
+//! any rustdoc `escape-hatches.md#<anchor>` link anywhere in `crates/`,
+//! which lets non-variant escape hatches (e.g. struct fields like
+//! `CompletionRequest.provider_specific`) be registered the same way.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -13,7 +16,7 @@ use walkdir::WalkDir;
 
 const REGISTRY_PATH: &str = "../../docs/explanation/escape-hatches.md";
 const CRATES_ROOT: &str = "../../crates";
-const ESCAPE_HATCH_VARIANTS: &[&str] = &["Custom", "InternalError"];
+const ESCAPE_HATCH_VARIANTS: &[&str] = &["Custom", "InternalError", "Internal"];
 
 #[derive(Debug)]
 struct SourceHatch {
@@ -56,6 +59,34 @@ fn parse_registry_anchors() -> HashSet<String> {
     found
 }
 
+/// Collect every `escape-hatches.md#<anchor>` substring that appears
+/// anywhere in any `.rs` file under `crates/`. This lets non-variant
+/// escape hatches (e.g. struct fields with rustdoc anchor links) be
+/// counted as "live" so their registry entry isn't flagged as stale.
+fn find_anchor_references() -> HashSet<String> {
+    let mut found = HashSet::new();
+    for entry in WalkDir::new(CRATES_ROOT).into_iter().filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "rs") {
+            continue;
+        }
+        let raw = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let mut rest = raw.as_str();
+        while let Some(start) = rest.find("escape-hatches.md#") {
+            let after = &rest[start + "escape-hatches.md#".len()..];
+            let end = after
+                .find([')', ']', ' ', '"', '\n'])
+                .unwrap_or(after.len());
+            found.insert(after[..end].to_string());
+            rest = &after[end..];
+        }
+    }
+    found
+}
+
 fn find_escape_hatches() -> Vec<SourceHatch> {
     let mut hatches = Vec::new();
     for entry in WalkDir::new(CRATES_ROOT).into_iter().filter_map(Result::ok) {
@@ -80,13 +111,18 @@ fn find_escape_hatches() -> Vec<SourceHatch> {
                         next_char,
                         Some(' ') | Some('{') | Some('(') | Some(',') | None
                     ) {
-                        // Look back through immediately-preceding doc comments.
+                        // Look back through immediately-preceding doc comments
+                        // and `#[...]` attribute lines (e.g. `#[error(...)]`
+                        // between the rustdoc and the variant).
                         let mut anchor: Option<String> = None;
                         let mut j = i;
                         while j > 0 {
                             j -= 1;
                             let prev = lines[j].trim();
-                            if prev.starts_with("///") || prev.starts_with("//!") || prev.is_empty()
+                            if prev.starts_with("///")
+                                || prev.starts_with("//!")
+                                || prev.starts_with("#[")
+                                || prev.is_empty()
                             {
                                 if let Some(start) = prev.find("escape-hatches.md#") {
                                     let after = &prev[start + "escape-hatches.md#".len()..];
@@ -96,9 +132,6 @@ fn find_escape_hatches() -> Vec<SourceHatch> {
                                         })
                                         .unwrap_or(after.len());
                                     anchor = Some(after[..end].to_string());
-                                    break;
-                                }
-                                if !prev.starts_with("///") && !prev.starts_with("//!") {
                                     break;
                                 }
                             } else {
@@ -150,6 +183,14 @@ fn every_escape_hatch_is_registered() {
                 live_anchors.insert(a.clone());
             }
         }
+    }
+
+    // Also count any anchor referenced from a rustdoc link anywhere in
+    // `crates/` as "live", so non-variant escape hatches (e.g. struct
+    // fields) can be registered without a Custom/InternalError/Internal
+    // variant declaration.
+    for a in find_anchor_references() {
+        live_anchors.insert(a);
     }
 
     let stale: Vec<_> = registered.difference(&live_anchors).collect();
