@@ -7,6 +7,8 @@
 
 pub mod error;
 pub mod id;
+pub mod value;
 
 pub use error::{AgentIdError, PackageNameError};
 pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
+pub use value::Value;
