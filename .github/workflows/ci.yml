@@ -51,3 +51,15 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
       - run: cargo test --workspace --all-targets
       - run: cargo test --workspace --doc
+
+  no-default-features:
+    name: build (no-default-features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build tau-domain (no default features)
+        run: cargo build -p tau-domain --no-default-features
+      - name: Test tau-domain (no default features)
+        run: cargo test -p tau-domain --no-default-features --lib
