@@ -91,6 +91,26 @@ trait boundaries — your PR must include an ADR. Copy
 sequentially. Per Constitution §4, guideline-changing ADRs wait at
 least 24 hours between draft and merge.
 
+## Working with escape hatches
+
+tau core uses two structural escape hatches (`Custom { ... }` variants
+on enums, plus the singleton `FailureKind::InternalError`) to leave room
+for unknown shapes that haven't been typed yet. Every escape hatch is
+tracked in `docs/explanation/escape-hatches.md` with a rationale and a
+promotion trigger.
+
+If your PR adds, promotes (replaces with a typed variant), or removes
+an escape hatch, you must update `docs/explanation/escape-hatches.md`
+in the same commit. The CI test
+`crates/tau-domain/tests/escape_hatch_registry.rs` checks this
+mechanically — every source variant named `Custom` or `InternalError`
+must have a rustdoc link of the form `escape-hatches.md#<anchor>`,
+and every active registry row must point at a live source variant.
+
+If you're introducing a new escape hatch, name the rustdoc anchor and
+add the row to the registry's "Active" table; copy the rustdoc
+convention from existing variants.
+
 ## License
 
 By contributing, you agree your contribution is dual-licensed under
