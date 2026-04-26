@@ -2,9 +2,9 @@
 //!
 //! This module exports the [`Tool`] trait, the supporting data types
 //! ([`SessionContext`], [`ToolResult`], [`ToolContent`]) exchanged
-//! between tau-runtime and tool-plugin adapters, and (in T10) the
-//! `StatelessTool` / `StatelessAdapter` pair for the common stateless
-//! case.
+//! between tau-runtime and tool-plugin adapters, and the
+//! [`StatelessTool`] / [`StatelessAdapter`] pair for the common
+//! stateless case.
 
 use std::time::SystemTime;
 
@@ -129,8 +129,8 @@ pub enum ToolContent {
 
 /// Trait implemented by `kind = "tool"` plugins.
 ///
-/// Stateful by design — see `crate::tool::StatelessAdapter` (T10) for the
-/// common stateless case.
+/// Stateful by design — see [`StatelessAdapter`] for the common
+/// stateless case.
 ///
 /// # Error semantics
 ///
@@ -142,7 +142,7 @@ pub enum ToolContent {
 /// are surfaced to the agent's LLM via `MessagePayload::ToolError`.
 #[allow(async_fn_in_trait)]
 pub trait Tool: Send + Sync {
-    /// Per-session state. Use `()` for stateless tools (or use `StatelessAdapter`).
+    /// Per-session state. Use `()` for stateless tools (or use [`StatelessAdapter`]).
     type Session: Send + 'static;
 
     /// Stable name used for routing. SemVer-stable surface.
@@ -167,4 +167,113 @@ pub trait Tool: Send + Sync {
     /// future (cancellation), `teardown` is NOT called — plugin authors
     /// put critical cleanup in `Drop`.
     async fn teardown(&self, session: Self::Session) -> Result<(), ToolError>;
+}
+
+/// Simpler trait for stateless tools. Implement this and wrap with
+/// [`StatelessAdapter`] to satisfy [`Tool`] with `Session = ()`.
+///
+/// Most tools (filesystem read, HTTP fetch, calculator, search APIs,
+/// MCP) are stateless and should use this trait. Tools that need
+/// per-session state (browser drivers, database connections, GPU
+/// handles) should implement [`Tool`] directly.
+#[allow(async_fn_in_trait)]
+pub trait StatelessTool: Send + Sync {
+    /// Stable name used for routing. SemVer-stable surface.
+    fn name(&self) -> &str;
+    /// JSON Schema describing the tool's input. Used both for runtime
+    /// validation and for surfacing to the LLM via
+    /// `CompletionRequest.tools`.
+    fn schema(&self) -> ToolSpec;
+    /// Perform a single tool call. Stateless: no session is threaded
+    /// through.
+    async fn invoke(&self, args: Value) -> Result<ToolResult, ToolError>;
+}
+
+/// Newtype that adapts a [`StatelessTool`] to satisfy [`Tool`] with
+/// `Session = ()`.
+///
+/// # Example
+///
+/// ```ignore
+/// // StatelessAdapter wraps a StatelessTool to give it a Session lifecycle.
+/// // Plugin author writes:
+/// // let tool = StatelessAdapter(MyTool);
+/// // runtime.register_tool(Box::new(tool));
+/// ```
+pub struct StatelessAdapter<T: StatelessTool>(pub T);
+
+impl<T: StatelessTool> Tool for StatelessAdapter<T> {
+    type Session = ();
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn schema(&self) -> ToolSpec {
+        self.0.schema()
+    }
+
+    async fn init(&self, _: SessionContext) -> Result<(), ToolError> {
+        Ok(())
+    }
+
+    async fn invoke(&self, _: &mut (), args: Value) -> Result<ToolResult, ToolError> {
+        self.0.invoke(args).await
+    }
+
+    async fn teardown(&self, _: ()) -> Result<(), ToolError> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tau_domain::Value;
+
+    struct EchoTool;
+    impl StatelessTool for EchoTool {
+        fn name(&self) -> &str {
+            "echo"
+        }
+        fn schema(&self) -> ToolSpec {
+            ToolSpec {
+                name: "echo".into(),
+                description: "echo args back".into(),
+                input_schema: Value::Object(Default::default()),
+            }
+        }
+        async fn invoke(&self, args: Value) -> Result<ToolResult, ToolError> {
+            Ok(ToolResult {
+                content: vec![ToolContent::Json { data: args }],
+                is_error: false,
+            })
+        }
+    }
+
+    #[tokio::test]
+    #[allow(clippy::let_unit_value)] // Session = () for the adapter; we
+                                     // bind it explicitly to exercise the full Tool lifecycle.
+    async fn stateless_adapter_round_trip() {
+        let tool = StatelessAdapter(EchoTool);
+        assert_eq!(Tool::name(&tool), "echo");
+
+        let mut session = tool
+            .init(SessionContext {
+                agent_instance_id: tau_domain::AgentInstanceId::new(),
+                session_id: uuid::Uuid::now_v7(),
+                deadline: None,
+            })
+            .await
+            .unwrap();
+
+        let result = tool
+            .invoke(&mut session, Value::String("hi".into()))
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+        assert_eq!(result.content.len(), 1);
+
+        tool.teardown(session).await.unwrap();
+    }
 }
