@@ -11,7 +11,14 @@ use std::str::FromStr;
 use tau_domain::{Message, PackageSource};
 
 fn read(path: &str) -> String {
-    std::fs::read_to_string(path).expect(path)
+    // Normalize CRLF -> LF on the read path so this test is robust to
+    // Windows checkouts where git's autocrlf may have rewritten line
+    // endings, even though `.gitattributes` pins these files to LF.
+    // `serde_json::to_string_pretty` always emits `\n`, so without this
+    // the comparison spuriously fails on Windows working copies.
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("failed to read {path}: {e}"))
+        .replace("\r\n", "\n")
 }
 
 fn round_trip_message(path: &str) {
