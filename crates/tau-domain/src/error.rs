@@ -138,3 +138,40 @@ pub enum PackageKindError {
     #[error("package kind is empty")]
     Empty,
 }
+
+/// Validation errors for [`crate::package::PackageManifest`].
+///
+/// Composes leaf errors (`PackageNameError`, `PackageSourceError`,
+/// `PackageKindError`) via `#[from]` for the first occurrence and
+/// `#[source]` for repeated uses.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PackageManifestError {
+    /// The `name` field failed `PackageName` validation.
+    #[error("manifest field 'name': {0}")]
+    Name(#[from] PackageNameError),
+    /// The `source` field failed parser/validator.
+    #[error("manifest field 'source': {0}")]
+    Source(#[from] PackageSourceError),
+    /// The `kind` field failed validation.
+    #[error("manifest field 'kind': {0}")]
+    Kind(#[from] PackageKindError),
+    /// The `description` field was empty.
+    #[error("manifest field 'description' is empty")]
+    EmptyDescription,
+    /// A dependency entry's name failed validation.
+    #[error("dependency #{index}: invalid name: {source}")]
+    DependencyName {
+        /// 0-based index of the offending dependency.
+        index: usize,
+        /// Underlying name validation error.
+        #[source]
+        source: PackageNameError,
+    },
+    /// A `Capability::Custom` entry had an empty `name`.
+    #[error("capability #{index} has empty name")]
+    CapabilityEmptyName {
+        /// 0-based index of the offending capability.
+        index: usize,
+    },
+}

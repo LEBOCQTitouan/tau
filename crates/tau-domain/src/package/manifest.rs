@@ -208,7 +208,6 @@ impl PackageManifest {
     /// Wrap a checked `UncheckedManifest` without re-running validation.
     /// Internal use only — public API must go through
     /// [`UncheckedManifest::validate`].
-    #[allow(dead_code)] // used by validate() landing in Task 13 and by tests below
     pub(crate) fn from_checked(u: UncheckedManifest) -> Self {
         Self(u)
     }
@@ -281,5 +280,104 @@ mod manifest_tests {
         let u: UncheckedManifest = m.into();
         let m2 = PackageManifest::from_checked(u);
         assert_eq!(m2.name().as_str(), "fs-tools");
+    }
+}
+
+use crate::error::PackageManifestError;
+use crate::package::capability::Capability as Cap;
+
+impl UncheckedManifest {
+    /// Run cross-field validation. Returns the validated manifest on
+    /// success.
+    ///
+    /// Field types are already validated at construction (`PackageName`,
+    /// `PackageSource`, etc.); this checks invariants those types
+    /// can't enforce alone (non-empty description, non-empty Custom
+    /// capability names, etc.).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // `UncheckedManifest` is `#[non_exhaustive]`, so it cannot be
+    /// // built via struct expression from outside `tau-domain`. In
+    /// // practice, callers obtain one by deserializing a manifest file
+    /// // (in tau-pkg) and then call `.validate()`.
+    /// use tau_domain::{UncheckedManifest, PackageManifestError};
+    /// // let err = unchecked.validate().unwrap_err();
+    /// // assert_eq!(err, PackageManifestError::EmptyDescription);
+    /// # let _ = std::any::type_name::<UncheckedManifest>();
+    /// # let _ = std::any::type_name::<PackageManifestError>();
+    /// ```
+    pub fn validate(self) -> Result<PackageManifest, PackageManifestError> {
+        if self.description.is_empty() {
+            return Err(PackageManifestError::EmptyDescription);
+        }
+        // dependency names are already PackageName values (pre-validated),
+        // but the loop is here as a hook for future per-dep invariants
+        // (e.g. duplicate-name detection, version-range cross-checks).
+        // The `index` is kept so it can be threaded into
+        // `PackageManifestError::DependencyName { index, source }`.
+        #[allow(clippy::unused_enumerate_index)]
+        for (_index, _dep) in self.dependencies.iter().enumerate() {
+            // no-op at v0.1
+        }
+        for (i, cap) in self.capabilities.iter().enumerate() {
+            if let Cap::Custom { name, .. } = cap {
+                if name.is_empty() {
+                    return Err(PackageManifestError::CapabilityEmptyName { index: i });
+                }
+            }
+        }
+        Ok(PackageManifest::from_checked(self))
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::str::FromStr;
+
+    fn good() -> UncheckedManifest {
+        UncheckedManifest {
+            name: PackageName::from_str("fs-tools").unwrap(),
+            version: Version::parse("0.3.0").unwrap(),
+            description: "fs tools".into(),
+            authors: vec![],
+            license: None,
+            source: PackageSource::from_str("https://example.com/fs.git").unwrap(),
+            kind: PackageKind::Custom {
+                kind: "tool".into(),
+            },
+            dependencies: vec![],
+            capabilities: vec![],
+        }
+    }
+
+    #[test]
+    fn good_manifest_validates() {
+        let m = good().validate().unwrap();
+        assert_eq!(m.name().as_str(), "fs-tools");
+    }
+
+    #[test]
+    fn empty_description_rejected() {
+        let mut u = good();
+        u.description = String::new();
+        assert_eq!(
+            u.validate().unwrap_err(),
+            PackageManifestError::EmptyDescription
+        );
+    }
+
+    #[test]
+    fn empty_custom_capability_name_rejected() {
+        let mut u = good();
+        u.capabilities = vec![Cap::Custom {
+            name: String::new(),
+            params: BTreeMap::new(),
+        }];
+        let err = u.validate().unwrap_err();
+        assert_eq!(err, PackageManifestError::CapabilityEmptyName { index: 0 });
     }
 }

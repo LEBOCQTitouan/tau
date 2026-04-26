@@ -11,7 +11,9 @@ pub mod package;
 pub mod value;
 pub mod version;
 
-pub use error::{AgentIdError, PackageKindError, PackageNameError, PackageSourceError};
+pub use error::{
+    AgentIdError, PackageKindError, PackageManifestError, PackageNameError, PackageSourceError,
+};
 pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
 pub use package::{
     kinds, AgentCapability, Capability, FsCapability, GitLocation, NetCapability, PackageDep,
