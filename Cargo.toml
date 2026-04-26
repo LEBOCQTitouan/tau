@@ -25,5 +25,6 @@ semver    = { version = "1" }
 uuid      = { version = "1", features = ["v7"] }
 url       = "2"
 serde     = { version = "1", features = ["derive"] }
+base64    = "0.22"
 proptest  = "1"
 walkdir   = "2"
