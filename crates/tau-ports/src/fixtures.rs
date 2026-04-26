@@ -25,11 +25,50 @@ use tau_domain::Value;
 use crate::error::{LlmError, SandboxError, StorageError, ToolError};
 use crate::llm::{
     batch_to_stream, CompletionChunk, CompletionRequest, CompletionResponse, CompletionStream,
-    LlmBackend, StopReason, ToolSpec,
+    LlmBackend, StopReason, TokenUsage, ToolSpec, ToolUse,
 };
 use crate::sandbox::{Sandbox, SandboxPlan};
 use crate::storage::{Key, Namespace, Storage};
 use crate::tool::{SessionContext, Tool, ToolResult};
+
+// ---------------------------------------------------------------------------
+// Construction helpers for `#[non_exhaustive]` types
+// ---------------------------------------------------------------------------
+//
+// External integration tests cannot construct `#[non_exhaustive]` types via
+// struct-literal syntax (E0639). These helpers live here so that downstream
+// crates (and tau-ports' own integration tests) can build canonical
+// `CompletionResponse`, `ToolUse`, and `TokenUsage` values when the
+// `test-fixtures` feature is enabled.
+
+/// Build a [`CompletionResponse`] without struct-literal syntax. Used by
+/// integration tests that can't construct `#[non_exhaustive]` types.
+pub fn make_completion_response(
+    text: String,
+    tool_uses: Vec<ToolUse>,
+    stop_reason: StopReason,
+    usage: Option<TokenUsage>,
+) -> CompletionResponse {
+    CompletionResponse {
+        text,
+        tool_uses,
+        stop_reason,
+        usage,
+    }
+}
+
+/// Build a [`ToolUse`] without struct-literal syntax.
+pub fn make_tool_use(id: String, name: String, input: Value) -> ToolUse {
+    ToolUse { id, name, input }
+}
+
+/// Build a [`TokenUsage`] without struct-literal syntax.
+pub fn make_token_usage(input_tokens: u32, output_tokens: u32) -> TokenUsage {
+    TokenUsage {
+        input_tokens,
+        output_tokens,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // MockLlmBackend
