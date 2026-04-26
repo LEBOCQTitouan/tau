@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7a8ae59819b039fc7bf01ce6a78dc04fac63b7a97bf0827348908aff42aebaaf # shrinks to m = Message { id: MessageId(019dca23-098e-7ae0-a347-e6927799e42c), sender: User, recipient: Agent(AgentInstanceId(019dca23-098e-7ae0-a347-e6adec6e3ea8)), parent_id: None, created_at: SystemTime { tv_sec: 0, tv_nsec: 0 }, headers: {}, payload: ToolResult { body: Object({"": Float(-1.370555559916121e-308)}) } }
+cc cbbe4209aa4d65b566986a420ddc017577786516f465d75cb9d36c5eb1c0470a # shrinks to m = Message { id: MessageId(019dca27-ce92-7db1-890b-9e8975c6d754), sender: User, recipient: Agent(AgentInstanceId(019dca27-ce92-7db1-890b-9e982c513bbb)), parent_id: None, created_at: SystemTime { tv_sec: 0, tv_nsec: 0 }, headers: {}, payload: ToolResult { body: Array([Float(3.7554337474964823e-180)]) } }
