@@ -9,4 +9,4 @@ pub mod error;
 pub mod id;
 
 pub use error::{AgentIdError, PackageNameError};
-pub use id::{AgentId, PackageName};
+pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
