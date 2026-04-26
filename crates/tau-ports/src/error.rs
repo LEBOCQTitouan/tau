@@ -6,10 +6,236 @@
 //! comparisons.
 //!
 //! `LlmError`, `ToolError`, `StorageError`, and `SandboxError` are the
-//! per-trait error types (added in Task 4). `NamespaceError` and `KeyError`
-//! are the validation errors for the `Namespace` and `Key` newtypes.
+//! per-trait error types. `NamespaceError` and `KeyError` are the validation
+//! errors for the `Namespace` and `Key` newtypes.
 
 use thiserror::Error;
+
+/// Errors returned by `crate::llm::LlmBackend` implementations.
+///
+/// Variants partition transport, protocol, and provider failures so adapters
+/// can map provider-specific errors to a uniform surface. Use
+/// [`LlmError::is_retryable`] for the default retry-policy hint.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum LlmError {
+    /// The request was malformed or violated provider constraints.
+    #[error("invalid request: {reason}")]
+    InvalidRequest {
+        /// Human-readable reason the request was rejected.
+        reason: String,
+    },
+    /// The provider rate-limited the caller.
+    #[error("rate limited: retry after {retry_after_seconds:?}s")]
+    RateLimited {
+        /// Suggested wait, in seconds, before retrying. `None` if the provider
+        /// did not signal one.
+        retry_after_seconds: Option<u32>,
+    },
+    /// Authentication failed (bad credentials, missing API key, etc.).
+    #[error("authentication failed: {message}")]
+    Auth {
+        /// Provider-supplied or adapter-synthesized auth-failure detail.
+        message: String,
+    },
+    /// Network/transport failure reaching the provider.
+    #[error("transport: {message}")]
+    Transport {
+        /// Description of the underlying transport failure.
+        message: String,
+    },
+    /// Mid-stream error (only emitted from `CompletionStream` items, never
+    /// from the return of `complete()`).
+    #[error("stream error: {message}")]
+    Stream {
+        /// Description of the stream-time failure.
+        message: String,
+    },
+    /// The provider returned a server-side error not covered by other variants.
+    #[error("provider error: {message}")]
+    Provider {
+        /// Provider-supplied error detail.
+        message: String,
+    },
+    /// The requested feature is not supported by this backend.
+    #[error("unsupported: {what}")]
+    Unsupported {
+        /// Description of the unsupported feature or option.
+        what: String,
+    },
+    /// Plugin internal error.
+    ///
+    /// See: [escape-hatches.md#llmerror-internal](../docs/explanation/escape-hatches.md#llmerror-internal).
+    #[error("internal: {message}")]
+    Internal {
+        /// Free-form internal-error message; not part of the stable API surface.
+        message: String,
+    },
+}
+
+impl LlmError {
+    /// Heuristic: is the error likely transient? Default-policy hint;
+    /// nuanced policies should match on variants directly.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            LlmError::RateLimited { .. }
+                | LlmError::Transport { .. }
+                | LlmError::Stream { .. }
+                | LlmError::Provider { .. },
+        )
+    }
+}
+
+/// Errors returned by `crate::storage::Storage` implementations.
+///
+/// Backend-time rejection of a `Namespace`/`Key` is distinct from
+/// construction-time validation: see [`NamespaceError`] / [`KeyError`] for the
+/// latter. Use [`StorageError::is_retryable`] for the default retry-policy
+/// hint.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum StorageError {
+    /// Backend rejected the namespace (length cap, reserved prefix, charset).
+    #[error("invalid namespace: {reason}")]
+    InvalidNamespace {
+        /// Backend-supplied reason the namespace was rejected.
+        reason: String,
+    },
+    /// Backend rejected the key (length, charset, reserved prefix).
+    #[error("invalid key: {reason}")]
+    InvalidKey {
+        /// Backend-supplied reason the key was rejected.
+        reason: String,
+    },
+    /// Backend is currently unavailable (connection refused, degraded mode).
+    #[error("unavailable: {message}")]
+    Unavailable {
+        /// Description of the availability failure.
+        message: String,
+    },
+    /// Operation timed out.
+    #[error("timeout")]
+    Timeout,
+    /// The requested operation is not supported by this backend.
+    #[error("unsupported: {what}")]
+    Unsupported {
+        /// Description of the unsupported operation.
+        what: String,
+    },
+    /// Plugin internal error.
+    ///
+    /// See: [escape-hatches.md#storageerror-internal](../docs/explanation/escape-hatches.md#storageerror-internal).
+    #[error("internal: {message}")]
+    Internal {
+        /// Free-form internal-error message; not part of the stable API surface.
+        message: String,
+    },
+}
+
+impl StorageError {
+    /// Heuristic: is the error likely transient? Default-policy hint;
+    /// nuanced policies should match on variants directly.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            StorageError::Unavailable { .. } | StorageError::Timeout,
+        )
+    }
+}
+
+/// Errors returned by `crate::sandbox::Sandbox` implementations.
+///
+/// **PROVISIONAL (v0.1):** the `Sandbox` trait surface — including this error
+/// type — is provisional and likely to change in Phase 1 when real adapters
+/// land. No `is_retryable()` predicate is provided at v0.1.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum SandboxError {
+    /// The requested feature is not supported by this sandbox.
+    #[error("unsupported: {what}")]
+    Unsupported {
+        /// Description of the unsupported feature.
+        what: String,
+    },
+    /// A configured resource limit was exceeded.
+    #[error("limit exceeded: {limit}")]
+    LimitExceeded {
+        /// Identifier of the limit that was exceeded (e.g. `"cpu_seconds"`).
+        limit: String,
+    },
+    /// Plugin internal error.
+    ///
+    /// See: [escape-hatches.md#sandboxerror-internal](../docs/explanation/escape-hatches.md#sandboxerror-internal).
+    #[error("internal: {message}")]
+    Internal {
+        /// Free-form internal-error message; not part of the stable API surface.
+        message: String,
+    },
+}
+
+/// Errors returned by `crate::tool::Tool` implementations.
+///
+/// `ToolError` composes [`LlmError`] and [`StorageError`] via `#[from]` so
+/// tools that internally drive an LLM or storage backend can propagate via
+/// `?`. Direction is unidirectional (Tool → LlmError/StorageError, not vice
+/// versa) to avoid cycles and preserve layering. Use
+/// [`ToolError::is_retryable`] for the default retry-policy hint; it
+/// delegates to the inner predicate for `Llm`/`Storage` and returns `false`
+/// otherwise.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ToolError {
+    /// Caller passed arguments the tool rejected.
+    #[error("bad args: {reason}")]
+    BadArgs {
+        /// Human-readable reason the arguments were rejected.
+        reason: String,
+    },
+    /// The tool's session is no longer usable; the caller should reopen it.
+    #[error("session unusable: {reason}")]
+    SessionDead {
+        /// Reason the session was declared dead.
+        reason: String,
+    },
+    /// The tool exceeded its deadline.
+    #[error("deadline exceeded")]
+    DeadlineExceeded,
+    /// The tool requires a capability that the caller is not granted.
+    #[error("capability denied: {capability}")]
+    CapabilityDenied {
+        /// Identifier of the denied capability.
+        capability: String,
+    },
+    /// Underlying LLM call failed (for tools that internally use an LLM).
+    #[error("llm: {0}")]
+    Llm(#[from] LlmError),
+    /// Underlying storage operation failed.
+    #[error("storage: {0}")]
+    Storage(#[from] StorageError),
+    /// Plugin internal error.
+    ///
+    /// See: [escape-hatches.md#toolerror-internal](../docs/explanation/escape-hatches.md#toolerror-internal).
+    #[error("internal: {message}")]
+    Internal {
+        /// Free-form internal-error message; not part of the stable API surface.
+        message: String,
+    },
+}
+
+impl ToolError {
+    /// Heuristic: is the error likely transient? Most `ToolError` variants
+    /// are NOT retryable — `SessionDead` means reopen the session, `BadArgs`
+    /// is permanent, etc. Composed `Llm`/`Storage` errors delegate to their
+    /// inner predicate.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            ToolError::Llm(e) => e.is_retryable(),
+            ToolError::Storage(e) => e.is_retryable(),
+            _ => false,
+        }
+    }
+}
 
 /// Validation errors for [`crate::storage::Namespace`].
 ///
@@ -73,4 +299,126 @@ pub enum KeyError {
         /// Byte position in the input.
         pos: usize,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn llm_is_retryable() {
+        assert!(LlmError::RateLimited {
+            retry_after_seconds: None
+        }
+        .is_retryable());
+        assert!(LlmError::RateLimited {
+            retry_after_seconds: Some(2)
+        }
+        .is_retryable());
+        assert!(LlmError::Transport {
+            message: "tcp reset".into()
+        }
+        .is_retryable());
+        assert!(LlmError::Stream {
+            message: "eof".into()
+        }
+        .is_retryable());
+        assert!(LlmError::Provider {
+            message: "5xx".into()
+        }
+        .is_retryable());
+
+        assert!(!LlmError::InvalidRequest {
+            reason: "bad".into()
+        }
+        .is_retryable());
+        assert!(!LlmError::Auth {
+            message: "no key".into()
+        }
+        .is_retryable());
+        assert!(!LlmError::Unsupported {
+            what: "embeds".into()
+        }
+        .is_retryable());
+        assert!(!LlmError::Internal {
+            message: "x".into()
+        }
+        .is_retryable());
+    }
+
+    #[test]
+    fn storage_is_retryable() {
+        assert!(StorageError::Unavailable {
+            message: "down".into()
+        }
+        .is_retryable());
+        assert!(StorageError::Timeout.is_retryable());
+
+        assert!(!StorageError::InvalidNamespace { reason: "r".into() }.is_retryable());
+        assert!(!StorageError::InvalidKey { reason: "r".into() }.is_retryable());
+        assert!(!StorageError::Unsupported { what: "txn".into() }.is_retryable());
+        assert!(!StorageError::Internal {
+            message: "x".into()
+        }
+        .is_retryable());
+    }
+
+    #[test]
+    fn tool_is_retryable_delegates() {
+        // Composed Llm/Storage variants delegate to their inner predicate.
+        assert!(ToolError::Llm(LlmError::Transport {
+            message: "x".into()
+        })
+        .is_retryable());
+        assert!(!ToolError::Llm(LlmError::Auth {
+            message: "x".into()
+        })
+        .is_retryable());
+        assert!(ToolError::Storage(StorageError::Timeout).is_retryable());
+        assert!(
+            !ToolError::Storage(StorageError::InvalidKey { reason: "x".into() }).is_retryable()
+        );
+
+        // All non-composed variants are NOT retryable.
+        assert!(!ToolError::BadArgs { reason: "r".into() }.is_retryable());
+        assert!(!ToolError::SessionDead { reason: "r".into() }.is_retryable());
+        assert!(!ToolError::DeadlineExceeded.is_retryable());
+        assert!(!ToolError::CapabilityDenied {
+            capability: "fs".into()
+        }
+        .is_retryable());
+        assert!(!ToolError::Internal {
+            message: "x".into()
+        }
+        .is_retryable());
+    }
+
+    #[test]
+    fn tool_from_llm_error() {
+        fn op() -> Result<(), ToolError> {
+            Err(LlmError::Transport {
+                message: "oops".into(),
+            })?;
+            Ok(())
+        }
+        let err = op().unwrap_err();
+        assert_eq!(
+            err,
+            ToolError::Llm(LlmError::Transport {
+                message: "oops".into()
+            }),
+        );
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn tool_from_storage_error() {
+        fn op() -> Result<(), ToolError> {
+            Err(StorageError::Timeout)?;
+            Ok(())
+        }
+        let err = op().unwrap_err();
+        assert_eq!(err, ToolError::Storage(StorageError::Timeout));
+        assert!(err.is_retryable());
+    }
 }

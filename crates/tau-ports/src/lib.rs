@@ -18,5 +18,5 @@
 pub mod error;
 pub mod storage;
 
-pub use error::{KeyError, NamespaceError};
+pub use error::{KeyError, LlmError, NamespaceError, SandboxError, StorageError, ToolError};
 pub use storage::{Key, Namespace};
