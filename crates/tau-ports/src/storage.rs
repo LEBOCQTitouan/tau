@@ -1,14 +1,14 @@
 //! Storage port — `kind = "storage"` plugin contracts.
 //!
 //! [`Namespace`] and [`Key`] are validating newtypes used by the
-//! `Storage` trait (added in Task 11). Per the G8 scope-handling intent,
+//! [`Storage`] trait. Per the G8 scope-handling intent,
 //! tau-runtime is responsible for composing scope information into a
 //! `Namespace`; storage plugins treat the namespace as opaque and never
 //! parse or interpret it.
 
 use std::fmt;
 
-use crate::error::{KeyError, NamespaceError};
+use crate::error::{KeyError, NamespaceError, StorageError};
 
 /// Validated namespace identifier. Carries scope information composed
 /// by tau-runtime; opaque to Storage plugins.
@@ -119,6 +119,36 @@ impl fmt::Display for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
+}
+
+/// Trait implemented by `kind = "storage"` plugins.
+///
+/// v0.1 surface is KV-only. Per G8, the namespace carries scope
+/// (e.g., global / project / agent-instance); tau-runtime composes
+/// namespaces and plugins consume them opaquely.
+///
+/// `Send + Sync` so the runtime can store impls in a multi-task plugin
+/// registry.
+#[allow(async_fn_in_trait)]
+pub trait Storage: Send + Sync {
+    /// Plugin-visible name (matches the package name; for diagnostics).
+    fn name(&self) -> &str;
+
+    /// Fetch the value at `(namespace, key)`. Returns `Ok(None)` if absent.
+    async fn get(&self, namespace: &Namespace, key: &Key) -> Result<Option<Vec<u8>>, StorageError>;
+
+    /// Set the value at `(namespace, key)`. Overwrites any existing value.
+    async fn put(&self, namespace: &Namespace, key: &Key, value: &[u8])
+        -> Result<(), StorageError>;
+
+    /// Delete the key. Returns `true` if a key was deleted, `false` if
+    /// it wasn't present.
+    async fn delete(&self, namespace: &Namespace, key: &Key) -> Result<bool, StorageError>;
+
+    /// List all keys under `namespace` whose names begin with `prefix`.
+    /// Use empty string `""` to list all keys in the namespace.
+    /// Order is plugin-defined — callers must not rely on alphabetical.
+    async fn list(&self, namespace: &Namespace, prefix: &str) -> Result<Vec<Key>, StorageError>;
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@
 //!
 //! - [`llm::LlmBackend`] — LLM provider plugins (`kind = "llm-backend"`).
 //! - [`tool::Tool`] — tool plugins (`kind = "tool"`).
-//! - `storage::Storage` — storage plugins (`kind = "storage"`).
+//! - [`storage::Storage`] — storage plugins (`kind = "storage"`).
 //! - `sandbox::Sandbox` — sandbox plugins (`kind = "sandbox"`); see the
 //!   module docs for the v0.1 PROVISIONAL caveat.
 //!
@@ -26,5 +26,5 @@ pub use llm::{
     CompletionStream, ContentBlock, LlmBackend, LlmProviderMessage, StopReason, TokenUsage,
     ToolChoice, ToolSpec, ToolUse, ToolUseAccumulator,
 };
-pub use storage::{Key, Namespace};
+pub use storage::{Key, Namespace, Storage};
 pub use tool::{SessionContext, StatelessAdapter, StatelessTool, Tool, ToolContent, ToolResult};

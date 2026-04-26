@@ -87,7 +87,7 @@ impl LlmError {
     }
 }
 
-/// Errors returned by `crate::storage::Storage` implementations.
+/// Errors returned by [`crate::storage::Storage`] implementations.
 ///
 /// Backend-time rejection of a `Namespace`/`Key` is distinct from
 /// construction-time validation: see [`NamespaceError`] / [`KeyError`] for the
