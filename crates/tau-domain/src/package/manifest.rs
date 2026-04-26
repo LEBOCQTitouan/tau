@@ -62,6 +62,55 @@ pub struct PackageId {
     pub version: Version,
 }
 
+/// Package kind. Structural at v0.1: every kind goes through `Custom`.
+/// Typed variants land additively as tau-runtime gains plugin trait
+/// awareness for each kind.
+///
+/// See: [escape-hatches.md#packagekind-custom](../../../../../docs/explanation/escape-hatches.md#packagekind-custom).
+///
+/// # Example
+///
+/// ```ignore
+/// // `PackageKind` is `#[non_exhaustive]` and cannot be built via struct
+/// // expression from outside `tau-domain`. Construction is performed
+/// // inside the crate (e.g. by manifest validation in tau-pkg).
+/// use tau_domain::PackageKind;
+/// let k = PackageKind::Custom { kind: "tool".into() };
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum PackageKind {
+    /// A package kind not yet typed in core.
+    /// See: [escape-hatches.md#packagekind-custom](../../../../../docs/explanation/escape-hatches.md#packagekind-custom).
+    Custom {
+        /// The kind name. By convention one of [`crate::package::kinds`]'s
+        /// constants (e.g. `"llm-backend"`, `"tool"`).
+        kind: String,
+    },
+}
+
+/// Canonical kind strings for `PackageKind::Custom.kind` and manifest
+/// `kind` fields. Recommended convention; tau-domain validates only
+/// "non-empty" so plugin authors who want a non-conforming kind name
+/// can use `Custom` with arbitrary text.
+pub mod kinds {
+    /// LLM backend plugin kind.
+    pub const LLM_BACKEND: &str = "llm-backend";
+    /// Tool plugin kind.
+    pub const TOOL: &str = "tool";
+    /// Skill plugin kind.
+    pub const SKILL: &str = "skill";
+    /// Pipeline plugin kind.
+    pub const PIPELINE: &str = "pipeline";
+    /// MCP server plugin kind.
+    pub const MCP_SERVER: &str = "mcp-server";
+    /// Storage plugin kind.
+    pub const STORAGE: &str = "storage";
+    /// Sandbox plugin kind.
+    pub const SANDBOX: &str = "sandbox";
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
