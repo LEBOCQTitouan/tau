@@ -18,6 +18,7 @@
 pub mod error;
 pub mod llm;
 pub mod storage;
+pub mod tool;
 
 pub use error::{KeyError, LlmError, NamespaceError, SandboxError, StorageError, ToolError};
 pub use llm::{
@@ -26,3 +27,4 @@ pub use llm::{
     ToolChoice, ToolSpec, ToolUse, ToolUseAccumulator,
 };
 pub use storage::{Key, Namespace};
+pub use tool::{SessionContext, ToolContent, ToolResult};
