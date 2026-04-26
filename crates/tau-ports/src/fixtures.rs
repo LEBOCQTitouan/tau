@@ -19,17 +19,19 @@
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
+use std::time::SystemTime;
 
-use tau_domain::Value;
+use tau_domain::{AgentInstanceId, Value};
+use uuid::Uuid;
 
 use crate::error::{LlmError, SandboxError, StorageError, ToolError};
 use crate::llm::{
     batch_to_stream, CompletionChunk, CompletionRequest, CompletionResponse, CompletionStream,
-    LlmBackend, StopReason, TokenUsage, ToolSpec, ToolUse,
+    LlmBackend, LlmProviderMessage, StopReason, TokenUsage, ToolChoice, ToolSpec, ToolUse,
 };
 use crate::sandbox::{Sandbox, SandboxPlan};
 use crate::storage::{Key, Namespace, Storage};
-use crate::tool::{SessionContext, Tool, ToolResult};
+use crate::tool::{SessionContext, Tool, ToolContent, ToolResult};
 
 // ---------------------------------------------------------------------------
 // Construction helpers for `#[non_exhaustive]` types
@@ -67,6 +69,54 @@ pub fn make_token_usage(input_tokens: u32, output_tokens: u32) -> TokenUsage {
     TokenUsage {
         input_tokens,
         output_tokens,
+    }
+}
+
+/// Build a minimal [`CompletionRequest`] without struct-literal syntax.
+///
+/// Optional fields default to `None` / empty / [`ToolChoice::Auto`].
+/// Used by integration tests that need to feed canonical requests to a
+/// [`MockLlmBackend`] or similar.
+pub fn make_completion_request(model: String) -> CompletionRequest {
+    CompletionRequest {
+        model,
+        system: None,
+        messages: Vec::<LlmProviderMessage>::new(),
+        tools: Vec::<ToolSpec>::new(),
+        max_tokens: None,
+        temperature: None,
+        top_p: None,
+        seed: None,
+        tool_choice: ToolChoice::Auto,
+        stop_sequences: Vec::new(),
+        provider_specific: BTreeMap::new(),
+    }
+}
+
+/// Build a [`ToolSpec`] without struct-literal syntax.
+pub fn make_tool_spec(name: String, description: String, input_schema: Value) -> ToolSpec {
+    ToolSpec {
+        name,
+        description,
+        input_schema,
+    }
+}
+
+/// Build a [`ToolResult`] without struct-literal syntax.
+pub fn make_tool_result(content: Vec<ToolContent>, is_error: bool) -> ToolResult {
+    ToolResult { content, is_error }
+}
+
+/// Build a [`SessionContext`] without struct-literal syntax.
+pub fn make_session_context(
+    agent_instance_id: AgentInstanceId,
+    session_id: Uuid,
+    deadline: Option<SystemTime>,
+) -> SessionContext {
+    SessionContext {
+        agent_instance_id,
+        session_id,
+        deadline,
     }
 }
 
