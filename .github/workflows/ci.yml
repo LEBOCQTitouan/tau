@@ -63,3 +63,25 @@ jobs:
         run: cargo build -p tau-domain --no-default-features
       - name: Test tau-domain (no default features)
         run: cargo test -p tau-domain --no-default-features --lib
+
+  no-default-features-ports:
+    name: build (tau-ports no-default-features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build tau-ports (no default features)
+        run: cargo build -p tau-ports --no-default-features
+      - name: Test tau-ports (no default features)
+        run: cargo test -p tau-ports --no-default-features --lib
+
+  test-fixtures-ports:
+    name: test (tau-ports test-fixtures only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Test tau-ports (test-fixtures feature only)
+        run: cargo test -p tau-ports --features test-fixtures
