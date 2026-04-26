@@ -7,7 +7,7 @@
 //!
 //! tau-ports defines four trait families:
 //!
-//! - `llm::LlmBackend` — LLM provider plugins (`kind = "llm-backend"`).
+//! - [`llm::LlmBackend`] — LLM provider plugins (`kind = "llm-backend"`).
 //! - `tool::Tool` — tool plugins (`kind = "tool"`).
 //! - `storage::Storage` — storage plugins (`kind = "storage"`).
 //! - `sandbox::Sandbox` — sandbox plugins (`kind = "sandbox"`); see the
@@ -21,7 +21,7 @@ pub mod storage;
 
 pub use error::{KeyError, LlmError, NamespaceError, SandboxError, StorageError, ToolError};
 pub use llm::{
-    CompletionChunk, CompletionRequest, CompletionResponse, ContentBlock, LlmProviderMessage,
-    StopReason, TokenUsage, ToolChoice, ToolSpec, ToolUse,
+    CompletionChunk, CompletionRequest, CompletionResponse, CompletionStream, ContentBlock,
+    LlmBackend, LlmProviderMessage, StopReason, TokenUsage, ToolChoice, ToolSpec, ToolUse,
 };
 pub use storage::{Key, Namespace};
