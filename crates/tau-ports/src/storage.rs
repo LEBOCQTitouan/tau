@@ -27,7 +27,7 @@ use crate::error::{KeyError, NamespaceError, StorageError};
 /// let ns = Namespace::try_new("global:cache").unwrap();
 /// assert_eq!(ns.as_str(), "global:cache");
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Namespace(String);
 
 impl Namespace {
@@ -82,7 +82,7 @@ impl fmt::Display for Namespace {
 /// let k = Key::try_new("agent:01890000-0000-7000-8000-000000000001").unwrap();
 /// assert_eq!(k.as_str(), "agent:01890000-0000-7000-8000-000000000001");
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Key(String);
 
 impl Key {
