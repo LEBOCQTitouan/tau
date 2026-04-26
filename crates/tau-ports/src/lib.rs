@@ -27,4 +27,4 @@ pub use llm::{
     ToolChoice, ToolSpec, ToolUse, ToolUseAccumulator,
 };
 pub use storage::{Key, Namespace};
-pub use tool::{SessionContext, Tool, ToolContent, ToolResult};
+pub use tool::{SessionContext, StatelessAdapter, StatelessTool, Tool, ToolContent, ToolResult};
