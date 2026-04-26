@@ -16,7 +16,12 @@
 //! See `docs/decisions/0003-tau-ports.md` for the design rationale.
 
 pub mod error;
+pub mod llm;
 pub mod storage;
 
 pub use error::{KeyError, LlmError, NamespaceError, SandboxError, StorageError, ToolError};
+pub use llm::{
+    CompletionChunk, CompletionRequest, CompletionResponse, ContentBlock, LlmProviderMessage,
+    StopReason, TokenUsage, ToolChoice, ToolSpec, ToolUse,
+};
 pub use storage::{Key, Namespace};
