@@ -1,10 +1,9 @@
 //! LLM-backend port — `kind = "llm-backend"` plugin contracts.
 //!
-//! This module defines the data types exchanged between tau-runtime and
-//! `LlmBackend` plugin adapters. The `LlmBackend` trait itself, the
-//! `CompletionStream` type alias, and the `batch_to_stream` /
-//! `stream_to_batch` / `ToolUseAccumulator` helpers land in later tasks
-//! (T6 and T7); this module is data-only at v0.1.
+//! This module defines the [`LlmBackend`] trait, the [`CompletionStream`]
+//! type alias, and the data types exchanged between tau-runtime and
+//! plugin adapters. The `batch_to_stream` / `stream_to_batch` /
+//! `ToolUseAccumulator` helpers land in T7.
 //!
 //! # Layer separation: `LlmProviderMessage` vs `tau_domain::Message`
 //!
@@ -31,8 +30,12 @@
 //! [`Address`]: tau_domain::Address
 
 use std::collections::BTreeMap;
+use std::pin::Pin;
 
+use futures_core::Stream;
 use tau_domain::Value;
+
+use crate::error::LlmError;
 
 /// Parameters for a single completion request to an `LlmBackend`.
 ///
@@ -260,4 +263,44 @@ pub struct TokenUsage {
     pub input_tokens: u32,
     /// Tokens generated in the response.
     pub output_tokens: u32,
+}
+
+/// Boxed dyn-stream type at the runtime registry boundary. Returned from
+/// [`LlmBackend::stream`].
+pub type CompletionStream = Pin<Box<dyn Stream<Item = Result<CompletionChunk, LlmError>> + Send>>;
+
+/// Trait implemented by `kind = "llm-backend"` plugins.
+///
+/// Native `async fn in trait` (Rust 1.75+; tau MSRV is 1.91). Both
+/// `complete` and `stream` are required to avoid mutual-recursion
+/// footguns; helpers in [the helpers section] make the inverse
+/// implementation a one-liner for plugin authors who only have one
+/// path natively.
+///
+/// `Send + Sync` so the runtime can store impls in a multi-task plugin
+/// registry.
+///
+/// The `async_fn_in_trait` lint is suppressed: tau-ports intentionally
+/// uses native `async fn in trait` (no `async-trait` macro, no boxed
+/// future per call). tau-runtime boxes once at the dyn-cast boundary
+/// where it stores `Arc<dyn LlmBackend>` in the plugin registry. See
+/// spec §3.1 design call "Native `async fn in trait`" and ADR-0003.
+#[allow(async_fn_in_trait)]
+pub trait LlmBackend: Send + Sync {
+    /// Plugin-visible name (matches the package name; for diagnostics).
+    fn name(&self) -> &str;
+
+    /// Make a batch completion request.
+    ///
+    /// Plugin authors with batch-only SDKs implement natively.
+    /// Plugin authors with streaming SDKs call
+    /// `stream_to_batch(self.stream(req).await?)` (helper in Task 7).
+    async fn complete(&self, req: CompletionRequest) -> Result<CompletionResponse, LlmError>;
+
+    /// Make a streaming completion request.
+    ///
+    /// Plugin authors with streaming SDKs implement natively.
+    /// Plugin authors with batch-only SDKs call
+    /// `Ok(batch_to_stream(self.complete(req).await?))` (helper in Task 7).
+    async fn stream(&self, req: CompletionRequest) -> Result<CompletionStream, LlmError>;
 }
