@@ -5,12 +5,14 @@
 //! Core domain types for tau. Pure data — no I/O, no plugin contracts.
 //! See the constitution (G5) for why messages are the universal interaction primitive.
 
+pub mod agent;
 pub mod error;
 pub mod id;
 pub mod package;
 pub mod value;
 pub mod version;
 
+pub use agent::{AgentStatus, FailureKind};
 pub use error::{
     AgentIdError, PackageKindError, PackageManifestError, PackageNameError, PackageSourceError,
 };
