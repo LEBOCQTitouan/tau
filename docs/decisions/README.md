@@ -33,3 +33,4 @@ require ADRs and are recorded in commit messages and PR discussion (PG3).
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-bootstrap.md) | Bootstrap decisions | Accepted |
+| [0002](0002-manifest-format.md) | Manifest format, capability evolution, escape-hatch policy | Accepted |
