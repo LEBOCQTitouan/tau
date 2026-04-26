@@ -3,5 +3,5 @@
 pub mod manifest;
 pub mod source;
 
-pub use manifest::{PackageDep, PackageId};
+pub use manifest::{kinds, PackageDep, PackageId, PackageKind};
 pub use source::{GitLocation, PackageSource};

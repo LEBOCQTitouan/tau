@@ -129,3 +129,12 @@ pub enum PackageSourceError {
     #[error("revision is empty after '#'")]
     EmptyRevision,
 }
+
+/// Validation errors for [`crate::package::PackageKind`].
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PackageKindError {
+    /// The kind string was empty.
+    #[error("package kind is empty")]
+    Empty,
+}

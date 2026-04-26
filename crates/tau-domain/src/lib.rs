@@ -11,9 +11,9 @@ pub mod package;
 pub mod value;
 pub mod version;
 
-pub use error::{AgentIdError, PackageNameError, PackageSourceError};
+pub use error::{AgentIdError, PackageKindError, PackageNameError, PackageSourceError};
 pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
-pub use package::{GitLocation, PackageDep, PackageId, PackageSource};
+pub use package::{kinds, GitLocation, PackageDep, PackageId, PackageKind, PackageSource};
 pub use value::Value;
 pub use version::{Version, VersionReq};
 
