@@ -5,15 +5,15 @@
 //! require breaking changes. Treat as forward-compatible documentation,
 //! not a SemVer commitment beyond the major-version bump that
 //! introduces actual sandboxing.
-//!
-//! Sandbox trait lands in T13.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use tau_domain::Capability;
 
-/// Plan provided to `crate::sandbox::Sandbox::create` (T13).
+use crate::error::SandboxError;
+
+/// Plan provided to [`Sandbox::create`].
 ///
 /// **PROVISIONAL** — see module-level caveat.
 #[non_exhaustive]
@@ -58,4 +58,30 @@ pub struct ResourceLimits {
     pub wall_clock_seconds: Option<u32>,
     /// Maximum concurrent subprocesses (OS-native; WASM impls ignore).
     pub max_subprocesses: Option<u32>,
+}
+
+/// Trait implemented by `kind = "sandbox"` plugins.
+///
+/// **PROVISIONAL** — this trait is a v0.1 sketch for plugin authors to
+/// anticipate the shape Phase-1 sandboxing will take. The actual
+/// implementation (WASM, OS-native, container) is not yet picked, and
+/// when it lands, breaking changes to this trait surface are likely.
+/// Treat as forward-compatible documentation, not a SemVer commitment
+/// beyond the major-version bump that introduces actual sandboxing.
+///
+/// At v0.1 there are zero implementations; this trait exists so plugin
+/// authors writing for v0.1 can anticipate the shape Phase-1 sandboxing
+/// will take.
+#[allow(async_fn_in_trait)]
+pub trait Sandbox: Send + Sync {
+    /// Per-sandbox handle. Opaque at v0.1; Phase-1 implementations may
+    /// add methods or trait-bound additional behavior.
+    type Handle: Send + 'static;
+
+    /// Plugin-visible name (matches the package name; for diagnostics).
+    fn name(&self) -> &str;
+
+    /// Provision a sandboxed execution context with the given plan.
+    /// Returns an opaque handle whose meaning is implementation-defined.
+    async fn create(&self, plan: SandboxPlan) -> Result<Self::Handle, SandboxError>;
 }
