@@ -88,3 +88,44 @@ pub enum AgentIdError {
         ch: char,
     },
 }
+
+/// Parser/validation errors for [`crate::package::PackageSource`] and
+/// [`crate::package::GitLocation`].
+///
+/// # Example
+///
+/// ```
+/// use tau_domain::{PackageSource, PackageSourceError};
+/// use std::str::FromStr;
+///
+/// let err = PackageSource::from_str("").unwrap_err();
+/// assert_eq!(err, PackageSourceError::Empty);
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PackageSourceError {
+    /// The input was empty.
+    #[error("package source is empty")]
+    Empty,
+    /// The URL had a scheme outside the allowed set.
+    #[error("unsupported URL scheme {scheme:?}; expected https, http, ssh, or git")]
+    UnsupportedScheme {
+        /// The rejected scheme.
+        scheme: String,
+    },
+    /// The URL did not parse as RFC 3986 *and* did not match scp-style.
+    #[error("malformed URL: {reason}")]
+    MalformedUrl {
+        /// Upstream parser's diagnostic.
+        reason: String,
+    },
+    /// The scp-style address could not be parsed.
+    #[error("malformed scp-style address: {reason}")]
+    MalformedScpAddress {
+        /// Diagnostic from the scp-style parser.
+        reason: String,
+    },
+    /// The fragment after `#` was empty.
+    #[error("revision is empty after '#'")]
+    EmptyRevision,
+}
