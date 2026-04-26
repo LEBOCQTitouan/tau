@@ -11,7 +11,16 @@
 
 use thiserror::Error;
 
-/// Validation errors for `Namespace` (lands in Task 3).
+/// Validation errors for [`crate::storage::Namespace`].
+///
+/// # Example
+///
+/// ```
+/// use tau_ports::{NamespaceError, storage::Namespace};
+///
+/// let err = Namespace::try_new("").unwrap_err();
+/// assert_eq!(err, NamespaceError::Empty);
+/// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum NamespaceError {
@@ -34,7 +43,16 @@ pub enum NamespaceError {
     },
 }
 
-/// Validation errors for `Key` (lands in Task 3).
+/// Validation errors for [`crate::storage::Key`].
+///
+/// # Example
+///
+/// ```
+/// use tau_ports::{KeyError, storage::Key};
+///
+/// let err = Key::try_new("").unwrap_err();
+/// assert_eq!(err, KeyError::Empty);
+/// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum KeyError {
