@@ -12,7 +12,7 @@ pub mod package;
 pub mod value;
 pub mod version;
 
-pub use agent::{AgentStatus, FailureKind};
+pub use agent::{AgentDefinition, AgentStatus, FailureKind};
 pub use error::{
     AgentIdError, PackageKindError, PackageManifestError, PackageNameError, PackageSourceError,
 };
