@@ -149,6 +149,84 @@ pub struct UncheckedManifest {
     pub capabilities: Vec<Capability>,
 }
 
+/// Validated package manifest. By construction, satisfies all cross-field
+/// invariants enforced by [`UncheckedManifest::validate`]. Cannot be
+/// constructed directly — must go through validation.
+///
+/// To mutate a `PackageManifest`, downgrade via `Into<UncheckedManifest>`,
+/// edit, then call [`UncheckedManifest::validate`] again.
+///
+/// # Example
+///
+/// ```no_run
+/// use tau_domain::{UncheckedManifest, PackageManifest};
+/// // let manifest: PackageManifest = unchecked.validate()?;
+/// # let _ = std::any::type_name::<PackageManifest>();
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PackageManifest(UncheckedManifest);
+
+impl PackageManifest {
+    /// Package name.
+    pub fn name(&self) -> &PackageName {
+        &self.0.name
+    }
+    /// Package version.
+    pub fn version(&self) -> &Version {
+        &self.0.version
+    }
+    /// Free-form description.
+    pub fn description(&self) -> &str {
+        &self.0.description
+    }
+    /// Authors.
+    pub fn authors(&self) -> &[String] {
+        &self.0.authors
+    }
+    /// SPDX license expression, if present.
+    pub fn license(&self) -> Option<&str> {
+        self.0.license.as_deref()
+    }
+    /// Source location.
+    pub fn source(&self) -> &PackageSource {
+        &self.0.source
+    }
+    /// Package kind.
+    pub fn kind(&self) -> &PackageKind {
+        &self.0.kind
+    }
+    /// Required dependencies.
+    pub fn dependencies(&self) -> &[PackageDep] {
+        &self.0.dependencies
+    }
+    /// Capability declarations.
+    pub fn capabilities(&self) -> &[Capability] {
+        &self.0.capabilities
+    }
+
+    /// Wrap a checked `UncheckedManifest` without re-running validation.
+    /// Internal use only — public API must go through
+    /// [`UncheckedManifest::validate`].
+    #[allow(dead_code)] // used by validate() landing in Task 13 and by tests below
+    pub(crate) fn from_checked(u: UncheckedManifest) -> Self {
+        Self(u)
+    }
+}
+
+impl From<PackageManifest> for UncheckedManifest {
+    fn from(m: PackageManifest) -> Self {
+        m.0
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for PackageManifest {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(s)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,5 +243,43 @@ mod tests {
             version: Version::parse("1.2.3").unwrap(),
         };
         assert_eq!(a, b);
+    }
+}
+
+#[cfg(test)]
+mod manifest_tests {
+    use super::*;
+    use std::str::FromStr;
+
+    fn fixture() -> UncheckedManifest {
+        UncheckedManifest {
+            name: PackageName::from_str("fs-tools").unwrap(),
+            version: Version::parse("0.3.0").unwrap(),
+            description: "fs tools".into(),
+            authors: vec![],
+            license: None,
+            source: PackageSource::from_str("https://example.com/fs.git").unwrap(),
+            kind: PackageKind::Custom {
+                kind: "tool".into(),
+            },
+            dependencies: vec![],
+            capabilities: vec![],
+        }
+    }
+
+    #[test]
+    fn package_manifest_accessors_work() {
+        let m = PackageManifest::from_checked(fixture());
+        assert_eq!(m.name().as_str(), "fs-tools");
+        assert_eq!(m.description(), "fs tools");
+        assert_eq!(m.dependencies().len(), 0);
+    }
+
+    #[test]
+    fn round_trip_through_unchecked() {
+        let m = PackageManifest::from_checked(fixture());
+        let u: UncheckedManifest = m.into();
+        let m2 = PackageManifest::from_checked(u);
+        assert_eq!(m2.name().as_str(), "fs-tools");
     }
 }

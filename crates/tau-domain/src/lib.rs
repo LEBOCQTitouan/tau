@@ -15,7 +15,7 @@ pub use error::{AgentIdError, PackageKindError, PackageNameError, PackageSourceE
 pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
 pub use package::{
     kinds, AgentCapability, Capability, FsCapability, GitLocation, NetCapability, PackageDep,
-    PackageId, PackageKind, PackageSource, ProcessCapability, UncheckedManifest,
+    PackageId, PackageKind, PackageManifest, PackageSource, ProcessCapability, UncheckedManifest,
 };
 pub use value::Value;
 pub use version::{Version, VersionReq};
