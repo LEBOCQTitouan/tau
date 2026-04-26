@@ -8,5 +8,5 @@
 pub mod error;
 pub mod id;
 
-pub use error::PackageNameError;
-pub use id::PackageName;
+pub use error::{AgentIdError, PackageNameError};
+pub use id::{AgentId, PackageName};
