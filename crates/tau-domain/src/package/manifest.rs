@@ -5,6 +5,8 @@
 //! derives (under the `serde` feature).
 
 use crate::id::PackageName;
+use crate::package::capability::Capability;
+use crate::package::source::PackageSource;
 use crate::version::{Version, VersionReq};
 
 /// A dependency declaration: a package name plus a SemVer requirement.
@@ -109,6 +111,42 @@ pub mod kinds {
     pub const STORAGE: &str = "storage";
     /// Sandbox plugin kind.
     pub const SANDBOX: &str = "sandbox";
+}
+
+/// Raw manifest as it appears on disk or on the wire. Deserializes from
+/// TOML/JSON directly. May contain field combinations that violate
+/// cross-field invariants — call [`UncheckedManifest::validate`] to
+/// obtain a verified [`PackageManifest`].
+///
+/// # Example
+///
+/// ```no_run
+/// use tau_domain::UncheckedManifest;
+/// // toml::from_str::<UncheckedManifest>(&raw)?.validate()?;
+/// # let _ = std::any::type_name::<UncheckedManifest>();
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct UncheckedManifest {
+    /// Package name.
+    pub name: PackageName,
+    /// Package version.
+    pub version: Version,
+    /// Free-form description.
+    pub description: String,
+    /// Authors (free-form, e.g. `"Acme Inc <support@acme.dev>"`).
+    pub authors: Vec<String>,
+    /// SPDX license expression as opaque text. `None` for unlicensed.
+    pub license: Option<String>,
+    /// Where the package lives.
+    pub source: PackageSource,
+    /// What the package provides.
+    pub kind: PackageKind,
+    /// Required dependencies.
+    pub dependencies: Vec<PackageDep>,
+    /// Capability declarations (G14).
+    pub capabilities: Vec<Capability>,
 }
 
 #[cfg(test)]
