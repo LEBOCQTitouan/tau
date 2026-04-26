@@ -26,7 +26,7 @@ and ships in its own brainstorm → spec → plan → implementation cycle.
 | # | Sub-project | Produces |
 |---|---|---|
 | 0 | Repo bootstrap *(this one)* | Empty workspace + governance + CI |
-| 1 | `tau-domain` Message + Agent + Package types | Pure-types crate with `thiserror` errors, doc tests, proptest for parsers |
+| 1 | `tau-domain` Message + Agent + Package types ✅ | Pure-types crate with `thiserror` errors, doc tests, proptest for parsers *(complete — 2026-04-25)* |
 | 2 | `tau-ports` plugin traits | Trait definitions for LLM backend, tool, storage, sandbox |
 | 3 | `tau-pkg` package manager | `tau install` from git URLs, capability declarations parsed (G14), scope resolution (G8) |
 | 4 | `tau-runtime` agent lifecycle + message passing | Spawn an agent, deliver messages, observe via structured logs (solo path only) |

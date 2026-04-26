@@ -58,7 +58,7 @@
 - Modify: `crates/tau-domain/Cargo.toml`
 - Modify: `crates/tau-domain/src/lib.rs`
 
-- [ ] **Step 1.1: Add `[workspace.dependencies]` to root Cargo.toml**
+- [x] **Step 1.1: Add `[workspace.dependencies]` to root Cargo.toml**
 
 Open `/Users/titouanlebocq/code/tau/Cargo.toml`. Append after the `[workspace.package]` block:
 
@@ -73,7 +73,7 @@ proptest  = "1"
 walkdir   = "2"
 ```
 
-- [ ] **Step 1.2: Update `crates/tau-domain/Cargo.toml`**
+- [x] **Step 1.2: Update `crates/tau-domain/Cargo.toml`**
 
 Replace the file contents with:
 
@@ -107,7 +107,7 @@ toml        = "0.8"
 walkdir     = { workspace = true }
 ```
 
-- [ ] **Step 1.3: Verify the no-default-features build still works**
+- [x] **Step 1.3: Verify the no-default-features build still works**
 
 Run from `/Users/titouanlebocq/code/tau`:
 
@@ -117,7 +117,7 @@ cargo build -p tau-domain --no-default-features
 
 Expected: success. The current `lib.rs` is just a doc comment; nothing depends on `serde` yet.
 
-- [ ] **Step 1.4: Verify the all-features build works**
+- [x] **Step 1.4: Verify the all-features build works**
 
 ```bash
 cargo build -p tau-domain --all-features
@@ -125,7 +125,7 @@ cargo build -p tau-domain --all-features
 
 Expected: success. The new optional deps are pulled in but unused.
 
-- [ ] **Step 1.5: Verify clippy + fmt are still clean**
+- [x] **Step 1.5: Verify clippy + fmt are still clean**
 
 ```bash
 cargo clippy -p tau-domain --all-targets --all-features -- -D warnings
@@ -134,7 +134,7 @@ cargo fmt --all -- --check
 
 Expected: both exit 0.
 
-- [ ] **Step 1.6: Stage and commit**
+- [x] **Step 1.6: Stage and commit**
 
 ```bash
 git add Cargo.toml crates/tau-domain/Cargo.toml
@@ -159,7 +159,7 @@ Refs: QG2, QG5, spec sub-project 1 §2"
 
 This task introduces the first newtype with full validation. Strict TDD because there is real parsing/validation logic.
 
-- [ ] **Step 2.1: Create `error.rs` with the first error enum**
+- [x] **Step 2.1: Create `error.rs` with the first error enum**
 
 Create `/Users/titouanlebocq/code/tau/crates/tau-domain/src/error.rs`:
 
@@ -215,7 +215,7 @@ pub enum PackageNameError {
 }
 ```
 
-- [ ] **Step 2.2: Create `id.rs` with `PackageName` and a failing test**
+- [x] **Step 2.2: Create `id.rs` with `PackageName` and a failing test**
 
 Create `/Users/titouanlebocq/code/tau/crates/tau-domain/src/id.rs`:
 
@@ -349,7 +349,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2.3: Wire modules into `lib.rs`**
+- [x] **Step 2.3: Wire modules into `lib.rs`**
 
 Replace `/Users/titouanlebocq/code/tau/crates/tau-domain/src/lib.rs` with:
 
@@ -368,7 +368,7 @@ pub use error::PackageNameError;
 pub use id::PackageName;
 ```
 
-- [ ] **Step 2.4: Run unit tests**
+- [x] **Step 2.4: Run unit tests**
 
 ```bash
 cargo test -p tau-domain --lib
@@ -376,7 +376,7 @@ cargo test -p tau-domain --lib
 
 Expected: 6 tests pass (`accepts_valid_names`, `rejects_empty`, `rejects_too_long`, `rejects_invalid_leading`, `rejects_invalid_mid_char`, `display_round_trip`).
 
-- [ ] **Step 2.5: Run doctests**
+- [x] **Step 2.5: Run doctests**
 
 ```bash
 cargo test -p tau-domain --doc
@@ -384,7 +384,7 @@ cargo test -p tau-domain --doc
 
 Expected: 2 doctests pass (one on `PackageName`, one on `PackageNameError`).
 
-- [ ] **Step 2.6: Run clippy and fmt**
+- [x] **Step 2.6: Run clippy and fmt**
 
 ```bash
 cargo clippy -p tau-domain --all-targets --all-features -- -D warnings
@@ -393,7 +393,7 @@ cargo fmt --all -- --check
 
 Expected: both exit 0.
 
-- [ ] **Step 2.7: Stage and commit**
+- [x] **Step 2.7: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/id.rs crates/tau-domain/src/error.rs
@@ -418,7 +418,7 @@ Refs: QG2, QG3, QG9, spec §3.1, §3.6"
 
 Same grammar as `PackageName`, but a separate type for discoverability per spec §3.6.
 
-- [ ] **Step 3.1: Append `AgentIdError` to `error.rs`**
+- [x] **Step 3.1: Append `AgentIdError` to `error.rs`**
 
 Append to `/Users/titouanlebocq/code/tau/crates/tau-domain/src/error.rs`:
 
@@ -465,7 +465,7 @@ pub enum AgentIdError {
 }
 ```
 
-- [ ] **Step 3.2: Append `AgentId` to `id.rs`**
+- [x] **Step 3.2: Append `AgentId` to `id.rs`**
 
 Add a `use crate::error::AgentIdError;` near the top of `id.rs`, then append at the end (after the existing `tests` module):
 
@@ -573,7 +573,7 @@ mod agent_id_tests {
 }
 ```
 
-- [ ] **Step 3.3: Update `lib.rs` re-exports**
+- [x] **Step 3.3: Update `lib.rs` re-exports**
 
 Replace the re-export lines in `lib.rs`:
 
@@ -582,7 +582,7 @@ pub use error::{AgentIdError, PackageNameError};
 pub use id::{AgentId, PackageName};
 ```
 
-- [ ] **Step 3.4: Run tests + clippy + fmt**
+- [x] **Step 3.4: Run tests + clippy + fmt**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -592,7 +592,7 @@ cargo fmt --all -- --check
 
 Expected: all green.
 
-- [ ] **Step 3.5: Stage and commit**
+- [x] **Step 3.5: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/id.rs crates/tau-domain/src/error.rs
@@ -616,7 +616,7 @@ Refs: QG2, QG9, spec §3.1, §3.6"
 
 UUID v7 IDs. No grammar validation — `uuid::Uuid` handles all parsing.
 
-- [ ] **Step 4.1: Append `AgentInstanceId` and `MessageId` to `id.rs`**
+- [x] **Step 4.1: Append `AgentInstanceId` and `MessageId` to `id.rs`**
 
 Append to `id.rs`:
 
@@ -779,14 +779,14 @@ mod uuid_id_tests {
 }
 ```
 
-- [ ] **Step 4.2: Update `lib.rs` re-exports**
+- [x] **Step 4.2: Update `lib.rs` re-exports**
 
 ```rust
 pub use error::{AgentIdError, PackageNameError};
 pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
 ```
 
-- [ ] **Step 4.3: Run all checks**
+- [x] **Step 4.3: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -797,7 +797,7 @@ cargo fmt --all -- --check
 
 Expected: all green. The `--no-default-features` build verifies `serde` gating.
 
-- [ ] **Step 4.4: Stage and commit**
+- [x] **Step 4.4: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/id.rs
@@ -820,7 +820,7 @@ Refs: spec §3.1, §3.3"
 
 JSON-shaped value used by manifest capability params and tool args/results.
 
-- [ ] **Step 5.1: Create `value.rs`**
+- [x] **Step 5.1: Create `value.rs`**
 
 Create `/Users/titouanlebocq/code/tau/crates/tau-domain/src/value.rs`:
 
@@ -936,7 +936,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 5.2: Wire into `lib.rs`**
+- [x] **Step 5.2: Wire into `lib.rs`**
 
 Add `pub mod value;` and `pub use value::Value;` to `lib.rs`:
 
@@ -957,7 +957,7 @@ pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
 pub use value::Value;
 ```
 
-- [ ] **Step 5.3: Run all checks**
+- [x] **Step 5.3: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -968,7 +968,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 5.4: Stage and commit**
+- [x] **Step 5.4: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/value.rs
@@ -993,7 +993,7 @@ Refs: spec §3.2"
 
 The spec re-exports rather than wraps `semver::Version` and `semver::VersionReq` (no v0.1 invariants to enforce). Same for `url::Url` and `uuid::Uuid`. Putting these in their own module keeps `lib.rs` clean.
 
-- [ ] **Step 6.1: Create `version.rs`**
+- [x] **Step 6.1: Create `version.rs`**
 
 Create `/Users/titouanlebocq/code/tau/crates/tau-domain/src/version.rs`:
 
@@ -1010,7 +1010,7 @@ Create `/Users/titouanlebocq/code/tau/crates/tau-domain/src/version.rs`:
 pub use semver::{Version, VersionReq};
 ```
 
-- [ ] **Step 6.2: Update `lib.rs`**
+- [x] **Step 6.2: Update `lib.rs`**
 
 Replace `lib.rs` with:
 
@@ -1038,7 +1038,7 @@ pub use url::Url;
 pub use uuid::Uuid;
 ```
 
-- [ ] **Step 6.3: Run all checks**
+- [x] **Step 6.3: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -1049,7 +1049,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 6.4: Stage and commit**
+- [x] **Step 6.4: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/version.rs
@@ -1074,7 +1074,7 @@ Refs: spec §3.5.2, §3.1"
 
 Real parsing logic. Strict TDD: tests first, watch fail, implement, watch pass.
 
-- [ ] **Step 7.1: Append `PackageSourceError` to `error.rs`**
+- [x] **Step 7.1: Append `PackageSourceError` to `error.rs`**
 
 Append:
 
@@ -1121,7 +1121,7 @@ pub enum PackageSourceError {
 }
 ```
 
-- [ ] **Step 7.2: Create `package/mod.rs`**
+- [x] **Step 7.2: Create `package/mod.rs`**
 
 Create `/Users/titouanlebocq/code/tau/crates/tau-domain/src/package/mod.rs`:
 
@@ -1133,7 +1133,7 @@ pub mod source;
 pub use source::{GitLocation, PackageSource};
 ```
 
-- [ ] **Step 7.3: Create `package/source.rs` with failing tests first**
+- [x] **Step 7.3: Create `package/source.rs` with failing tests first**
 
 Create `/Users/titouanlebocq/code/tau/crates/tau-domain/src/package/source.rs`. Start with the type declarations and tests; leave the parser bodies as `todo!()` to confirm tests fail:
 
@@ -1412,7 +1412,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 7.4: Wire into `lib.rs`**
+- [x] **Step 7.4: Wire into `lib.rs`**
 
 Add to `lib.rs`:
 
@@ -1425,7 +1425,7 @@ pub use package::{GitLocation, PackageSource};
 
 (Replace the existing `pub use error::...` line and add the `pub use package::...` line.)
 
-- [ ] **Step 7.5: Run tests**
+- [x] **Step 7.5: Run tests**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -1436,7 +1436,7 @@ cargo fmt --all -- --check
 
 Expected: 10 source tests pass, 1 doctest passes.
 
-- [ ] **Step 7.6: Stage and commit**
+- [x] **Step 7.6: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/error.rs crates/tau-domain/src/package
@@ -1462,7 +1462,7 @@ Refs: QG5, spec §3.5.1, §4"
 
 Pure data structs. No validation logic — fields are pre-validated newtypes.
 
-- [ ] **Step 8.1: Create `package/manifest.rs` (start)**
+- [x] **Step 8.1: Create `package/manifest.rs` (start)**
 
 Create `/Users/titouanlebocq/code/tau/crates/tau-domain/src/package/manifest.rs`:
 
@@ -1544,7 +1544,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 8.2: Update `package/mod.rs`**
+- [x] **Step 8.2: Update `package/mod.rs`**
 
 Replace with:
 
@@ -1558,13 +1558,13 @@ pub use manifest::{PackageDep, PackageId};
 pub use source::{GitLocation, PackageSource};
 ```
 
-- [ ] **Step 8.3: Update `lib.rs` re-exports**
+- [x] **Step 8.3: Update `lib.rs` re-exports**
 
 ```rust
 pub use package::{GitLocation, PackageDep, PackageId, PackageSource};
 ```
 
-- [ ] **Step 8.4: Run all checks**
+- [x] **Step 8.4: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -1575,7 +1575,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 8.5: Stage and commit**
+- [x] **Step 8.5: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/package
@@ -1600,7 +1600,7 @@ Refs: spec §3.5.2"
 
 `PackageKind` is structural (Custom-only) at v0.1 per the escape-hatch policy.
 
-- [ ] **Step 9.1: Append `PackageKindError` to `error.rs`**
+- [x] **Step 9.1: Append `PackageKindError` to `error.rs`**
 
 ```rust
 /// Validation errors for [`crate::package::PackageKind`].
@@ -1613,7 +1613,7 @@ pub enum PackageKindError {
 }
 ```
 
-- [ ] **Step 9.2: Append `PackageKind` and `kinds` module to `package/manifest.rs`**
+- [x] **Step 9.2: Append `PackageKind` and `kinds` module to `package/manifest.rs`**
 
 ```rust
 /// Package kind. Structural at v0.1: every kind goes through `Custom`.
@@ -1663,20 +1663,20 @@ pub mod kinds {
 }
 ```
 
-- [ ] **Step 9.3: Update `package/mod.rs`**
+- [x] **Step 9.3: Update `package/mod.rs`**
 
 ```rust
 pub use manifest::{kinds, PackageDep, PackageId, PackageKind};
 ```
 
-- [ ] **Step 9.4: Update `lib.rs` re-exports**
+- [x] **Step 9.4: Update `lib.rs` re-exports**
 
 ```rust
 pub use error::{AgentIdError, PackageKindError, PackageNameError, PackageSourceError};
 pub use package::{kinds, GitLocation, PackageDep, PackageId, PackageKind, PackageSource};
 ```
 
-- [ ] **Step 9.5: Run all checks**
+- [x] **Step 9.5: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -1687,7 +1687,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 9.6: Stage and commit**
+- [x] **Step 9.6: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/error.rs crates/tau-domain/src/package
@@ -1712,7 +1712,7 @@ Refs: G14, spec §3.5.2"
 
 The hierarchical typed enum (β shape) with the custom `Deserialize` mapping flat manifest TOML form (`kind = "fs.read"`) onto the nested variant tree.
 
-- [ ] **Step 10.1: Create `package/capability.rs` with the type hierarchy**
+- [x] **Step 10.1: Create `package/capability.rs` with the type hierarchy**
 
 ```rust
 //! Capability declarations attached to a package manifest.
@@ -1927,7 +1927,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 10.2: Update `package/mod.rs`**
+- [x] **Step 10.2: Update `package/mod.rs`**
 
 ```rust
 //! Package metadata types (sources, manifests, capabilities).
@@ -1943,7 +1943,7 @@ pub use manifest::{kinds, PackageDep, PackageId, PackageKind};
 pub use source::{GitLocation, PackageSource};
 ```
 
-- [ ] **Step 10.3: Update `lib.rs`**
+- [x] **Step 10.3: Update `lib.rs`**
 
 ```rust
 pub use package::{
@@ -1952,7 +1952,7 @@ pub use package::{
 };
 ```
 
-- [ ] **Step 10.4: Run all checks**
+- [x] **Step 10.4: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -1963,7 +1963,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 10.5: Stage and commit**
+- [x] **Step 10.5: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/package
@@ -1989,7 +1989,7 @@ Refs: G10, G14, spec §3.5.3, §6"
 
 The deserialization target. No validation yet — that lands in Task 13.
 
-- [ ] **Step 11.1: Append `UncheckedManifest` to `package/manifest.rs`**
+- [x] **Step 11.1: Append `UncheckedManifest` to `package/manifest.rs`**
 
 ```rust
 use crate::package::capability::Capability;
@@ -2032,13 +2032,13 @@ pub struct UncheckedManifest {
 }
 ```
 
-- [ ] **Step 11.2: Update `package/mod.rs`**
+- [x] **Step 11.2: Update `package/mod.rs`**
 
 ```rust
 pub use manifest::{kinds, PackageDep, PackageId, PackageKind, UncheckedManifest};
 ```
 
-- [ ] **Step 11.3: Update `lib.rs` re-exports**
+- [x] **Step 11.3: Update `lib.rs` re-exports**
 
 ```rust
 pub use package::{
@@ -2047,7 +2047,7 @@ pub use package::{
 };
 ```
 
-- [ ] **Step 11.4: Run all checks**
+- [x] **Step 11.4: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -2058,7 +2058,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 11.5: Stage and commit**
+- [x] **Step 11.5: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/package
@@ -2083,7 +2083,7 @@ Refs: spec §3.5.2"
 
 The validated wrapper. Read-only accessors. `From<PackageManifest> for UncheckedManifest` for mutation round-trip. `Serialize` delegated to inner.
 
-- [ ] **Step 12.1: Append `PackageManifest` to `package/manifest.rs`**
+- [x] **Step 12.1: Append `PackageManifest` to `package/manifest.rs`**
 
 ```rust
 /// Validated package manifest. By construction, satisfies all cross-field
@@ -2200,13 +2200,13 @@ mod manifest_tests {
 }
 ```
 
-- [ ] **Step 12.2: Update `package/mod.rs`**
+- [x] **Step 12.2: Update `package/mod.rs`**
 
 ```rust
 pub use manifest::{kinds, PackageDep, PackageId, PackageKind, PackageManifest, UncheckedManifest};
 ```
 
-- [ ] **Step 12.3: Update `lib.rs`**
+- [x] **Step 12.3: Update `lib.rs`**
 
 ```rust
 pub use package::{
@@ -2215,7 +2215,7 @@ pub use package::{
 };
 ```
 
-- [ ] **Step 12.4: Run all checks**
+- [x] **Step 12.4: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -2226,7 +2226,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 12.5: Stage and commit**
+- [x] **Step 12.5: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/package
@@ -2253,7 +2253,7 @@ Refs: spec §3.5.2 typestate"
 
 Real validation logic. Strict TDD.
 
-- [ ] **Step 13.1: Append `PackageManifestError` to `error.rs`**
+- [x] **Step 13.1: Append `PackageManifestError` to `error.rs`**
 
 ```rust
 /// Validation errors for [`crate::package::PackageManifest`].
@@ -2294,7 +2294,7 @@ pub enum PackageManifestError {
 }
 ```
 
-- [ ] **Step 13.2: Append `validate()` to `package/manifest.rs`**
+- [x] **Step 13.2: Append `validate()` to `package/manifest.rs`**
 
 ```rust
 use crate::error::PackageManifestError;
@@ -2394,7 +2394,7 @@ mod validation_tests {
 }
 ```
 
-- [ ] **Step 13.3: Update `lib.rs`**
+- [x] **Step 13.3: Update `lib.rs`**
 
 ```rust
 pub use error::{
@@ -2402,7 +2402,7 @@ pub use error::{
 };
 ```
 
-- [ ] **Step 13.4: Run all checks**
+- [x] **Step 13.4: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -2413,7 +2413,7 @@ cargo fmt --all -- --check
 
 Expected: green. 3 new validation tests + 1 new doctest pass.
 
-- [ ] **Step 13.5: Stage and commit**
+- [x] **Step 13.5: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/error.rs crates/tau-domain/src/package
@@ -2435,7 +2435,7 @@ Refs: QG2, spec §3.5.2 typestate, §3.6"
 - Create: `crates/tau-domain/src/agent.rs`
 - Modify: `crates/tau-domain/src/lib.rs`
 
-- [ ] **Step 14.1: Create `agent.rs` with status types**
+- [x] **Step 14.1: Create `agent.rs` with status types**
 
 Create `/Users/titouanlebocq/code/tau/crates/tau-domain/src/agent.rs`:
 
@@ -2539,7 +2539,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 14.2: Wire into `lib.rs`**
+- [x] **Step 14.2: Wire into `lib.rs`**
 
 Add `pub mod agent;` and re-exports:
 
@@ -2548,7 +2548,7 @@ pub mod agent;
 pub use agent::{AgentStatus, FailureKind};
 ```
 
-- [ ] **Step 14.3: Run all checks**
+- [x] **Step 14.3: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -2559,7 +2559,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 14.4: Stage and commit**
+- [x] **Step 14.4: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/agent.rs
@@ -2580,7 +2580,7 @@ Refs: spec §3.4"
 - Modify: `crates/tau-domain/src/agent.rs` (append)
 - Modify: `crates/tau-domain/src/lib.rs`
 
-- [ ] **Step 15.1: Append `AgentDefinition` to `agent.rs`**
+- [x] **Step 15.1: Append `AgentDefinition` to `agent.rs`**
 
 ```rust
 /// Static description of an agent. Holds what the runtime needs to
@@ -2679,13 +2679,13 @@ mod definition_tests {
 }
 ```
 
-- [ ] **Step 15.2: Update `lib.rs`**
+- [x] **Step 15.2: Update `lib.rs`**
 
 ```rust
 pub use agent::{AgentDefinition, AgentStatus, FailureKind};
 ```
 
-- [ ] **Step 15.3: Run all checks**
+- [x] **Step 15.3: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -2696,7 +2696,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 15.4: Stage and commit**
+- [x] **Step 15.4: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/agent.rs
@@ -2717,7 +2717,7 @@ Refs: G4, Constitution Appendix C, spec §3.4"
 - Create: `crates/tau-domain/src/message.rs`
 - Modify: `crates/tau-domain/src/lib.rs`
 
-- [ ] **Step 16.1: Create `message.rs`**
+- [x] **Step 16.1: Create `message.rs`**
 
 ```rust
 //! Message envelope, addressing, and payload types (G5).
@@ -2841,14 +2841,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 16.2: Update `lib.rs`**
+- [x] **Step 16.2: Update `lib.rs`**
 
 ```rust
 pub mod message;
 pub use message::{Address, Message, MessagePayload};
 ```
 
-- [ ] **Step 16.3: Run all checks**
+- [x] **Step 16.3: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -2859,7 +2859,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 16.4: Stage and commit**
+- [x] **Step 16.4: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/message.rs
@@ -2883,7 +2883,7 @@ Refs: G5, G10, spec §3.3"
 
 Construction helpers for tests. Exposed via the `test-fixtures` feature.
 
-- [ ] **Step 17.1: Create `fixtures.rs`**
+- [x] **Step 17.1: Create `fixtures.rs`**
 
 ```rust
 //! Test fixtures for `tau-domain` types.
@@ -2979,7 +2979,7 @@ pub fn any_message() -> Message {
 }
 ```
 
-- [ ] **Step 17.2: Wire into `lib.rs` behind the feature**
+- [x] **Step 17.2: Wire into `lib.rs` behind the feature**
 
 Add to `lib.rs`:
 
@@ -2988,7 +2988,7 @@ Add to `lib.rs`:
 pub mod fixtures;
 ```
 
-- [ ] **Step 17.3: Run all checks**
+- [x] **Step 17.3: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -3000,7 +3000,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 17.4: Stage and commit**
+- [x] **Step 17.4: Stage and commit**
 
 ```bash
 git add crates/tau-domain/src/lib.rs crates/tau-domain/src/fixtures.rs
@@ -3023,7 +3023,7 @@ Refs: spec §5"
 - Create: `crates/tau-domain/tests/proptest_message_envelope.rs`
 - Create: `crates/tau-domain/tests/proptest_value.rs`
 
-- [ ] **Step 18.1: Write `proptest_package_source.rs`**
+- [x] **Step 18.1: Write `proptest_package_source.rs`**
 
 ```rust
 //! Property tests for `PackageSource` parser/round-trip.
@@ -3073,7 +3073,7 @@ proptest! {
 }
 ```
 
-- [ ] **Step 18.2: Write `proptest_ids.rs`**
+- [x] **Step 18.2: Write `proptest_ids.rs`**
 
 ```rust
 //! Property tests for `PackageName` and `AgentId` grammar.
@@ -3108,7 +3108,7 @@ proptest! {
 }
 ```
 
-- [ ] **Step 18.3: Write `proptest_message_envelope.rs`**
+- [x] **Step 18.3: Write `proptest_message_envelope.rs`**
 
 ```rust
 //! Property test: arbitrary Message round-trips through serde_json.
@@ -3171,7 +3171,7 @@ proptest! {
 }
 ```
 
-- [ ] **Step 18.4: Write `proptest_value.rs`**
+- [x] **Step 18.4: Write `proptest_value.rs`**
 
 ```rust
 //! Property test: arbitrary Value round-trips through serde_json.
@@ -3206,7 +3206,7 @@ proptest! {
 }
 ```
 
-- [ ] **Step 18.5: Run the proptest suite**
+- [x] **Step 18.5: Run the proptest suite**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -3214,7 +3214,7 @@ cargo test -p tau-domain --all-targets --all-features
 
 Expected: every proptest passes (each runs 256 cases by default; first run will be slower as proptest builds its corpus).
 
-- [ ] **Step 18.6: Run clippy + fmt**
+- [x] **Step 18.6: Run clippy + fmt**
 
 ```bash
 cargo clippy -p tau-domain --all-targets --all-features -- -D warnings
@@ -3223,7 +3223,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 18.7: Stage and commit**
+- [x] **Step 18.7: Stage and commit**
 
 ```bash
 git add crates/tau-domain/tests/proptest_package_source.rs crates/tau-domain/tests/proptest_ids.rs crates/tau-domain/tests/proptest_message_envelope.rs crates/tau-domain/tests/proptest_value.rs
@@ -3248,7 +3248,7 @@ Refs: QG5, spec §4, §5"
 
 Table-driven and example-based integration tests.
 
-- [ ] **Step 19.1: Write `manifest_roundtrip.rs`**
+- [x] **Step 19.1: Write `manifest_roundtrip.rs`**
 
 ```rust
 //! Integration test: TOML manifest round-trips through
@@ -3311,7 +3311,7 @@ fn programmatic_manifest_round_trips_through_serde_json() {
 }
 ```
 
-- [ ] **Step 19.2: Write `manifest_validation_table.rs`**
+- [x] **Step 19.2: Write `manifest_validation_table.rs`**
 
 ```rust
 //! Table-driven test: malformed manifests produce specific
@@ -3386,7 +3386,7 @@ fn good_validates() {
 }
 ```
 
-- [ ] **Step 19.3: Write `message_envelope_serde.rs`**
+- [x] **Step 19.3: Write `message_envelope_serde.rs`**
 
 ```rust
 //! Integration test: every MessagePayload variant round-trips
@@ -3464,7 +3464,7 @@ fn custom() {
 }
 ```
 
-- [ ] **Step 19.4: Write `package_source_grammar.rs`**
+- [x] **Step 19.4: Write `package_source_grammar.rs`**
 
 ```rust
 //! Integration test: PackageSource grammar across known cases.
@@ -3520,7 +3520,7 @@ fn rejects_empty_rev_marker() {
 }
 ```
 
-- [ ] **Step 19.5: Run all checks**
+- [x] **Step 19.5: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -3530,7 +3530,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 19.6: Stage and commit**
+- [x] **Step 19.6: Stage and commit**
 
 ```bash
 git add crates/tau-domain/tests/manifest_roundtrip.rs crates/tau-domain/tests/manifest_validation_table.rs crates/tau-domain/tests/message_envelope_serde.rs crates/tau-domain/tests/package_source_grammar.rs
@@ -3554,7 +3554,7 @@ Refs: QG5, spec §5"
 
 Canonical serialized forms; tests assert deserialize-then-serialize is byte-identical.
 
-- [ ] **Step 20.1: Create the wire_format directory and files**
+- [x] **Step 20.1: Create the wire_format directory and files**
 
 ```bash
 mkdir -p crates/tau-domain/tests/wire_format
@@ -3673,7 +3673,7 @@ Create `crates/tau-domain/tests/wire_format/package_source_scp.txt`:
 git@github.com:owner/repo.git
 ```
 
-- [ ] **Step 20.2: Write `wire_format_golden.rs`**
+- [x] **Step 20.2: Write `wire_format_golden.rs`**
 
 ```rust
 //! Golden-file tests for the wire format. Each canonical input file
@@ -3737,7 +3737,7 @@ fn package_source_scp_golden() {
 }
 ```
 
-- [ ] **Step 20.3: Run the golden tests**
+- [x] **Step 20.3: Run the golden tests**
 
 ```bash
 cargo test -p tau-domain --test wire_format_golden --all-features
@@ -3745,7 +3745,7 @@ cargo test -p tau-domain --test wire_format_golden --all-features
 
 If any test fails because the actual serialization disagrees with the golden file, **inspect the diff** — if the type / serde change is intentional, regenerate the golden file from the actual output. If the change is a drift, fix the type.
 
-- [ ] **Step 20.4: Run full test suite + clippy + fmt**
+- [x] **Step 20.4: Run full test suite + clippy + fmt**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -3755,7 +3755,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 20.5: Stage and commit**
+- [x] **Step 20.5: Stage and commit**
 
 ```bash
 git add crates/tau-domain/tests/wire_format crates/tau-domain/tests/wire_format_golden.rs
@@ -3776,13 +3776,13 @@ Refs: G5, G6, QG12, spec §5"
 **Files:**
 - Modify: `.github/workflows/ci.yml`
 
-- [ ] **Step 21.1: Read current CI workflow**
+- [x] **Step 21.1: Read current CI workflow**
 
 ```bash
 cat .github/workflows/ci.yml | head -80
 ```
 
-- [ ] **Step 21.2: Add the `no-default-features` job**
+- [x] **Step 21.2: Add the `no-default-features` job**
 
 Edit `.github/workflows/ci.yml`. Add a new job alongside the existing `fmt`, `clippy`, `test` jobs:
 
@@ -3802,7 +3802,7 @@ Edit `.github/workflows/ci.yml`. Add a new job alongside the existing `fmt`, `cl
 
 (The `--lib` is to skip integration tests that depend on `serde`.)
 
-- [ ] **Step 21.3: Validate YAML locally**
+- [x] **Step 21.3: Validate YAML locally**
 
 ```bash
 python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))" 2>&1
@@ -3810,7 +3810,7 @@ python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))" 2>&1
 
 Expected: no output.
 
-- [ ] **Step 21.4: Run the new check locally**
+- [x] **Step 21.4: Run the new check locally**
 
 ```bash
 cargo build -p tau-domain --no-default-features
@@ -3819,7 +3819,7 @@ cargo test -p tau-domain --no-default-features --lib
 
 Expected: success.
 
-- [ ] **Step 21.5: Stage and commit**
+- [x] **Step 21.5: Stage and commit**
 
 ```bash
 git add .github/workflows/ci.yml
@@ -3838,7 +3838,7 @@ Refs: spec §5, ADR-0002 escape-hatch policy implementation"
 **Files:**
 - Create: `docs/explanation/escape-hatches.md`
 
-- [ ] **Step 22.1: Create the registry file**
+- [x] **Step 22.1: Create the registry file**
 
 Create `/Users/titouanlebocq/code/tau/docs/explanation/escape-hatches.md`:
 
@@ -3873,7 +3873,7 @@ mechanically.
 (none yet)
 ````
 
-- [ ] **Step 22.2: Verify the file is well-formed**
+- [x] **Step 22.2: Verify the file is well-formed**
 
 ```bash
 ls -la docs/explanation/escape-hatches.md
@@ -3882,7 +3882,7 @@ wc -l docs/explanation/escape-hatches.md
 
 Expected: file exists, ~30 lines.
 
-- [ ] **Step 22.3: Stage and commit**
+- [x] **Step 22.3: Stage and commit**
 
 ```bash
 git add docs/explanation/escape-hatches.md
@@ -3906,7 +3906,7 @@ Refs: ADR-0002, spec §5, §6"
 - Create: `.github/pull_request_template.md`
 - Modify: `CONTRIBUTING.md`
 
-- [ ] **Step 23.1: Write `escape_hatch_registry.rs`**
+- [x] **Step 23.1: Write `escape_hatch_registry.rs`**
 
 ```rust
 //! Mechanical enforcement of the escape-hatch registry rule from ADR-0002.
@@ -4068,7 +4068,7 @@ fn every_escape_hatch_is_registered() {
 }
 ```
 
-- [ ] **Step 23.2: Run the registry test**
+- [x] **Step 23.2: Run the registry test**
 
 ```bash
 cargo test -p tau-domain --test escape_hatch_registry --all-features
@@ -4076,7 +4076,7 @@ cargo test -p tau-domain --test escape_hatch_registry --all-features
 
 Expected: test passes. Source variants found: `Capability::Custom`, `MessagePayload::Custom`, `PackageKind::Custom`, `FailureKind::InternalError` (and the rustdoc on each links to the matching anchor).
 
-- [ ] **Step 23.3: Create the PR template**
+- [x] **Step 23.3: Create the PR template**
 
 Create `/Users/titouanlebocq/code/tau/.github/pull_request_template.md`:
 
@@ -4087,21 +4087,21 @@ Create `/Users/titouanlebocq/code/tau/.github/pull_request_template.md`:
 
 ## Test plan
 
-- [ ] Local `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --all-features` pass.
-- [ ] If CI behavior changes, the workflow file is updated and validated.
+- [x] Local `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --all-features` pass.
+- [x] If CI behavior changes, the workflow file is updated and validated.
 
 ## Escape-hatch checklist
 
-- [ ] This PR does not add, modify, or remove a `Custom` / `InternalError` escape hatch, OR
-- [ ] `docs/explanation/escape-hatches.md` is updated with the corresponding entry (added / promoted / removed). The CI registry-coverage test (`crates/tau-domain/tests/escape_hatch_registry.rs`) enforces this.
+- [x] This PR does not add, modify, or remove a `Custom` / `InternalError` escape hatch, OR
+- [x] `docs/explanation/escape-hatches.md` is updated with the corresponding entry (added / promoted / removed). The CI registry-coverage test (`crates/tau-domain/tests/escape_hatch_registry.rs`) enforces this.
 
 ## ADR check
 
-- [ ] This PR does not require an ADR per QG18, OR
-- [ ] An ADR has been filed in `docs/decisions/` and is referenced here.
+- [x] This PR does not require an ADR per QG18, OR
+- [x] An ADR has been filed in `docs/decisions/` and is referenced here.
 ```
 
-- [ ] **Step 23.4: Append the escape-hatch section to `CONTRIBUTING.md`**
+- [x] **Step 23.4: Append the escape-hatch section to `CONTRIBUTING.md`**
 
 Read the current `CONTRIBUTING.md` to confirm structure, then append a new section before the License section:
 
@@ -4133,7 +4133,7 @@ add the row to the registry's "Active" table; copy the rustdoc
 convention from existing variants.
 ```
 
-- [ ] **Step 23.5: Run all checks**
+- [x] **Step 23.5: Run all checks**
 
 ```bash
 cargo test -p tau-domain --all-targets --all-features
@@ -4143,7 +4143,7 @@ cargo fmt --all -- --check
 
 Expected: green.
 
-- [ ] **Step 23.6: Stage and commit**
+- [x] **Step 23.6: Stage and commit**
 
 ```bash
 git add crates/tau-domain/tests/escape_hatch_registry.rs .github/pull_request_template.md CONTRIBUTING.md
@@ -4168,7 +4168,7 @@ Refs: ADR-0002 §6, spec §6 bullets 5+7"
 - Create: `docs/decisions/0002-manifest-format.md`
 - Modify: `docs/decisions/README.md` (add ADR-0002 to index)
 
-- [ ] **Step 24.1: Create ADR-0002**
+- [x] **Step 24.1: Create ADR-0002**
 
 Create `/Users/titouanlebocq/code/tau/docs/decisions/0002-manifest-format.md`:
 
@@ -4320,7 +4320,7 @@ prompt (template), and CI gate (test).
   materialize; pre-1.0 SemVer makes the loosen-later path cheap.
 ```
 
-- [ ] **Step 24.2: Update the ADR index**
+- [x] **Step 24.2: Update the ADR index**
 
 Open `/Users/titouanlebocq/code/tau/docs/decisions/README.md` and add a row to the Index table:
 
@@ -4328,7 +4328,7 @@ Open `/Users/titouanlebocq/code/tau/docs/decisions/README.md` and add a row to t
 | [0002](0002-manifest-format.md) | Manifest format, capability evolution, escape-hatch policy | Accepted |
 ```
 
-- [ ] **Step 24.3: Verify links resolve**
+- [x] **Step 24.3: Verify links resolve**
 
 ```bash
 test -f docs/decisions/0002-manifest-format.md && echo OK
@@ -4336,7 +4336,7 @@ test -f docs/decisions/0002-manifest-format.md && echo OK
 
 Expected: `OK`.
 
-- [ ] **Step 24.4: Run the registry test once more (it should still pass)**
+- [x] **Step 24.4: Run the registry test once more (it should still pass)**
 
 ```bash
 cargo test -p tau-domain --test escape_hatch_registry --all-features
@@ -4344,7 +4344,7 @@ cargo test -p tau-domain --test escape_hatch_registry --all-features
 
 Expected: pass.
 
-- [ ] **Step 24.5: Stage and commit**
+- [x] **Step 24.5: Stage and commit**
 
 ```bash
 git add docs/decisions/0002-manifest-format.md docs/decisions/README.md
@@ -4365,7 +4365,7 @@ Refs: QG18, QG11, G4, G14, spec §6"
 
 **No file changes. No commit.** Mirrors Plan 1 Task 16.
 
-- [ ] **Step 25.1: Confirm directory structure**
+- [x] **Step 25.1: Confirm directory structure**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -4395,7 +4395,7 @@ echo "structure check complete"
 
 Expected: only `structure check complete` — no `MISSING:` lines.
 
-- [ ] **Step 25.2: Run the full local CI equivalent**
+- [x] **Step 25.2: Run the full local CI equivalent**
 
 ```bash
 cargo fmt --all -- --check && \
@@ -4415,7 +4415,7 @@ Expected last line: `ALL CHECKS PASS`. Common failure modes:
 - `test --doc` fails on `missing_docs`: confirm every public item has a `///` doc comment.
 - registry test fails: a Custom/InternalError variant was added without a rustdoc link or a registry entry.
 
-- [ ] **Step 25.3: Verify the commit log**
+- [x] **Step 25.3: Verify the commit log**
 
 ```bash
 git log --oneline | head -25
@@ -4423,7 +4423,7 @@ git log --oneline | head -25
 
 Expected: a clean series of Conventional Commits prefixed with `build:`, `feat(tau-domain):`, `test(tau-domain):`, `docs:`, `docs(adr):`, `ci:`. ~24 commits since Plan 1's last commit.
 
-- [ ] **Step 25.4: Push to origin**
+- [x] **Step 25.4: Push to origin**
 
 ```bash
 git push origin main
@@ -4437,7 +4437,7 @@ gh run watch
 
 Expected: all jobs (`fmt`, `clippy`, `test` matrix, `no-default-features`) complete green on Linux + macOS. Windows is non-blocking per G15.
 
-- [ ] **Step 25.5: Confirm green status**
+- [x] **Step 25.5: Confirm green status**
 
 ```bash
 gh run list --workflow ci.yml --limit 1
@@ -4451,13 +4451,13 @@ Expected: most recent run shows `completed  success`.
 
 **No commit.** Per QG22, ADR-0002 needs a 24-hour wait between drafting and final sign-off.
 
-- [ ] **Step 26.1: Note the time of the ADR-0002 commit**
+- [x] **Step 26.1: Note the time of the ADR-0002 commit**
 
 ```bash
 git log -1 --format=%cI -- docs/decisions/0002-manifest-format.md
 ```
 
-- [ ] **Step 26.2: Wait at least until the next calendar day**
+- [x] **Step 26.2: Wait at least until the next calendar day**
 
 Use the time productively per QG22:
 - Reread ADR-0002 with fresh eyes from a logged-out browser.
@@ -4466,7 +4466,7 @@ Use the time productively per QG22:
 
 If you find issues, file an issue tagged `adr-0002-followup` rather than amending the ADR commit.
 
-- [ ] **Step 26.3: Confirm sign-off (no file change)**
+- [x] **Step 26.3: Confirm sign-off (no file change)**
 
 After the wait elapses and you're satisfied with the ADR contents, the ADR's status remains `Accepted` (set when committed). No further action — ADR-0002 is now part of the durable history.
 
@@ -4481,13 +4481,13 @@ sub-project. Plan 2 finishes the tau-domain sub-project; "acceptance"
 is *after* the overnight delay, not at the moment Task 25 turns CI
 green.
 
-- [ ] **Step 27.1: Note the time of the last commit**
+- [x] **Step 27.1: Note the time of the last commit**
 
 ```bash
 git log -1 --format=%cI
 ```
 
-- [ ] **Step 27.2: Wait at least until the next calendar day**
+- [x] **Step 27.2: Wait at least until the next calendar day**
 
 Use the time productively:
 - Read the ROADMAP again with fresh eyes — does sub-project 2 (tau-ports) still feel like the right next step?
@@ -4497,7 +4497,7 @@ Use the time productively:
 If you find something to change, file an issue tagged
 `tau-domain-followup` rather than amending the sub-project's commits.
 
-- [ ] **Step 27.3: Sign off Plan 2**
+- [x] **Step 27.3: Sign off Plan 2**
 
 When the overnight delay has elapsed and you have no findings (or have
 filed issues for findings):
