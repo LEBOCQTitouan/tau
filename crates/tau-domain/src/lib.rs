@@ -8,6 +8,7 @@
 pub mod agent;
 pub mod error;
 pub mod id;
+pub mod message;
 pub mod package;
 pub mod value;
 pub mod version;
@@ -17,6 +18,7 @@ pub use error::{
     AgentIdError, PackageKindError, PackageManifestError, PackageNameError, PackageSourceError,
 };
 pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
+pub use message::{Address, Message, MessagePayload};
 pub use package::{
     kinds, AgentCapability, Capability, FsCapability, GitLocation, NetCapability, PackageDep,
     PackageId, PackageKind, PackageManifest, PackageSource, ProcessCapability, UncheckedManifest,
