@@ -21,7 +21,8 @@ pub mod storage;
 
 pub use error::{KeyError, LlmError, NamespaceError, SandboxError, StorageError, ToolError};
 pub use llm::{
-    CompletionChunk, CompletionRequest, CompletionResponse, CompletionStream, ContentBlock,
-    LlmBackend, LlmProviderMessage, StopReason, TokenUsage, ToolChoice, ToolSpec, ToolUse,
+    batch_to_stream, stream_to_batch, CompletionChunk, CompletionRequest, CompletionResponse,
+    CompletionStream, ContentBlock, LlmBackend, LlmProviderMessage, StopReason, TokenUsage,
+    ToolChoice, ToolSpec, ToolUse, ToolUseAccumulator,
 };
 pub use storage::{Key, Namespace};

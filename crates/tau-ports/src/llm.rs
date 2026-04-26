@@ -304,3 +304,383 @@ pub trait LlmBackend: Send + Sync {
     /// `Ok(batch_to_stream(self.complete(req).await?))` (helper in Task 7).
     async fn stream(&self, req: CompletionRequest) -> Result<CompletionStream, LlmError>;
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Convert a batch [`CompletionResponse`] into a [`CompletionStream`] that
+/// yields the equivalent chunks: zero-or-one [`CompletionChunk::Text`]
+/// (only when `resp.text` is non-empty), one [`CompletionChunk::ToolUse`]
+/// per entry in `resp.tool_uses` (in order), and one terminal
+/// [`CompletionChunk::Finish`] carrying `resp.stop_reason` and `resp.usage`.
+///
+/// Plugin authors with batch-only SDKs use this in their
+/// [`LlmBackend::stream`] impl: `Ok(batch_to_stream(self.complete(req).await?))`.
+///
+/// # Example
+///
+/// ```ignore
+/// // Illustrative; `CompletionResponse` is `#[non_exhaustive]` so external
+/// // callers must build it via the data-types builder added in T5.
+/// let resp = /* CompletionResponse */;
+/// let stream = tau_ports::batch_to_stream(resp);
+/// ```
+pub fn batch_to_stream(resp: CompletionResponse) -> CompletionStream {
+    let CompletionResponse {
+        text,
+        tool_uses,
+        stop_reason,
+        usage,
+    } = resp;
+
+    let mut chunks: Vec<Result<CompletionChunk, LlmError>> = Vec::new();
+    if !text.is_empty() {
+        chunks.push(Ok(CompletionChunk::Text { delta: text }));
+    }
+    for tu in tool_uses {
+        chunks.push(Ok(CompletionChunk::ToolUse(tu)));
+    }
+    chunks.push(Ok(CompletionChunk::Finish { stop_reason, usage }));
+
+    Box::pin(VecStream {
+        items: chunks.into_iter(),
+    })
+}
+
+/// Adapter from a `Vec` of pre-computed items into a `Stream`. Used by
+/// [`batch_to_stream`] to avoid pulling in `futures` as a runtime dep.
+struct VecStream<T> {
+    items: std::vec::IntoIter<T>,
+}
+
+impl<T> Stream for VecStream<T>
+where
+    T: Unpin,
+{
+    type Item = T;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::task::Poll::Ready(self.get_mut().items.next())
+    }
+}
+
+/// Consume a [`CompletionStream`] and reassemble it into a
+/// [`CompletionResponse`].
+///
+/// Concatenates [`CompletionChunk::Text`] deltas in order, collects
+/// [`CompletionChunk::ToolUse`] blocks in order, and captures the final
+/// [`CompletionChunk::Finish`]'s `stop_reason` and `usage`.
+///
+/// Returns [`LlmError::Stream`] if the stream ends without emitting a
+/// `Finish` chunk. Mid-stream errors propagate as-is.
+///
+/// Plugin authors with streaming-only SDKs use this in their
+/// [`LlmBackend::complete`] impl: `stream_to_batch(self.stream(req).await?).await`.
+///
+/// # Example
+///
+/// ```ignore
+/// // Illustrative; building a `CompletionStream` requires constructing
+/// // `#[non_exhaustive]` types via the data-types builder added in T5.
+/// let stream: tau_ports::CompletionStream = /* ... */;
+/// let resp = tau_ports::stream_to_batch(stream).await?;
+/// ```
+pub async fn stream_to_batch(mut stream: CompletionStream) -> Result<CompletionResponse, LlmError> {
+    let mut text = String::new();
+    let mut tool_uses: Vec<ToolUse> = Vec::new();
+    let mut finish: Option<(StopReason, Option<TokenUsage>)> = None;
+
+    loop {
+        let next = std::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await;
+        match next {
+            None => break,
+            Some(Err(e)) => return Err(e),
+            Some(Ok(CompletionChunk::Text { delta })) => text.push_str(&delta),
+            Some(Ok(CompletionChunk::ToolUse(tu))) => tool_uses.push(tu),
+            Some(Ok(CompletionChunk::Finish { stop_reason, usage })) => {
+                finish = Some((stop_reason, usage));
+                // Per spec: Finish is the terminal marker; stop here so any
+                // post-Finish items would be a stream-shape bug we don't mask.
+                break;
+            }
+        }
+    }
+
+    let (stop_reason, usage) = finish.ok_or_else(|| LlmError::Stream {
+        message: "stream ended without Finish chunk".into(),
+    })?;
+
+    Ok(CompletionResponse {
+        text,
+        tool_uses,
+        stop_reason,
+        usage,
+    })
+}
+
+/// Helper for plugin authors whose streaming SDKs emit JSON tool-use input
+/// deltas (e.g. Anthropic's `input_json_delta` events).
+///
+/// Call [`ToolUseAccumulator::append`] for each delta event, then
+/// [`ToolUseAccumulator::finalize_with`] when the tool-use block closes
+/// to obtain a fully-assembled [`ToolUse`].
+///
+/// `finalize_with` takes a parse callback so plugin authors plug in their
+/// preferred JSON parser. tau-ports has no runtime `serde_json` dependency;
+/// the callback returns a `Result<Value, String>` so any parser crate can
+/// feed in. On `Err(message)` the accumulator returns
+/// [`LlmError::Stream`] wrapping the parse-error message.
+///
+/// # Example
+///
+/// ```ignore
+/// // Illustrative; depends on `serde_json` (a tau-ports dev-dep, not a
+/// // runtime dep), so this doctest is `ignore`-marked.
+/// use tau_ports::ToolUseAccumulator;
+///
+/// let mut acc = ToolUseAccumulator::new("toolu_01".into(), "search".into());
+/// acc.append(r#"{"q":"#);
+/// acc.append(r#""hello"}"#);
+///
+/// let tool_use = acc
+///     .finalize_with(|s| {
+///         serde_json::from_str::<tau_domain::Value>(s).map_err(|e| e.to_string())
+///     })
+///     .unwrap();
+/// ```
+#[derive(Debug, Clone)]
+pub struct ToolUseAccumulator {
+    id: String,
+    name: String,
+    input_buffer: String,
+}
+
+impl ToolUseAccumulator {
+    /// Create a fresh accumulator for the tool-use block identified by
+    /// `id` (provider-supplied; round-trips to
+    /// [`LlmProviderMessage::ToolResult::tool_use_id`]) and named `name`
+    /// (must match a [`ToolSpec::name`] in the originating request).
+    pub fn new(id: String, name: String) -> Self {
+        Self {
+            id,
+            name,
+            input_buffer: String::new(),
+        }
+    }
+
+    /// Append a raw JSON delta fragment to the input buffer. Plugin
+    /// authors call this once per provider-specific delta event.
+    pub fn append(&mut self, json_delta: &str) {
+        self.input_buffer.push_str(json_delta);
+    }
+
+    /// Borrow the current input buffer (for diagnostics or partial-parse
+    /// inspection).
+    pub fn input_buffer(&self) -> &str {
+        &self.input_buffer
+    }
+
+    /// Finalize into a [`ToolUse`] using the supplied JSON parser.
+    ///
+    /// `parse` is called once with the accumulated buffer; it returns
+    /// `Ok(Value)` for a successful parse or `Err(message)` to surface a
+    /// parse failure as [`LlmError::Stream`].
+    pub fn finalize_with<F>(self, parse: F) -> Result<ToolUse, LlmError>
+    where
+        F: FnOnce(&str) -> Result<Value, String>,
+    {
+        let input = parse(&self.input_buffer).map_err(|message| LlmError::Stream {
+            message: format!("tool_use input JSON parse failed: {message}"),
+        })?;
+        Ok(ToolUse {
+            id: self.id,
+            name: self.name,
+            input,
+        })
+    }
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    use std::pin::Pin;
+
+    use futures_core::Stream;
+
+    /// Drain a `CompletionStream` into a `Vec<CompletionChunk>` for
+    /// assertion. Errors short-circuit.
+    async fn drain(mut stream: CompletionStream) -> Result<Vec<CompletionChunk>, LlmError> {
+        let mut out = Vec::new();
+        loop {
+            let next: Option<Result<CompletionChunk, LlmError>> =
+                std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await;
+            match next {
+                None => break,
+                Some(Ok(c)) => out.push(c),
+                Some(Err(e)) => return Err(e),
+            }
+        }
+        Ok(out)
+    }
+
+    #[tokio::test]
+    async fn batch_to_stream_to_batch_empty_round_trip() {
+        let resp = CompletionResponse {
+            text: String::new(),
+            tool_uses: vec![],
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+        };
+
+        let stream = batch_to_stream(resp);
+        let chunks = drain(stream).await.expect("drain");
+        // Empty text => no Text chunk; no tool_uses => no ToolUse chunks;
+        // exactly one Finish.
+        assert_eq!(chunks.len(), 1);
+        let CompletionChunk::Finish { stop_reason, usage } = &chunks[0] else {
+            panic!("expected Finish, got {:?}", chunks[0]);
+        };
+        assert_eq!(*stop_reason, StopReason::EndTurn);
+        assert!(usage.is_none());
+
+        // Round-trip via stream_to_batch.
+        let resp2 = stream_to_batch(batch_to_stream(CompletionResponse {
+            text: String::new(),
+            tool_uses: vec![],
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+        }))
+        .await
+        .expect("stream_to_batch");
+        assert_eq!(resp2.text, "");
+        assert!(resp2.tool_uses.is_empty());
+        assert_eq!(resp2.stop_reason, StopReason::EndTurn);
+        assert!(resp2.usage.is_none());
+    }
+
+    #[tokio::test]
+    async fn batch_to_stream_to_batch_text_round_trip() {
+        let resp = CompletionResponse {
+            text: "hello world".into(),
+            tool_uses: vec![],
+            stop_reason: StopReason::MaxTokens,
+            usage: Some(TokenUsage {
+                input_tokens: 7,
+                output_tokens: 11,
+            }),
+        };
+
+        let stream = batch_to_stream(resp);
+        let chunks = drain(stream).await.expect("drain");
+        // One Text + one Finish.
+        assert_eq!(chunks.len(), 2);
+        let CompletionChunk::Text { delta } = &chunks[0] else {
+            panic!("expected Text, got {:?}", chunks[0]);
+        };
+        assert_eq!(delta, "hello world");
+
+        // Round-trip.
+        let resp2 = stream_to_batch(batch_to_stream(CompletionResponse {
+            text: "hello world".into(),
+            tool_uses: vec![],
+            stop_reason: StopReason::MaxTokens,
+            usage: Some(TokenUsage {
+                input_tokens: 7,
+                output_tokens: 11,
+            }),
+        }))
+        .await
+        .expect("stream_to_batch");
+        assert_eq!(resp2.text, "hello world");
+        assert!(resp2.tool_uses.is_empty());
+        assert_eq!(resp2.stop_reason, StopReason::MaxTokens);
+        assert_eq!(
+            resp2.usage,
+            Some(TokenUsage {
+                input_tokens: 7,
+                output_tokens: 11,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_to_stream_to_batch_tool_use_round_trip() {
+        let tu1 = ToolUse {
+            id: "toolu_a".into(),
+            name: "search".into(),
+            input: Value::String("hello".into()),
+        };
+        let tu2 = ToolUse {
+            id: "toolu_b".into(),
+            name: "fetch".into(),
+            input: Value::String("world".into()),
+        };
+
+        let resp = CompletionResponse {
+            text: "preamble".into(),
+            tool_uses: vec![tu1.clone(), tu2.clone()],
+            stop_reason: StopReason::ToolUse,
+            usage: None,
+        };
+
+        let stream = batch_to_stream(resp);
+        let chunks = drain(stream).await.expect("drain");
+        // Text + ToolUse + ToolUse + Finish.
+        assert_eq!(chunks.len(), 4);
+
+        let resp2 = stream_to_batch(batch_to_stream(CompletionResponse {
+            text: "preamble".into(),
+            tool_uses: vec![tu1.clone(), tu2.clone()],
+            stop_reason: StopReason::ToolUse,
+            usage: None,
+        }))
+        .await
+        .expect("stream_to_batch");
+
+        assert_eq!(resp2.text, "preamble");
+        assert_eq!(resp2.tool_uses.len(), 2);
+        assert_eq!(resp2.tool_uses[0].id, "toolu_a");
+        assert_eq!(resp2.tool_uses[0].name, "search");
+        assert_eq!(resp2.tool_uses[1].id, "toolu_b");
+        assert_eq!(resp2.tool_uses[1].name, "fetch");
+        assert_eq!(resp2.stop_reason, StopReason::ToolUse);
+    }
+
+    #[test]
+    fn tool_use_accumulator_round_trip() {
+        let mut acc = ToolUseAccumulator::new("toolu_xyz".into(), "search".into());
+        acc.append(r#"{"q":"#);
+        acc.append(r#""hello world"}"#);
+
+        assert_eq!(acc.input_buffer(), r#"{"q":"hello world"}"#);
+
+        let tu = acc
+            .finalize_with(|s| serde_json::from_str::<Value>(s).map_err(|e| e.to_string()))
+            .expect("finalize");
+
+        assert_eq!(tu.id, "toolu_xyz");
+        assert_eq!(tu.name, "search");
+        // Input is an object with one string field.
+        let Value::Object(map) = &tu.input else {
+            panic!("expected Value::Object, got {:?}", tu.input);
+        };
+        assert_eq!(map.get("q"), Some(&Value::String("hello world".into())));
+    }
+
+    #[test]
+    fn tool_use_accumulator_invalid_json() {
+        let mut acc = ToolUseAccumulator::new("toolu_bad".into(), "search".into());
+        acc.append(r#"{"unterminated":"#);
+
+        let err = acc
+            .finalize_with(|s| serde_json::from_str::<Value>(s).map_err(|e| e.to_string()))
+            .expect_err("should fail to parse");
+
+        assert!(matches!(err, LlmError::Stream { .. }), "got {err:?}");
+    }
+}
