@@ -6,7 +6,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use crate::error::PackageNameError;
+use crate::error::{AgentIdError, PackageNameError};
 
 /// A package name. ASCII kebab-case, must start with a lowercase letter,
 /// 1..=64 characters, character set `[a-z0-9-]`.
@@ -127,5 +127,107 @@ mod tests {
     fn display_round_trip() {
         let n = PackageName::from_str("fs-tools").unwrap();
         assert_eq!(n.to_string(), "fs-tools");
+    }
+}
+
+/// An agent identifier. ASCII kebab-case, must start with a lowercase letter,
+/// 1..=64 characters, character set `[a-z0-9-]`.
+///
+/// Same grammar as [`PackageName`]; separate type for clarity at call sites.
+///
+/// # Example
+///
+/// ```
+/// use tau_domain::AgentId;
+/// use std::str::FromStr;
+///
+/// let id = AgentId::from_str("researcher").unwrap();
+/// assert_eq!(id.as_str(), "researcher");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AgentId(String);
+
+impl AgentId {
+    /// The maximum permitted length, in bytes.
+    pub const MAX_LEN: usize = 64;
+
+    /// View as a `&str`.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for AgentId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl FromStr for AgentId {
+    type Err = AgentIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(AgentIdError::Empty);
+        }
+        if s.len() > Self::MAX_LEN {
+            return Err(AgentIdError::TooLong {
+                max: Self::MAX_LEN,
+                got: s.len(),
+            });
+        }
+        let mut chars = s.char_indices();
+        let (_, first) = chars.next().expect("length-checked above");
+        if !first.is_ascii_lowercase() {
+            return Err(AgentIdError::InvalidLeadingCharacter { ch: first });
+        }
+        for (pos, ch) in chars {
+            if !(ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-') {
+                return Err(AgentIdError::InvalidCharacter { ch, pos });
+            }
+        }
+        Ok(Self(s.to_owned()))
+    }
+}
+
+#[cfg(test)]
+mod agent_id_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_valid() {
+        for name in ["a", "researcher", "agent-123"] {
+            assert!(AgentId::from_str(name).is_ok());
+        }
+    }
+
+    #[test]
+    fn rejects_empty() {
+        assert_eq!(AgentId::from_str(""), Err(AgentIdError::Empty));
+    }
+
+    #[test]
+    fn rejects_too_long() {
+        let s = "a".repeat(65);
+        assert_eq!(
+            AgentId::from_str(&s),
+            Err(AgentIdError::TooLong { max: 64, got: 65 }),
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_leading() {
+        assert_eq!(
+            AgentId::from_str("1agent"),
+            Err(AgentIdError::InvalidLeadingCharacter { ch: '1' }),
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_mid_char() {
+        assert!(matches!(
+            AgentId::from_str("agent_x"),
+            Err(AgentIdError::InvalidCharacter { ch: '_', pos: 5 }),
+        ));
     }
 }

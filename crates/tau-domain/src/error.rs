@@ -47,3 +47,44 @@ pub enum PackageNameError {
         ch: char,
     },
 }
+
+/// Validation errors for [`crate::id::AgentId`].
+///
+/// # Example
+///
+/// ```
+/// use tau_domain::{AgentId, AgentIdError};
+/// use std::str::FromStr;
+///
+/// let err = AgentId::from_str("").unwrap_err();
+/// assert_eq!(err, AgentIdError::Empty);
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum AgentIdError {
+    /// The input was empty.
+    #[error("agent id is empty")]
+    Empty,
+    /// The input exceeded the 64-character cap.
+    #[error("agent id exceeds {max} characters: got {got}")]
+    TooLong {
+        /// Maximum permitted length.
+        max: usize,
+        /// Actual length of the input.
+        got: usize,
+    },
+    /// A character outside `[a-z0-9-]` was found mid-string.
+    #[error("agent id contains invalid character {ch:?} at byte {pos}")]
+    InvalidCharacter {
+        /// The offending character.
+        ch: char,
+        /// Byte position in the input string.
+        pos: usize,
+    },
+    /// The leading character was not an ASCII lowercase letter.
+    #[error("agent id must start with a letter, got {ch:?}")]
+    InvalidLeadingCharacter {
+        /// The first character of the input.
+        ch: char,
+    },
+}
