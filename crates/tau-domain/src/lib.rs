@@ -8,7 +8,14 @@
 pub mod error;
 pub mod id;
 pub mod value;
+pub mod version;
 
 pub use error::{AgentIdError, PackageNameError};
 pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
 pub use value::Value;
+pub use version::{Version, VersionReq};
+
+// External-crate re-exports for convenience: anything that takes a
+// `tau_domain::Url` should accept a `url::Url` from anywhere in the tree.
+pub use url::Url;
+pub use uuid::Uuid;
