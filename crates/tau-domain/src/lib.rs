@@ -13,7 +13,10 @@ pub mod version;
 
 pub use error::{AgentIdError, PackageKindError, PackageNameError, PackageSourceError};
 pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
-pub use package::{kinds, GitLocation, PackageDep, PackageId, PackageKind, PackageSource};
+pub use package::{
+    kinds, AgentCapability, Capability, FsCapability, GitLocation, NetCapability, PackageDep,
+    PackageId, PackageKind, PackageSource, ProcessCapability,
+};
 pub use value::Value;
 pub use version::{Version, VersionReq};
 
