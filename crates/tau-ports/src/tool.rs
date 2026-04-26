@@ -1,18 +1,21 @@
 //! Tool port — `kind = "tool"` plugin contracts.
 //!
-//! This module currently exports the supporting data types
+//! This module exports the [`Tool`] trait, the supporting data types
 //! ([`SessionContext`], [`ToolResult`], [`ToolContent`]) exchanged
-//! between tau-runtime and tool-plugin adapters. The `Tool` trait
-//! (T9) and the `StatelessTool` / `StatelessAdapter` pair (T10) land
-//! in subsequent tasks.
+//! between tau-runtime and tool-plugin adapters, and (in T10) the
+//! `StatelessTool` / `StatelessAdapter` pair for the common stateless
+//! case.
 
 use std::time::SystemTime;
 
 use tau_domain::{AgentInstanceId, Value};
 use uuid::Uuid;
 
+use crate::error::ToolError;
+use crate::llm::ToolSpec;
+
 /// Per-session context handed to a tool plugin when the runtime opens
-/// a new session (i.e. at `Tool::init`, added in T9).
+/// a new session (i.e. at [`Tool::init`]).
 ///
 /// `SessionContext` is `#[non_exhaustive]`: external callers cannot
 /// construct it via struct-literal syntax. Construction is performed
@@ -50,7 +53,7 @@ pub struct SessionContext {
     pub deadline: Option<SystemTime>,
 }
 
-/// Result of a single `Tool::invoke` call (added in T9).
+/// Result of a single [`Tool::invoke`] call.
 ///
 /// Mirrors the MCP tool-result shape: a list of typed content blocks
 /// plus an `is_error` flag. The flag distinguishes "the tool ran but
@@ -122,4 +125,46 @@ pub enum ToolContent {
         data: Value,
     },
     // Future: ImageRef { ... }, AudioRef { ... }, ResourceRef { ... }
+}
+
+/// Trait implemented by `kind = "tool"` plugins.
+///
+/// Stateful by design — see `crate::tool::StatelessAdapter` (T10) for the
+/// common stateless case.
+///
+/// # Error semantics
+///
+/// `Err(ToolError)` means *the tool itself failed to run* (session
+/// unhealthy, contract violation, internal bug). `Ok(ToolResult { is_error: true, ... })`
+/// means *the tool ran but the operation reports an error to the LLM*
+/// (file not found, HTTP failure, etc.). The runtime treats these
+/// differently: errors may trigger retry/agent-stop; semantic failures
+/// are surfaced to the agent's LLM via `MessagePayload::ToolError`.
+#[allow(async_fn_in_trait)]
+pub trait Tool: Send + Sync {
+    /// Per-session state. Use `()` for stateless tools (or use `StatelessAdapter`).
+    type Session: Send + 'static;
+
+    /// Stable name used for routing. SemVer-stable surface.
+    fn name(&self) -> &str;
+
+    /// JSON Schema describing the tool's input. Used both for runtime
+    /// validation and for surfacing to the LLM via
+    /// `CompletionRequest.tools`.
+    fn schema(&self) -> ToolSpec;
+
+    /// Open a session. Called once before any `invoke`.
+    async fn init(&self, ctx: SessionContext) -> Result<Self::Session, ToolError>;
+
+    /// Perform a single tool call within an open session.
+    async fn invoke(
+        &self,
+        session: &mut Self::Session,
+        args: Value,
+    ) -> Result<ToolResult, ToolError>;
+
+    /// Close the session gracefully. If the runtime drops the session
+    /// future (cancellation), `teardown` is NOT called — plugin authors
+    /// put critical cleanup in `Drop`.
+    async fn teardown(&self, session: Self::Session) -> Result<(), ToolError>;
 }

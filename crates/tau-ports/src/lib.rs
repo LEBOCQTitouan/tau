@@ -8,7 +8,7 @@
 //! tau-ports defines four trait families:
 //!
 //! - [`llm::LlmBackend`] — LLM provider plugins (`kind = "llm-backend"`).
-//! - `tool::Tool` — tool plugins (`kind = "tool"`).
+//! - [`tool::Tool`] — tool plugins (`kind = "tool"`).
 //! - `storage::Storage` — storage plugins (`kind = "storage"`).
 //! - `sandbox::Sandbox` — sandbox plugins (`kind = "sandbox"`); see the
 //!   module docs for the v0.1 PROVISIONAL caveat.
@@ -27,4 +27,4 @@ pub use llm::{
     ToolChoice, ToolSpec, ToolUse, ToolUseAccumulator,
 };
 pub use storage::{Key, Namespace};
-pub use tool::{SessionContext, ToolContent, ToolResult};
+pub use tool::{SessionContext, Tool, ToolContent, ToolResult};
