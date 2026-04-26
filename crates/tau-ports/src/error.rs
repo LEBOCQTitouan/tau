@@ -174,7 +174,7 @@ pub enum SandboxError {
     },
 }
 
-/// Errors returned by `crate::tool::Tool` implementations.
+/// Errors returned by [`crate::tool::Tool`] implementations.
 ///
 /// `ToolError` composes [`LlmError`] and [`StorageError`] via `#[from]` so
 /// tools that internally drive an LLM or storage backend can propagate via
