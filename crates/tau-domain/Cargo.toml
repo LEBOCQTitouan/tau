@@ -1,9 +1,27 @@
 [package]
 name = "tau-domain"
 description = "Core domain types for tau (messages, agents, packages, plugin descriptors)."
-version.workspace = true
-edition.workspace = true
+version.workspace      = true
+edition.workspace      = true
 rust-version.workspace = true
-license.workspace = true
-repository.workspace = true
-authors.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+
+[dependencies]
+thiserror = { workspace = true }
+semver    = { workspace = true }
+uuid      = { workspace = true }
+url       = { workspace = true }
+serde     = { workspace = true, optional = true }
+
+[features]
+default       = []
+serde         = ["dep:serde", "uuid/serde", "semver/serde", "url/serde"]
+test-fixtures = []
+
+[dev-dependencies]
+proptest    = { workspace = true }
+serde_json  = "1"
+toml        = "0.8"
+walkdir     = { workspace = true }

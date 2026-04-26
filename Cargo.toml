@@ -18,3 +18,12 @@ rust-version = "1.91"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/LEBOCQTitouan/tau"
 authors = ["Titouan Lebocq <75916953+LEBOCQTitouan@users.noreply.github.com>"]
+
+[workspace.dependencies]
+thiserror = "2"
+semver    = { version = "1" }
+uuid      = { version = "1", features = ["v7"] }
+url       = "2"
+serde     = { version = "1", features = ["derive"] }
+proptest  = "1"
+walkdir   = "2"
