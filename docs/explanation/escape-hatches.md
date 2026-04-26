@@ -18,6 +18,11 @@ mechanically.
 | <a id="messagepayload-custom"></a>`messagepayload-custom` | `MessagePayload::Custom { kind, body }` | Plugin-specific message kinds (MCP resources, skill-specific shapes) not yet enumerated. | When MCP plugin trait stabilizes (sub-project 2+), promote `mcp.*` shapes; same for skill-specific message kinds. | 1 |
 | <a id="packagekind-custom"></a>`packagekind-custom` | `PackageKind::Custom { kind }` | All package kinds go through `Custom` at v0.1; no typed variants exist. | When tau-ports lands plugin traits for LLM/Tool/Storage/Sandbox (sub-project 2), consider promoting matching `PackageKind` variants. | 1 |
 | <a id="failurekind-internalerror"></a>`failurekind-internalerror` | `FailureKind::InternalError` | Catch-all for failures not matching the v0.1 typed kinds (Crashed, BackendError, PolicyDenied, OutOfResources). tau-runtime hasn't yet emitted enough variety to identify recurring shapes. | When tau-runtime construction sites for `InternalError` exceed 3 distinct contexts, file an ADR proposing typed variants for the recurring shapes. | 1 |
+| <a id="llmerror-internal"></a>`llmerror-internal` | `LlmError::Internal { message }` | catch-all for plugin failures not matching named LLM-error variants | promote when 2+ distinct contexts surface | 2 |
+| <a id="toolerror-internal"></a>`toolerror-internal` | `ToolError::Internal { message }` | catch-all for plugin failures not matching named tool-error variants | promote when 2+ distinct contexts surface | 2 |
+| <a id="storageerror-internal"></a>`storageerror-internal` | `StorageError::Internal { message }` | catch-all for storage-plugin failures not matching named variants | promote when 2+ distinct contexts surface | 2 |
+| <a id="sandboxerror-internal"></a>`sandboxerror-internal` | `SandboxError::Internal { message }` | catch-all (provisional — sandbox trait itself is provisional at v0.1) | promote alongside Phase-1 sandbox impl | 2 |
+| <a id="completionrequest-provider-specific"></a>`completionrequest-provider-specific` | `CompletionRequest.provider_specific: BTreeMap<String, Value>` | provider-specific LLM call params (top_k, presence_penalty, response_format, etc.) not yet typed in core | promote a key when it appears in 2+ plugins | 2 |
 
 ## Promoted escape hatches
 
