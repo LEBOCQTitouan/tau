@@ -21,10 +21,12 @@
 pub mod error;
 pub(crate) mod git;
 pub mod lockfile;
+pub mod manifest;
 pub mod scope;
 
 pub use error::{
     GitError, InstallError, ManifestReadError, RegistryError, ScopeError, UninstallError,
 };
 pub use lockfile::{LockFile, LockedPackage, LockedVersion};
+pub use manifest::read_manifest;
 pub use scope::{Scope, ScopeConfig, ScopeKind};
