@@ -1,14 +1,17 @@
-//! Integration test: a programmatically-constructed manifest round-trips
-//! through `UncheckedManifest → validate → PackageManifest → serde_json
-//! → UncheckedManifest → validate`.
+//! Integration tests for `UncheckedManifest` / `PackageManifest` round-trips.
 //!
-//! Constructs the base manifest via `tau_domain::fixtures::any_unchecked_manifest()`
-//! because `UncheckedManifest` is `#[non_exhaustive]`, blocking struct-literal
-//! construction from outside the crate (E0639). The test then mutates the
-//! fields it cares about.
+//! Two tests are provided:
 //!
-//! The TOML-shaped sample below is kept (unused) as documentation of the
-//! intended manifest shape; the JSON path is the one actually exercised.
+//! 1. `programmatic_manifest_round_trips_through_serde_json` — constructs a
+//!    manifest programmatically (via `tau_domain::fixtures::any_unchecked_manifest()`
+//!    because `UncheckedManifest` is `#[non_exhaustive]`) and exercises the
+//!    JSON path: `validate → serde_json::to_string → serde_json::from_str → validate`.
+//!
+//! 2. `manifest_round_trips_through_toml` — parses the `SAMPLE` TOML constant
+//!    directly and exercises the full TOML path: `toml::from_str → validate →
+//!    toml::to_string_pretty → toml::from_str → validate`. This test is the
+//!    end-to-end proof that the natural TOML form works after ADR-0005 replaced
+//!    the old verbose `url::Url` serde with a Display/FromStr string form.
 
 #![cfg(feature = "test-fixtures")]
 
@@ -25,18 +28,9 @@ version = "0.3.0"
 description = "Filesystem tools"
 authors = ["Acme <hi@acme.dev>"]
 license = "MIT OR Apache-2.0"
-dependencies = []
-
-[source]
-[source.Git]
-rev = "v0.3.0"
-[source.Git.location]
-[source.Git.location.Url]
-"https" = "_"
-# A placeholder; the test below uses programmatic construction to avoid
-# TOML representation gymnastics for the url::Url internals.
-
+source = "https://example.com/fs.git#v0.3.0"
 kind = "tool"
+dependencies = []
 capabilities = []
 "#;
 
@@ -62,8 +56,38 @@ fn programmatic_manifest_round_trips_through_serde_json() {
     assert_eq!(revalidated.description(), "Filesystem tools");
     assert_eq!(revalidated.version().to_string(), "0.3.0");
     assert_eq!(revalidated.license(), Some("MIT OR Apache-2.0"));
+}
 
-    // Reference the SAMPLE constant so it's not dead code; TOML round-trip
-    // for url::Url internals is finicky and out of scope for this test.
-    let _ = SAMPLE;
+#[test]
+fn manifest_round_trips_through_toml() {
+    let unchecked: UncheckedManifest = toml::from_str(SAMPLE).expect("parse SAMPLE");
+
+    assert_eq!(unchecked.name.as_str(), "fs-tools");
+    assert_eq!(
+        unchecked.source.to_string(),
+        "https://example.com/fs.git#v0.3.0"
+    );
+    assert!(
+        matches!(&unchecked.kind, PackageKind::Custom { kind } if kind == "tool"),
+        "expected PackageKind::Custom {{ kind: \"tool\" }}, got {:?}",
+        unchecked.kind
+    );
+
+    let manifest: PackageManifest = unchecked.validate().expect("validate");
+
+    let toml_str = toml::to_string_pretty(&manifest).expect("serialize");
+    let back: UncheckedManifest = toml::from_str(&toml_str).expect("re-parse");
+    let revalidated = back.validate().expect("re-validate");
+
+    assert_eq!(revalidated.name().as_str(), "fs-tools");
+    assert_eq!(revalidated.version().to_string(), "0.3.0");
+    assert_eq!(
+        revalidated.source().to_string(),
+        "https://example.com/fs.git#v0.3.0"
+    );
+    assert!(
+        matches!(revalidated.kind(), PackageKind::Custom { kind } if kind == "tool"),
+        "kind did not round-trip: {:?}",
+        revalidated.kind()
+    );
 }
