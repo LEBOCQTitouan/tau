@@ -33,7 +33,7 @@ use std::time::SystemTime;
 use fs4::FileExt;
 use tau_domain::{kinds, Capability, PackageName, PackageSource, Version};
 
-use crate::error::InstallError;
+use crate::error::{InstallError, UninstallError};
 use crate::git::Git;
 use crate::lockfile::{LockFile, LockedPackage, LockedVersion};
 use crate::manifest::read_manifest;
@@ -375,6 +375,143 @@ fn warn_non_namespaced_custom_capabilities(manifest: &tau_domain::PackageManifes
     }
 }
 
+/// Uninstall a package from `scope`.
+///
+/// If `version` is `None`, removes ALL installed versions and the
+/// lockfile entry. If `Some`, removes just that version directory
+/// and updates the lockfile. If the removed version was the active
+/// version, promotes the highest remaining (semver-sorted) version
+/// as active; if no versions remain, the package entry is removed
+/// entirely.
+///
+/// # Errors
+///
+/// - [`UninstallError::NotInstalled`] — the package isn't recorded
+///   in the lockfile at all.
+/// - [`UninstallError::VersionNotInstalled`] — the package is
+///   installed but not at the requested version.
+/// - [`UninstallError::Io`] — file-system removal failed.
+/// - [`UninstallError::Locked`] — the per-scope advisory file lock
+///   is held by another process (we currently always block on the
+///   lock; this is reserved for future non-blocking flavors).
+/// - [`UninstallError::Registry`] — lockfile load/save failed.
+/// - [`UninstallError::Scope`] — scope state directory issue.
+///
+/// # Example
+///
+/// ```ignore
+/// // `Scope` and `PackageName` are constructed via their respective APIs.
+/// use tau_pkg::{uninstall, Scope};
+/// use std::str::FromStr;
+///
+/// let scope = Scope::global().unwrap();
+/// let name: tau_domain::PackageName = "acme-tool".parse().unwrap();
+/// uninstall(&name, None, &scope).unwrap();
+/// ```
+pub fn uninstall(
+    name: &PackageName,
+    version: Option<&Version>,
+    scope: &Scope,
+) -> Result<(), UninstallError> {
+    let lock_path = scope.install_lock_path();
+    if let Some(parent) = lock_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| UninstallError::Io {
+            message: format!("creating lock directory {}: {e}", parent.display()),
+        })?;
+    }
+
+    let lock_file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| UninstallError::Io {
+            message: format!("opening uninstall lock {}: {e}", lock_path.display()),
+        })?;
+
+    FileExt::lock_exclusive(&lock_file).map_err(|e| UninstallError::Io {
+        message: format!("acquiring uninstall lock: {e}"),
+    })?;
+
+    let result = (|| -> Result<(), UninstallError> {
+        let lockfile_path = scope.lockfile_path();
+        let mut lf = LockFile::load(&lockfile_path)?;
+
+        if lf.find(name).is_none() {
+            return Err(UninstallError::NotInstalled {
+                name: name.as_str().to_owned(),
+            });
+        }
+
+        match version {
+            None => {
+                // Remove all versions of the package.
+                let pkg_dir = scope.packages_dir().join(name.as_str());
+                if pkg_dir.exists() {
+                    fs::remove_dir_all(&pkg_dir).map_err(|e| UninstallError::Io {
+                        message: format!("removing {}: {e}", pkg_dir.display()),
+                    })?;
+                }
+                lf.remove(name);
+            }
+            Some(v) => {
+                // Remove just one version.
+                let pkg = lf.find(name).expect("verified above");
+                let has_version = pkg.installed_versions.iter().any(|lv| lv.version == *v);
+                if !has_version {
+                    return Err(UninstallError::VersionNotInstalled {
+                        name: name.as_str().to_owned(),
+                        version: v.to_string(),
+                    });
+                }
+
+                let version_dir = scope.package_dir(name, v);
+                if version_dir.exists() {
+                    fs::remove_dir_all(&version_dir).map_err(|e| UninstallError::Io {
+                        message: format!("removing {}: {e}", version_dir.display()),
+                    })?;
+                }
+
+                // Mutate the lockfile entry: drop the LockedVersion, possibly
+                // promote a new active_version, or remove the package entirely.
+                let mut pkg_clone = lf.find(name).expect("verified above").clone();
+                pkg_clone.installed_versions.retain(|lv| lv.version != *v);
+
+                if pkg_clone.installed_versions.is_empty() {
+                    lf.remove(name);
+                } else {
+                    if pkg_clone.active_version == *v {
+                        // Promote the highest remaining version (semver-sorted).
+                        let highest = pkg_clone
+                            .installed_versions
+                            .iter()
+                            .map(|lv| lv.version.clone())
+                            .max()
+                            .expect("non-empty after retain check");
+                        pkg_clone.active_version = highest;
+                    }
+                    // Keep installed_versions sorted by semver for stable diffs.
+                    pkg_clone
+                        .installed_versions
+                        .sort_by(|a, b| a.version.cmp(&b.version));
+                    lf.upsert(pkg_clone);
+                }
+            }
+        }
+
+        // Top-level packages list also kept sorted for stable diffs.
+        lf.packages
+            .sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
+        lf.generated_at = SystemTime::now();
+        lf.save(&lockfile_path)?;
+        Ok(())
+    })();
+
+    let _ = FileExt::unlock(&lock_file);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,4 +538,172 @@ mod tests {
     // The bulk of install_with_options testing happens in Task 14's
     // integration test suite (tests/install_lifecycle.rs), which uses
     // file://-based git fixtures via `git init --bare`.
+
+    use std::time::{Duration, UNIX_EPOCH};
+
+    use tau_domain::Version;
+    use tempfile::TempDir;
+
+    use crate::lockfile::{LockFile, LockedPackage, LockedVersion};
+
+    fn make_scope_with_lockfile(tmp: &TempDir) -> Scope {
+        let global_path = tmp.path().join("tau-home");
+        Scope::global_at(global_path).unwrap()
+    }
+
+    fn fixture_locked_version(version_str: &str) -> LockedVersion {
+        LockedVersion {
+            version: version_str.parse().unwrap(),
+            rev: Some("main".into()),
+            resolved_commit: "0123456789abcdef0123456789abcdef01234567".into(),
+            sha256: String::new(),
+            installed_at: UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+        }
+    }
+
+    #[test]
+    fn uninstall_returns_not_installed_when_package_missing() {
+        let tmp = TempDir::new().unwrap();
+        let scope = make_scope_with_lockfile(&tmp);
+        let name: PackageName = "ghost-pkg".parse().unwrap();
+
+        let err = uninstall(&name, None, &scope).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::UninstallError::NotInstalled { .. }
+        ));
+    }
+
+    #[test]
+    fn uninstall_returns_version_not_installed_when_version_missing() {
+        let tmp = TempDir::new().unwrap();
+        let scope = make_scope_with_lockfile(&tmp);
+        let name: PackageName = "acme-tool".parse().unwrap();
+        let installed_version: Version = "1.0.0".parse().unwrap();
+        let missing_version: Version = "2.0.0".parse().unwrap();
+
+        let mut lf = LockFile::default();
+        lf.upsert(LockedPackage {
+            name: name.clone(),
+            active_version: installed_version.clone(),
+            source: "https://x.com/y.git".parse().unwrap(),
+            installed_versions: vec![fixture_locked_version("1.0.0")],
+        });
+        lf.save(&scope.lockfile_path()).unwrap();
+        fs::create_dir_all(scope.package_dir(&name, &installed_version)).unwrap();
+
+        let err = uninstall(&name, Some(&missing_version), &scope).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::UninstallError::VersionNotInstalled { .. }
+        ));
+    }
+
+    #[test]
+    fn uninstall_all_versions_removes_dir_and_lockfile_entry() {
+        let tmp = TempDir::new().unwrap();
+        let scope = make_scope_with_lockfile(&tmp);
+        let name: PackageName = "acme-tool".parse().unwrap();
+        let v1: Version = "1.0.0".parse().unwrap();
+        let v2: Version = "2.0.0".parse().unwrap();
+
+        let mut lf = LockFile::default();
+        lf.upsert(LockedPackage {
+            name: name.clone(),
+            active_version: v2.clone(),
+            source: "https://x.com/y.git".parse().unwrap(),
+            installed_versions: vec![
+                fixture_locked_version("1.0.0"),
+                fixture_locked_version("2.0.0"),
+            ],
+        });
+        lf.save(&scope.lockfile_path()).unwrap();
+        fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
+        fs::create_dir_all(scope.package_dir(&name, &v2)).unwrap();
+
+        uninstall(&name, None, &scope).unwrap();
+
+        assert!(!scope.packages_dir().join(name.as_str()).exists());
+        let reloaded = LockFile::load(&scope.lockfile_path()).unwrap();
+        assert!(reloaded.find(&name).is_none());
+    }
+
+    #[test]
+    fn uninstall_specific_version_promotes_highest_remaining() {
+        let tmp = TempDir::new().unwrap();
+        let scope = make_scope_with_lockfile(&tmp);
+        let name: PackageName = "acme-tool".parse().unwrap();
+        let v1: Version = "1.0.0".parse().unwrap();
+        let v2: Version = "2.0.0".parse().unwrap();
+        let v3: Version = "3.0.0".parse().unwrap();
+
+        let mut lf = LockFile::default();
+        lf.upsert(LockedPackage {
+            name: name.clone(),
+            active_version: v3.clone(),
+            source: "https://x.com/y.git".parse().unwrap(),
+            installed_versions: vec![
+                fixture_locked_version("1.0.0"),
+                fixture_locked_version("2.0.0"),
+                fixture_locked_version("3.0.0"),
+            ],
+        });
+        lf.save(&scope.lockfile_path()).unwrap();
+        fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
+        fs::create_dir_all(scope.package_dir(&name, &v2)).unwrap();
+        fs::create_dir_all(scope.package_dir(&name, &v3)).unwrap();
+
+        uninstall(&name, Some(&v3), &scope).unwrap();
+
+        assert!(scope.package_dir(&name, &v1).exists(), "v1 should remain");
+        assert!(scope.package_dir(&name, &v2).exists(), "v2 should remain");
+        assert!(!scope.package_dir(&name, &v3).exists(), "v3 should be gone");
+
+        let reloaded = LockFile::load(&scope.lockfile_path()).unwrap();
+        let pkg = reloaded.find(&name).unwrap();
+        assert_eq!(
+            pkg.active_version, v2,
+            "active_version should promote to v2 (highest remaining)"
+        );
+        assert_eq!(pkg.installed_versions.len(), 2);
+    }
+
+    #[test]
+    fn uninstall_specific_version_keeps_active_when_not_active() {
+        let tmp = TempDir::new().unwrap();
+        let scope = make_scope_with_lockfile(&tmp);
+        let name: PackageName = "acme-tool".parse().unwrap();
+        let v1: Version = "1.0.0".parse().unwrap();
+        let v2: Version = "2.0.0".parse().unwrap();
+
+        let mut lf = LockFile::default();
+        lf.upsert(LockedPackage {
+            name: name.clone(),
+            active_version: v2.clone(),
+            source: "https://x.com/y.git".parse().unwrap(),
+            installed_versions: vec![
+                fixture_locked_version("1.0.0"),
+                fixture_locked_version("2.0.0"),
+            ],
+        });
+        lf.save(&scope.lockfile_path()).unwrap();
+        fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
+        fs::create_dir_all(scope.package_dir(&name, &v2)).unwrap();
+
+        uninstall(&name, Some(&v1), &scope).unwrap();
+
+        let reloaded = LockFile::load(&scope.lockfile_path()).unwrap();
+        let pkg = reloaded.find(&name).unwrap();
+        assert_eq!(pkg.active_version, v2, "v2 should remain active");
+        assert_eq!(pkg.installed_versions.len(), 1, "only v2 should remain");
+        assert_eq!(pkg.installed_versions[0].version, v2);
+        assert!(
+            !scope.package_dir(&name, &v1).exists(),
+            "v1 dir should be gone"
+        );
+        assert!(
+            scope.package_dir(&name, &v2).exists(),
+            "v2 dir should remain"
+        );
+    }
 }

@@ -28,7 +28,7 @@ pub mod scope;
 pub use error::{
     GitError, InstallError, ManifestReadError, RegistryError, ScopeError, UninstallError,
 };
-pub use install::{install, install_with_options, InstallOptions, InstalledPackage};
+pub use install::{install, install_with_options, uninstall, InstallOptions, InstalledPackage};
 pub use lockfile::{LockFile, LockedPackage, LockedVersion};
 pub use manifest::read_manifest;
 pub use scope::{Scope, ScopeConfig, ScopeKind};
