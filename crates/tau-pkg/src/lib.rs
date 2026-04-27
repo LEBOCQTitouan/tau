@@ -19,9 +19,11 @@
 //! See `docs/decisions/0004-tau-pkg.md` for the design rationale.
 
 pub mod error;
+pub mod lockfile;
 pub mod scope;
 
 pub use error::{
     GitError, InstallError, ManifestReadError, RegistryError, ScopeError, UninstallError,
 };
+pub use lockfile::{LockFile, LockedPackage, LockedVersion};
 pub use scope::{Scope, ScopeConfig, ScopeKind};

@@ -25,7 +25,7 @@ use crate::error::ScopeError;
 /// Maximum `ScopeConfig::schema_version` this tau version recognizes.
 /// A `config.toml` with a higher value rejects with
 /// [`ScopeError::ConfigSchemaTooNew`].
-pub const MAX_SUPPORTED_SCHEMA_VERSION: u32 = 1;
+pub const MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION: u32 = 1;
 
 /// Distinguishes a global scope (default `~/.tau`) from a project scope
 /// (a `.tau/` directory inside a project's source tree).
@@ -84,7 +84,7 @@ impl ScopeConfig {
     /// crate version, schema version 1, and an empty defaults map.
     pub fn new(kind: ScopeKind) -> Self {
         Self {
-            schema_version: MAX_SUPPORTED_SCHEMA_VERSION,
+            schema_version: MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION,
             kind,
             created_at: SystemTime::now(),
             created_by_tau_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -93,15 +93,15 @@ impl ScopeConfig {
     }
 
     /// Parse a `ScopeConfig` from a TOML string. Validates
-    /// `schema_version` against [`MAX_SUPPORTED_SCHEMA_VERSION`].
+    /// `schema_version` against [`MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION`].
     pub fn read_from_str(text: &str) -> Result<Self, ScopeError> {
         let cfg: Self = toml::from_str(text).map_err(|e| ScopeError::ConfigParse {
             reason: e.to_string(),
         })?;
-        if cfg.schema_version > MAX_SUPPORTED_SCHEMA_VERSION {
+        if cfg.schema_version > MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION {
             return Err(ScopeError::ConfigSchemaTooNew {
                 found: cfg.schema_version,
-                supported: MAX_SUPPORTED_SCHEMA_VERSION,
+                supported: MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION,
             });
         }
         Ok(cfg)
