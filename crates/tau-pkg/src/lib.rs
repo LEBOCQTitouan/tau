@@ -23,6 +23,7 @@ pub(crate) mod git;
 pub mod install;
 pub mod lockfile;
 pub mod manifest;
+pub mod registry;
 pub mod scope;
 
 pub use error::{
@@ -31,4 +32,5 @@ pub use error::{
 pub use install::{install, install_with_options, uninstall, InstallOptions, InstalledPackage};
 pub use lockfile::{LockFile, LockedPackage, LockedVersion};
 pub use manifest::read_manifest;
+pub use registry::{get, list};
 pub use scope::{Scope, ScopeConfig, ScopeKind};
