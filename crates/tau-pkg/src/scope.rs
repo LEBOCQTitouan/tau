@@ -13,6 +13,9 @@
 //! and path accessors) lands in Task 5.
 
 use std::collections::BTreeMap;
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
@@ -112,9 +115,539 @@ impl ScopeConfig {
     }
 }
 
+/// A resolved scope: either the global `~/.tau` directory or a project-local
+/// `.tau/` directory discovered by walking up from the current working directory.
+///
+/// # Example
+///
+/// ```ignore
+/// // `Scope` is `#[non_exhaustive]`; constructed via `resolve`, `global`, or `new_project`.
+/// use std::path::Path;
+/// use tau_pkg::scope::Scope;
+///
+/// let scope = Scope::resolve(Path::new(".")).unwrap();
+/// println!("{:?}", scope.kind());
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Scope {
+    /// Scope root.
+    ///
+    /// - `Global`: `~/.tau` (or `$TAU_HOME` / `$XDG_DATA_HOME/tau`).
+    /// - `Project`: the project root directory (parent of `.tau/`).
+    path: PathBuf,
+    /// Local state directory.
+    ///
+    /// - `Global`: same as `path`.
+    /// - `Project`: `<path>/.tau`.
+    state_path: PathBuf,
+    /// Whether this is a global or project scope.
+    kind: ScopeKind,
+}
+
+impl Scope {
+    /// Resolve the active scope by walking up from `cwd`.
+    ///
+    /// Checks each ancestor (starting with `cwd` itself) for a `.tau/`
+    /// directory. Returns a `Project` scope on the first hit, or falls back
+    /// to `Scope::global()` if none is found.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use std::path::Path;
+    /// use tau_pkg::scope::Scope;
+    ///
+    /// let scope = Scope::resolve(Path::new(".")).unwrap();
+    /// println!("{:?}", scope.kind());
+    /// ```
+    pub fn resolve(cwd: &Path) -> Result<Self, ScopeError> {
+        if let Some((path, state_path)) = walk_up_for_dot_tau(cwd) {
+            return Ok(Self {
+                path,
+                state_path,
+                kind: ScopeKind::Project,
+            });
+        }
+        Self::global()
+    }
+
+    /// Materialize (or open) the global scope directory.
+    ///
+    /// Resolves the global path via precedence:
+    /// 1. `$TAU_HOME` if set and non-empty.
+    /// 2. `$XDG_DATA_HOME/tau` if `$XDG_DATA_HOME` is set and non-empty.
+    /// 3. `$HOME/.tau`.
+    ///
+    /// Creates the directory and a default `config.toml` if they are missing.
+    /// Returns `ScopeError::HomeNotFound` if none of the three env vars are set.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tau_pkg::scope::Scope;
+    ///
+    /// let scope = Scope::global().unwrap();
+    /// println!("{:?}", scope.path());
+    /// ```
+    pub fn global() -> Result<Self, ScopeError> {
+        let global_path = resolve_global_path()?;
+        Self::materialize_global(global_path)
+    }
+
+    /// Test-only constructor: materialize the global scope at a given path
+    /// without reading environment variables.
+    #[cfg(test)]
+    pub(crate) fn global_at(path: PathBuf) -> Result<Self, ScopeError> {
+        Self::materialize_global(path)
+    }
+
+    /// Test-only walk-up: same as `resolve` but uses `fallback_home` instead
+    /// of env-var lookup when no `.tau/` directory is found.
+    #[cfg(test)]
+    pub(crate) fn resolve_with_fallback(
+        cwd: &Path,
+        fallback_home: PathBuf,
+    ) -> Result<Self, ScopeError> {
+        if let Some((path, state_path)) = walk_up_for_dot_tau(cwd) {
+            return Ok(Self {
+                path,
+                state_path,
+                kind: ScopeKind::Project,
+            });
+        }
+        Self::materialize_global(fallback_home)
+    }
+
+    /// Internal helper shared by `global()` and `global_at()`.
+    fn materialize_global(global_path: PathBuf) -> Result<Self, ScopeError> {
+        // Ensure the directory exists.
+        fs::create_dir_all(&global_path).map_err(|e| ScopeError::Io {
+            message: e.to_string(),
+        })?;
+
+        // Verify it really is a directory (create_dir_all might succeed even
+        // if a symlink or regular file exists at the path in edge cases).
+        if !fs::metadata(&global_path)
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+        {
+            return Err(ScopeError::NotADirectory {
+                path: global_path.to_string_lossy().into_owned(),
+            });
+        }
+
+        // Write default config.toml if missing.
+        let config_path = global_path.join("config.toml");
+        if !config_path.exists() {
+            write_default_config(&config_path, ScopeKind::Global)?;
+        }
+
+        Ok(Self {
+            path: global_path.clone(),
+            state_path: global_path,
+            kind: ScopeKind::Global,
+        })
+    }
+
+    /// Materialize a new project scope at `<project_root>/.tau/`.
+    ///
+    /// Creates the `.tau/` directory (idempotent) and writes a default
+    /// `config.toml` if missing. Does **not** modify `.gitignore` — that
+    /// hint is printed by `tau init` (Phase 1, in `tau-cli`) instead.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use std::path::Path;
+    /// use tau_pkg::scope::Scope;
+    ///
+    /// let scope = Scope::new_project(Path::new("/my/project")).unwrap();
+    /// println!("{:?}", scope.state_path());
+    /// ```
+    pub fn new_project(project_root: &Path) -> Result<Self, ScopeError> {
+        // Verify that project_root exists and is a directory.
+        let meta = fs::metadata(project_root).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                ScopeError::Io {
+                    message: format!("project root not found: {}", project_root.display()),
+                }
+            } else {
+                ScopeError::Io {
+                    message: format!("stat-ing project root {}: {}", project_root.display(), e),
+                }
+            }
+        })?;
+        if !meta.is_dir() {
+            return Err(ScopeError::NotADirectory {
+                path: project_root.to_string_lossy().into_owned(),
+            });
+        }
+
+        let state_path = project_root.join(".tau");
+
+        // Create .tau/ directory (idempotent).
+        fs::create_dir_all(&state_path).map_err(|e| ScopeError::Io {
+            message: e.to_string(),
+        })?;
+
+        // Write default config.toml if missing.
+        let config_path = state_path.join("config.toml");
+        if !config_path.exists() {
+            write_default_config(&config_path, ScopeKind::Project)?;
+        }
+
+        Ok(Self {
+            path: project_root.to_path_buf(),
+            state_path,
+            kind: ScopeKind::Project,
+        })
+    }
+
+    /// Returns the scope root path.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Returns the local state directory path.
+    pub fn state_path(&self) -> &Path {
+        &self.state_path
+    }
+
+    /// Returns the `ScopeKind` for this scope.
+    pub fn kind(&self) -> ScopeKind {
+        self.kind
+    }
+
+    /// Returns the path to the lockfile: `<path>/tau-lock.toml`.
+    pub fn lockfile_path(&self) -> PathBuf {
+        self.path.join("tau-lock.toml")
+    }
+
+    /// Returns the path to the config file: `<state_path>/config.toml`.
+    pub fn config_path(&self) -> PathBuf {
+        self.state_path.join("config.toml")
+    }
+
+    /// Returns the path to the packages directory: `<state_path>/packages`.
+    pub fn packages_dir(&self) -> PathBuf {
+        self.state_path.join("packages")
+    }
+
+    /// Returns the path to the install advisory lock: `<state_path>/locks/install.lock`.
+    pub fn install_lock_path(&self) -> PathBuf {
+        self.state_path.join("locks").join("install.lock")
+    }
+
+    /// Returns the path to a specific package version:
+    /// `<state_path>/packages/<name>/<version>`.
+    pub fn package_dir(
+        &self,
+        name: &tau_domain::PackageName,
+        version: &tau_domain::Version,
+    ) -> PathBuf {
+        self.state_path
+            .join("packages")
+            .join(name.as_str())
+            .join(version.to_string())
+    }
+}
+
+/// Walk up from `cwd` looking for a `.tau/` directory.
+/// Returns `Some((scope_root, state_path))` on the first hit or `None` if no `.tau/` is found.
+fn walk_up_for_dot_tau(cwd: &Path) -> Option<(PathBuf, PathBuf)> {
+    for ancestor in cwd.ancestors() {
+        let candidate = ancestor.join(".tau");
+        if fs::metadata(&candidate)
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+        {
+            return Some((ancestor.to_path_buf(), candidate));
+        }
+    }
+    None
+}
+
+/// Resolve the global scope path from explicit env values (testable).
+///
+/// Precedence:
+/// 1. `tau_home` if set and non-empty.
+/// 2. `<xdg_data_home>/tau` if `xdg_data_home` is set and non-empty.
+/// 3. `<home>/.tau`.
+///
+/// Returns [`ScopeError::HomeNotFound`] if all three are missing/empty.
+fn resolve_global_path_from(
+    tau_home: Option<std::ffi::OsString>,
+    xdg_data_home: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Result<PathBuf, ScopeError> {
+    fn non_empty(s: Option<std::ffi::OsString>) -> Option<std::ffi::OsString> {
+        s.filter(|v| !v.is_empty())
+    }
+
+    if let Some(p) = non_empty(tau_home) {
+        return Ok(PathBuf::from(p));
+    }
+    if let Some(p) = non_empty(xdg_data_home) {
+        return Ok(PathBuf::from(p).join("tau"));
+    }
+    if let Some(home) = non_empty(home) {
+        return Ok(PathBuf::from(home).join(".tau"));
+    }
+    Err(ScopeError::HomeNotFound)
+}
+
+/// Determine the global tau data directory from env vars.
+///
+/// Precedence:
+/// 1. `$TAU_HOME`
+/// 2. `$XDG_DATA_HOME/tau`
+/// 3. `$HOME/.tau`
+fn resolve_global_path() -> Result<PathBuf, ScopeError> {
+    resolve_global_path_from(
+        env::var_os("TAU_HOME"),
+        env::var_os("XDG_DATA_HOME"),
+        env::var_os("HOME"),
+    )
+}
+
+/// Atomically write the default `ScopeConfig` TOML to `target_path`.
+///
+/// Uses a temp file in the same directory (so rename is atomic on POSIX).
+fn write_default_config(target_path: &Path, kind: ScopeKind) -> Result<(), ScopeError> {
+    let parent = target_path.parent().ok_or_else(|| ScopeError::Io {
+        message: format!(
+            "config path has no parent directory: {}",
+            target_path.display()
+        ),
+    })?;
+
+    let content = ScopeConfig::new(kind).to_toml_string()?;
+
+    // Write to a named temp file in the same directory, then rename.
+    let tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| ScopeError::Io {
+        message: e.to_string(),
+    })?;
+
+    fs::write(tmp.path(), content.as_bytes()).map_err(|e| ScopeError::Io {
+        message: format!("writing temp file: {e}"),
+    })?;
+
+    // Flush to disk before rename so a crash between write and rename
+    // leaves the target either non-existent or fully-written, never zero bytes.
+    tmp.as_file().sync_all().map_err(|e| ScopeError::Io {
+        message: format!("fsync temp file: {e}"),
+    })?;
+
+    tmp.persist(target_path).map_err(|e| ScopeError::Io {
+        message: format!("persisting config: {}", e.error),
+    })?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::fs;
+    use std::path::Path;
+
+    use tempfile::TempDir;
+
+    fn make_project_with_dot_tau(parent: &Path) -> std::path::PathBuf {
+        let project = parent.join("my-project");
+        fs::create_dir_all(project.join(".tau")).unwrap();
+        project
+    }
+
+    #[test]
+    fn scope_resolve_finds_dot_tau_in_cwd() {
+        let tmp = TempDir::new().unwrap();
+        let project = make_project_with_dot_tau(tmp.path());
+
+        let scope = Scope::resolve(&project).unwrap();
+        assert_eq!(scope.kind(), ScopeKind::Project);
+        assert_eq!(scope.path(), project.as_path());
+        assert_eq!(scope.state_path(), project.join(".tau").as_path());
+    }
+
+    #[test]
+    fn scope_resolve_walks_up_to_find_dot_tau() {
+        let tmp = TempDir::new().unwrap();
+        let project = make_project_with_dot_tau(tmp.path());
+        let nested = project.join("src").join("deep").join("nested");
+        fs::create_dir_all(&nested).unwrap();
+
+        let scope = Scope::resolve(&nested).unwrap();
+        assert_eq!(scope.kind(), ScopeKind::Project);
+        assert_eq!(scope.path(), project.as_path());
+    }
+
+    #[test]
+    fn scope_resolve_falls_back_to_global_when_no_dot_tau() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path().join("no-tau-here");
+        fs::create_dir_all(&cwd).unwrap();
+
+        // Use the test-only helper so we never touch real env vars.
+        let fake_home = tmp.path().join("fake-tau-home");
+        let scope = Scope::resolve_with_fallback(&cwd, fake_home.clone()).unwrap();
+        assert_eq!(scope.kind(), ScopeKind::Global);
+        assert_eq!(scope.path(), fake_home.as_path());
+    }
+
+    #[test]
+    fn scope_global_at_uses_passed_path_and_creates_dir() {
+        let tmp = TempDir::new().unwrap();
+        let fake_tau = tmp.path().join("fake-tau");
+
+        // Use the test-only `global_at` helper to avoid unsafe env mutations.
+        let scope = Scope::global_at(fake_tau.clone()).unwrap();
+        assert_eq!(scope.kind(), ScopeKind::Global);
+        assert_eq!(scope.path(), fake_tau.as_path());
+        assert_eq!(scope.state_path(), fake_tau.as_path());
+        assert!(fake_tau.is_dir(), "global() should create the directory");
+        assert!(
+            fake_tau.join("config.toml").is_file(),
+            "global() should write a default config.toml"
+        );
+    }
+
+    #[test]
+    fn resolve_global_path_from_prefers_tau_home() {
+        use std::ffi::OsString;
+        let p = resolve_global_path_from(
+            Some(OsString::from("/x/tau-home")),
+            Some(OsString::from("/x/xdg")),
+            Some(OsString::from("/x/home")),
+        )
+        .unwrap();
+        assert_eq!(p, std::path::Path::new("/x/tau-home"));
+    }
+
+    #[test]
+    fn resolve_global_path_from_falls_back_to_xdg() {
+        use std::ffi::OsString;
+        let p = resolve_global_path_from(
+            None,
+            Some(OsString::from("/x/xdg")),
+            Some(OsString::from("/x/home")),
+        )
+        .unwrap();
+        assert_eq!(p, std::path::Path::new("/x/xdg/tau"));
+    }
+
+    #[test]
+    fn resolve_global_path_from_falls_back_to_home() {
+        use std::ffi::OsString;
+        let p = resolve_global_path_from(None, None, Some(OsString::from("/x/home"))).unwrap();
+        assert_eq!(p, std::path::Path::new("/x/home/.tau"));
+    }
+
+    #[test]
+    fn resolve_global_path_from_treats_empty_as_unset() {
+        use std::ffi::OsString;
+        let p = resolve_global_path_from(
+            Some(OsString::from("")),
+            Some(OsString::from("")),
+            Some(OsString::from("/x/home")),
+        )
+        .unwrap();
+        assert_eq!(p, std::path::Path::new("/x/home/.tau"));
+    }
+
+    #[test]
+    fn resolve_global_path_from_returns_home_not_found_when_all_missing() {
+        let err = resolve_global_path_from(None, None, None).unwrap_err();
+        assert!(matches!(err, ScopeError::HomeNotFound));
+    }
+
+    #[test]
+    fn scope_new_project_creates_dot_tau_and_config() {
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path().join("a-fresh-project");
+        fs::create_dir_all(&project).unwrap();
+
+        let scope = Scope::new_project(&project).unwrap();
+        assert_eq!(scope.kind(), ScopeKind::Project);
+        assert_eq!(scope.path(), project.as_path());
+        assert_eq!(scope.state_path(), project.join(".tau").as_path());
+        assert!(
+            project.join(".tau").is_dir(),
+            "new_project should create .tau/"
+        );
+        assert!(
+            project.join(".tau").join("config.toml").is_file(),
+            "new_project should write a default config.toml"
+        );
+    }
+
+    #[test]
+    fn scope_new_project_does_not_modify_gitignore() {
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path().join("project-with-gitignore");
+        fs::create_dir_all(&project).unwrap();
+
+        // Pre-existing gitignore — verify Scope::new_project leaves it alone.
+        let gitignore = project.join(".gitignore");
+        fs::write(&gitignore, "target/\n").unwrap();
+
+        let _ = Scope::new_project(&project).unwrap();
+
+        let contents = fs::read_to_string(&gitignore).unwrap();
+        assert_eq!(
+            contents, "target/\n",
+            "Scope::new_project must not modify .gitignore"
+        );
+    }
+
+    #[test]
+    fn scope_path_accessors_global() {
+        let scope = Scope {
+            path: "/x/global".into(),
+            state_path: "/x/global".into(),
+            kind: ScopeKind::Global,
+        };
+        assert_eq!(scope.lockfile_path(), Path::new("/x/global/tau-lock.toml"));
+        assert_eq!(scope.config_path(), Path::new("/x/global/config.toml"));
+        assert_eq!(scope.packages_dir(), Path::new("/x/global/packages"));
+        assert_eq!(
+            scope.install_lock_path(),
+            Path::new("/x/global/locks/install.lock"),
+        );
+    }
+
+    #[test]
+    fn scope_path_accessors_project() {
+        let scope = Scope {
+            path: "/proj".into(),
+            state_path: "/proj/.tau".into(),
+            kind: ScopeKind::Project,
+        };
+        assert_eq!(scope.lockfile_path(), Path::new("/proj/tau-lock.toml"));
+        assert_eq!(scope.config_path(), Path::new("/proj/.tau/config.toml"));
+        assert_eq!(scope.packages_dir(), Path::new("/proj/.tau/packages"));
+        assert_eq!(
+            scope.install_lock_path(),
+            Path::new("/proj/.tau/locks/install.lock"),
+        );
+    }
+
+    #[test]
+    fn scope_package_dir_uses_name_and_version() {
+        let scope = Scope {
+            path: "/proj".into(),
+            state_path: "/proj/.tau".into(),
+            kind: ScopeKind::Project,
+        };
+        let name: tau_domain::PackageName = "acme-tool".parse().unwrap();
+        let version: tau_domain::Version = "1.2.3".parse().unwrap();
+        assert_eq!(
+            scope.package_dir(&name, &version),
+            Path::new("/proj/.tau/packages/acme-tool/1.2.3"),
+        );
+    }
 
     #[test]
     fn scope_kind_serde_lowercase_global() {
