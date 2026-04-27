@@ -31,11 +31,7 @@ fn rejects_missing_required_field_name() {
         version = "1.0.0"
         description = "no name field"
         authors = []
-
-        [source.Git.location]
-        Url = "https://example.com/x.git"
-
-        [kind.Custom]
+        source = "https://example.com/x.git"
         kind = "tool"
     "#;
     let path = write_manifest(&tmp, bad);
@@ -54,11 +50,7 @@ fn rejects_invalid_version_format() {
         version = "not.a.semver"
         description = ""
         authors = []
-
-        [source.Git.location]
-        Url = "https://example.com/x.git"
-
-        [kind.Custom]
+        source = "https://example.com/x.git"
         kind = "tool"
     "#;
     let path = write_manifest(&tmp, bad);
@@ -77,8 +69,6 @@ fn rejects_missing_required_field_source() {
         version = "1.0.0"
         description = ""
         authors = []
-
-        [kind.Custom]
         kind = "tool"
     "#;
     let path = write_manifest(&tmp, bad);
@@ -101,13 +91,9 @@ fn unknown_top_level_field_outcome_is_defined() {
         version = "1.0.0"
         description = ""
         authors = []
-        unknown_field = "hello"
-
-        [source.Git.location]
-        Url = "https://example.com/x.git"
-
-        [kind.Custom]
+        source = "https://example.com/x.git"
         kind = "tool"
+        unknown_field = "hello"
     "#;
     let path = write_manifest(&tmp, input);
     // Both Ok and Err are valid — the test exercises the code path without

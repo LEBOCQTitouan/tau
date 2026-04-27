@@ -12,13 +12,9 @@
 //!
 //! ## `source` field TOML shape
 //!
-//! `PackageSource` is a serde-externally-tagged enum. In TOML the
-//! `Git` variant with a URL location serializes as:
-//!
-//! ```toml
-//! [source.Git.location]
-//! Url = "https://example.com/x/y.git"
-//! ```
+//! Per ADR-0005, `PackageSource` serializes through its `Display`/`FromStr`
+//! string form: `source = "https://example.com/x/y.git"` (optionally with
+//! `#<rev>`). No nested tables.
 
 use proptest::prelude::*;
 use tau_pkg::{LockFile, RegistryError};
@@ -64,12 +60,9 @@ fn arb_locked_version_toml() -> impl Strategy<Value = String> {
 
 /// Build a TOML string fragment for one `[[package]]` table.
 ///
-/// `PackageSource::Git { location: GitLocation::Url(_) }` serializes as:
-///
-/// ```toml
-/// [source.Git.location]
-/// Url = "https://example.com/x/y.git"
-/// ```
+/// Per ADR-0005, `source` is the `PackageSource` string form (via
+/// `Display`/`FromStr`), so it appears as a scalar field on the package
+/// table — no nested `[source.Git.location]` table needed.
 fn arb_locked_package_toml() -> impl Strategy<Value = String> {
     (
         arb_package_name_str(),
@@ -77,16 +70,11 @@ fn arb_locked_package_toml() -> impl Strategy<Value = String> {
         arb_locked_version_toml(),
     )
         .prop_map(|(name, active_version, version_toml)| {
-            // The source table MUST appear after the scalar fields and BEFORE
-            // the [[package.versions]] sub-array, otherwise toml crate
-            // misparses nested tables interleaved with array-of-table headers.
             format!(
                 "[[package]]\n\
                  name = \"{name}\"\n\
                  active_version = \"{active_version}\"\n\
-                 \n\
-                 [package.source.Git.location]\n\
-                 Url = \"https://example.com/x/y.git\"\n\
+                 source = \"https://example.com/x/y.git\"\n\
                  \n\
                  {version_toml}"
             )
