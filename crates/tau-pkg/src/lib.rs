@@ -19,6 +19,7 @@
 //! See `docs/decisions/0004-tau-pkg.md` for the design rationale.
 
 pub mod error;
+pub(crate) mod git;
 pub mod lockfile;
 pub mod scope;
 
