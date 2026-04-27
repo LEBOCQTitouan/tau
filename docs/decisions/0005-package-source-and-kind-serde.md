@@ -1,6 +1,6 @@
 # ADR-0005: Custom serde for `PackageSource` and `PackageKind`
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-04-27
 **Supersedes:** —
 

@@ -35,4 +35,4 @@ require ADRs and are recorded in commit messages and PR discussion (PG3).
 | [0001](0001-bootstrap.md) | Bootstrap decisions | Accepted |
 | [0002](0002-manifest-format.md) | Manifest format, capability evolution, escape-hatch policy | Accepted |
 | [0003](0003-tau-ports.md) | tau-ports trait surface | Accepted |
-| [0005](0005-package-source-and-kind-serde.md) | Custom serde for PackageSource and PackageKind | Proposed |
+| [0005](0005-package-source-and-kind-serde.md) | Custom serde for PackageSource and PackageKind | Accepted |
