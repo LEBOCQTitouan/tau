@@ -64,7 +64,7 @@ pub fn make_fixture_repo(parent: &Path, name: &str, version: &str, kind: &str) -
     run_git(&working, &["config", "user.email", "test@example.com"]);
     run_git(&working, &["config", "user.name", "Test User"]);
 
-    let source_url = format!("file://{}", bare.display());
+    let source_url = file_url(&bare);
     let manifest = format!(
         r#"name = "{name}"
 version = "{version}"
@@ -90,6 +90,23 @@ capabilities = []
 }
 
 /// Convenience: build a `file://` URL string from a path.
+///
+/// On Windows, `Path::display()` uses backslashes, which are not valid in
+/// URLs (TOML parses them as escape sequences). This function converts to
+/// forward slashes before embedding in the URL.
 pub fn file_url(path: &Path) -> String {
-    format!("file://{}", path.display())
+    // Convert the path to a string with forward slashes for URL compatibility.
+    // On POSIX systems the separator is already `/`; on Windows we replace `\`.
+    let forward_slashed = path
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    // On Windows, absolute paths look like `C:/path/...`. A file URL for an
+    // absolute Windows path needs three slashes: `file:///C:/path/...`.
+    // On POSIX, the path already starts with `/`, so `file:///path` also works
+    // and is the canonical form (host=empty, path=/...).
+    if forward_slashed.starts_with('/') {
+        format!("file://{forward_slashed}")
+    } else {
+        format!("file:///{forward_slashed}")
+    }
 }
