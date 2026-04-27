@@ -28,7 +28,6 @@ use crate::error::PackageSourceError;
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PackageSource {
     /// A git repository location, optionally pinned to a revision.
     Git {
@@ -40,10 +39,49 @@ pub enum PackageSource {
     },
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for PackageSource {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for PackageSource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = PackageSource;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a PackageSource string in the form `<location>` or `<location>#<rev>`")
+            }
+            fn visit_str<E>(self, v: &str) -> Result<PackageSource, E>
+            where
+                E: serde::de::Error,
+            {
+                use std::str::FromStr;
+                PackageSource::from_str(v).map_err(serde::de::Error::custom)
+            }
+            fn visit_string<E>(self, v: String) -> Result<PackageSource, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_str(&v)
+            }
+        }
+        deserializer.deserialize_str(Visitor)
+    }
+}
+
 /// Where a git repository lives. Two shapes because git itself accepts both.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum GitLocation {
     /// Standard URL (https / http / ssh / git scheme).
     Url(url::Url),
