@@ -165,3 +165,177 @@ pub enum RegistryError {
         message: String,
     },
 }
+
+/// Errors from `install` and `install_with_options` (added in Task 10).
+///
+/// Composes `GitError`, `ManifestReadError`, `RegistryError`, and
+/// `ScopeError` via `#[from]` so the install lifecycle can use `?`
+/// propagation throughout.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum InstallError {
+    /// The `git` subprocess failed.
+    #[error("git: {0}")]
+    Git(#[from] GitError),
+    /// Manifest parsing or structural validation failed.
+    #[error("manifest: {0}")]
+    Manifest(#[from] ManifestReadError),
+    /// Lockfile read / write failed.
+    #[error("registry: {0}")]
+    Registry(#[from] RegistryError),
+    /// Scope resolution / management failed.
+    #[error("scope: {0}")]
+    Scope(#[from] ScopeError),
+    /// User-supplied `source` doesn't match the manifest's declared `source`.
+    #[error("source / manifest mismatch: expected {expected}, found {found}")]
+    SourceManifestMismatch {
+        /// The source the user passed to `install`, formatted via `Display`.
+        expected: String,
+        /// The source declared in the cloned package's `tau.toml`, formatted via `Display`.
+        found: String,
+    },
+    /// Another `install` operation already holds the per-scope advisory lock.
+    #[error("install operation already in progress for scope {scope}")]
+    Locked {
+        /// Lossy-UTF-8 path of the scope state directory.
+        scope: String,
+    },
+    /// Catch-all for install lifecycle failures not yet covered by typed variants.
+    /// Use this only when the failure cannot be reported as `Git`, `Manifest`,
+    /// `Registry`, `Scope`, `SourceManifestMismatch`, or `Locked`.
+    /// See: [escape-hatches.md#installerror-internal](../docs/explanation/escape-hatches.md#installerror-internal).
+    #[error("internal: {message}")]
+    Internal {
+        /// Human-readable message describing the internal failure.
+        message: String,
+    },
+}
+
+/// Errors from `uninstall` (added in Task 11).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum UninstallError {
+    /// Lockfile read / write failed.
+    #[error("registry: {0}")]
+    Registry(#[from] RegistryError),
+    /// Scope resolution / management failed.
+    #[error("scope: {0}")]
+    Scope(#[from] ScopeError),
+    /// The package isn't recorded in the scope's lockfile at all.
+    #[error("package not installed: {name}")]
+    NotInstalled {
+        /// Package name.
+        name: String,
+    },
+    /// The package is installed but not at the requested version.
+    #[error("version not installed: {name}@{version}")]
+    VersionNotInstalled {
+        /// Package name.
+        name: String,
+        /// Requested version (string for display purposes).
+        version: String,
+    },
+    /// File-system I/O error while removing the package directory.
+    #[error("io: {message}")]
+    Io {
+        /// Human-readable I/O message.
+        message: String,
+    },
+    /// Another `uninstall` operation already holds the per-scope advisory lock.
+    #[error("uninstall operation already in progress for scope {scope}")]
+    Locked {
+        /// Lossy-UTF-8 path of the scope state directory.
+        scope: String,
+    },
+    /// Catch-all for uninstall failures not yet covered by typed variants.
+    /// See: [escape-hatches.md#uninstallerror-internal](../docs/explanation/escape-hatches.md#uninstallerror-internal).
+    #[error("internal: {message}")]
+    Internal {
+        /// Human-readable message describing the internal failure.
+        message: String,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn install_error_composes_git_error_via_from() {
+        let git_err = GitError::GitMissing;
+        let install_err: InstallError = git_err.into();
+        assert!(matches!(
+            install_err,
+            InstallError::Git(GitError::GitMissing)
+        ));
+    }
+
+    #[test]
+    fn install_error_composes_manifest_error_via_from() {
+        let manifest_err = ManifestReadError::NotFound {
+            path: "/tmp/missing".into(),
+        };
+        let install_err: InstallError = manifest_err.into();
+        assert!(matches!(
+            install_err,
+            InstallError::Manifest(ManifestReadError::NotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn install_error_composes_registry_error_via_from() {
+        let reg_err = RegistryError::Parse {
+            reason: "bad toml".into(),
+        };
+        let install_err: InstallError = reg_err.into();
+        assert!(matches!(
+            install_err,
+            InstallError::Registry(RegistryError::Parse { .. })
+        ));
+    }
+
+    #[test]
+    fn install_error_composes_scope_error_via_from() {
+        let scope_err = ScopeError::HomeNotFound;
+        let install_err: InstallError = scope_err.into();
+        assert!(matches!(
+            install_err,
+            InstallError::Scope(ScopeError::HomeNotFound)
+        ));
+    }
+
+    #[test]
+    fn uninstall_error_composes_registry_via_from() {
+        let reg_err = RegistryError::Io {
+            message: "x".into(),
+        };
+        let un_err: UninstallError = reg_err.into();
+        assert!(matches!(
+            un_err,
+            UninstallError::Registry(RegistryError::Io { .. })
+        ));
+    }
+
+    #[test]
+    fn uninstall_error_composes_scope_via_from() {
+        let scope_err = ScopeError::NotADirectory { path: "/x".into() };
+        let un_err: UninstallError = scope_err.into();
+        assert!(matches!(
+            un_err,
+            UninstallError::Scope(ScopeError::NotADirectory { .. })
+        ));
+    }
+
+    #[test]
+    fn display_renders_human_readable() {
+        let err = InstallError::Locked {
+            scope: "/tmp/.tau".into(),
+        };
+        let s = format!("{err}");
+        assert!(
+            s.contains("install operation already in progress"),
+            "got: {s}"
+        );
+        assert!(s.contains("/tmp/.tau"), "got: {s}");
+    }
+}

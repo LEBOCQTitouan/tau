@@ -25,6 +25,8 @@ mechanically.
 | <a id="completionrequest-provider-specific"></a>`completionrequest-provider-specific` | `CompletionRequest.provider_specific: BTreeMap<String, Value>` | provider-specific LLM call params (top_k, presence_penalty, response_format, etc.) not yet typed in core | promote a key when it appears in 2+ plugins | 2 |
 | <a id="scopeerror-internal"></a>`scopeerror-internal` | `ScopeError::Internal { message }` | catch-all for scope-resolution failures not yet covered by typed variants (e.g., XDG resolution edge cases, future env-var handling) | promote when 2+ distinct contexts surface | 3 |
 | <a id="registryerror-internal"></a>`registryerror-internal` | `RegistryError::Internal { message }` | catch-all for lockfile / registry-read failures not yet covered by typed variants | promote when 2+ distinct contexts surface | 3 |
+| <a id="installerror-internal"></a>`installerror-internal` | `InstallError::Internal { message }` | catch-all for install lifecycle failures not reportable as `Git`, `Manifest`, `Registry`, `Scope`, `SourceManifestMismatch`, or `Locked` | promote when 2+ distinct contexts surface | 3 |
+| <a id="uninstallerror-internal"></a>`uninstallerror-internal` | `UninstallError::Internal { message }` | catch-all for uninstall failures not yet covered by typed variants | promote when 2+ distinct contexts surface | 3 |
 
 ## Promoted escape hatches
 
