@@ -38,6 +38,12 @@ pub fn make_bare_repo(parent: &Path, name: &str) -> PathBuf {
     let bare = parent.join(format!("{name}.git"));
     std::fs::create_dir_all(&bare).unwrap();
     run_git(&bare, &["init", "--bare", "-q"]);
+    // Set the bare repo's HEAD to `main` so `git clone` checks out the
+    // right branch regardless of the host's `init.defaultBranch` setting.
+    // On CI runners that haven't configured `init.defaultBranch`, `git
+    // init --bare` defaults to `master`, causing `git clone` to check out
+    // a non-existent branch and produce an empty working tree.
+    run_git(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
     bare
 }
 
