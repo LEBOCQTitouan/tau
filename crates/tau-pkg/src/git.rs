@@ -27,12 +27,8 @@ use crate::error::GitError;
 /// Zero-sized handle for namespacing the git-binary subprocess wrapper.
 ///
 /// All methods are associated functions (no instance state).
-// The struct and its methods are used starting in Task 10 (install lifecycle).
-// Suppress dead_code warnings until then.
-#[allow(dead_code)]
 pub(crate) struct Git;
 
-#[allow(dead_code)]
 impl Git {
     /// Verify the `git` binary is on `PATH` and return its version string.
     ///
