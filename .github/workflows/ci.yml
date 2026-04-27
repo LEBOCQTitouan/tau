@@ -85,3 +85,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Test tau-ports (test-fixtures feature only)
         run: cargo test -p tau-ports --features test-fixtures
+
+  no-default-features-pkg:
+    name: build (tau-pkg no-default-features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build tau-pkg (no default features)
+        run: cargo build -p tau-pkg --no-default-features
+      - name: Test tau-pkg (no default features)
+        run: cargo test -p tau-pkg --no-default-features --lib
