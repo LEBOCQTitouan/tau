@@ -23,6 +23,8 @@ mechanically.
 | <a id="storageerror-internal"></a>`storageerror-internal` | `StorageError::Internal { message }` | catch-all for storage-plugin failures not matching named variants | promote when 2+ distinct contexts surface | 2 |
 | <a id="sandboxerror-internal"></a>`sandboxerror-internal` | `SandboxError::Internal { message }` | catch-all (provisional — sandbox trait itself is provisional at v0.1) | promote alongside Phase-1 sandbox impl | 2 |
 | <a id="completionrequest-provider-specific"></a>`completionrequest-provider-specific` | `CompletionRequest.provider_specific: BTreeMap<String, Value>` | provider-specific LLM call params (top_k, presence_penalty, response_format, etc.) not yet typed in core | promote a key when it appears in 2+ plugins | 2 |
+| <a id="scopeerror-internal"></a>`scopeerror-internal` | `ScopeError::Internal { message }` | catch-all for scope-resolution failures not yet covered by typed variants (e.g., XDG resolution edge cases, future env-var handling) | promote when 2+ distinct contexts surface | 3 |
+| <a id="registryerror-internal"></a>`registryerror-internal` | `RegistryError::Internal { message }` | catch-all for lockfile / registry-read failures not yet covered by typed variants | promote when 2+ distinct contexts surface | 3 |
 
 ## Promoted escape hatches
 
