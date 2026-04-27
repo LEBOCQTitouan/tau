@@ -83,7 +83,7 @@ impl<'de> serde::Deserialize<'de> for PackageSource {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitLocation {
-    /// Standard URL (https / http / ssh / git scheme).
+    /// Standard URL (https / http / ssh / git / file scheme).
     Url(url::Url),
     /// scp-style address, e.g. `git@github.com:owner/repo.git`. Not a
     /// valid URL by RFC 3986; git accepts it natively.
@@ -138,7 +138,7 @@ impl FromStr for GitLocation {
         // before deciding whether a non-allowed scheme is an error or a fall-through.
         match url::Url::parse(s) {
             Ok(url) => match url.scheme() {
-                "https" | "http" | "ssh" | "git" => Ok(GitLocation::Url(url)),
+                "https" | "http" | "ssh" | "git" | "file" => Ok(GitLocation::Url(url)),
                 other if s.contains("://") => Err(PackageSourceError::UnsupportedScheme {
                     scheme: other.to_owned(),
                 }),
