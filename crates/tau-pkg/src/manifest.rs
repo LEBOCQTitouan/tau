@@ -79,24 +79,19 @@ mod tests {
         path
     }
 
-    /// Minimal valid manifest using the actual TOML serde shape produced by
-    /// tau-domain's derives. `PackageSource::Git` serialises as a nested
-    /// table `[source.Git.location]` with `Url = "<url>"`, and
-    /// `PackageKind::Custom` as `[kind.Custom]` with `kind = "<name>"`.
+    /// Minimal valid manifest using the natural TOML form (per ADR-0005).
+    /// `PackageSource` serializes via its `Display`/`FromStr` string form,
+    /// `PackageKind::Custom` as the inner `kind` string.
     fn minimal_valid_manifest() -> &'static str {
         r#"
 name = "acme-tool"
 version = "1.0.0"
 description = "A tool for testing"
 authors = ["Acme <support@acme.dev>"]
+source = "https://example.com/acme/tool.git"
+kind = "tool"
 dependencies = []
 capabilities = []
-
-[source.Git.location]
-Url = "https://example.com/acme/tool.git"
-
-[kind.Custom]
-kind = "tool"
 "#
     }
 
@@ -128,14 +123,10 @@ name = "INVALID NAME WITH SPACES"
 version = "1.0.0"
 description = "bad"
 authors = []
+source = "https://example.com/x.git"
+kind = "tool"
 dependencies = []
 capabilities = []
-
-[source.Git.location]
-Url = "https://example.com/x.git"
-
-[kind.Custom]
-kind = "tool"
 "#;
         let path = write_manifest(&tmp, bad);
         let err = read_manifest(&path).unwrap_err();

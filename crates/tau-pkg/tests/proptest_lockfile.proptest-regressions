@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 75a2d3e293409437f2f6de1a613dce6aa8e484812e261fd17b4c3afd7162a9fa # shrinks to toml_str = "schema_version = 1\ngenerated_by_tau_version = \"0.0.0\"\ngenerated_at = \"2026-01-01T00:00:00Z\"\n\n[[package]]\nname = \"a\"\nactive_version = \"1.0.0\"\nsource = \"https://example.com/x/y.git\"\n\n[[package.versions]]\nversion = \"1.0.0\"\nresolved_commit = \"0aaaa0a000a0a0aaaa0000a0a0a0a000a000a0a0\"\nsha256 = \"\"\ninstalled_at = \"2026-01-01T00:00:00Z\"\n\n"
