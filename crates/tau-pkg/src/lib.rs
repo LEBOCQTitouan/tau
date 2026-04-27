@@ -24,4 +24,4 @@ pub mod scope;
 pub use error::{
     GitError, InstallError, ManifestReadError, RegistryError, ScopeError, UninstallError,
 };
-pub use scope::{ScopeConfig, ScopeKind};
+pub use scope::{Scope, ScopeConfig, ScopeKind};
