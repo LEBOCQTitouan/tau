@@ -86,6 +86,13 @@ impl Git {
         };
 
         let mut cmd = Command::new("git");
+        // Allow file:// protocol even when the system or CI git config sets
+        // protocol.file.allow = user (the post-git-2.38 default) or never.
+        // tau intentionally supports file://-based local sources (e.g. for
+        // test fixtures and air-gapped installs).
+        cmd.env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "protocol.file.allow")
+            .env("GIT_CONFIG_VALUE_0", "always");
         cmd.arg("clone");
         if let Some(rev) = &rev_opt {
             cmd.arg("--branch").arg(rev).arg("--single-branch");
