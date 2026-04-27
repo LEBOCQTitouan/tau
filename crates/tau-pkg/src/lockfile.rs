@@ -18,10 +18,14 @@
 //! [`LockFile::load`]/[`save`]/[`find`]/[`upsert`]/[`remove`] land in
 //! Task 7. This file (Task 6) defines only the data shapes + `Default`.
 
+use std::fs;
+use std::path::Path;
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use tau_domain::{PackageName, PackageSource, Version};
+
+use crate::error::RegistryError;
 
 /// Maximum `LockFile::schema_version` this tau version recognizes.
 /// A `tau-lock.toml` with a higher value is rejected by
@@ -134,11 +138,201 @@ impl Default for LockFile {
     }
 }
 
+impl LockFile {
+    /// Read the lockfile from `path`.
+    ///
+    /// Returns `LockFile::default()` if the file doesn't exist (lazy creation —
+    /// the first install in a scope creates the lockfile via [`Self::save`]).
+    ///
+    /// # Errors
+    ///
+    /// - [`RegistryError::Io`] — the file exists but could not be read.
+    /// - [`RegistryError::Parse`] — the file is not valid TOML or doesn't
+    ///   match the `LockFile` schema.
+    /// - [`RegistryError::SchemaTooNew`] — the file's `schema_version` exceeds
+    ///   [`MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION`].
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use std::path::Path;
+    /// use tau_pkg::lockfile::LockFile;
+    ///
+    /// let lf = LockFile::load(Path::new("/nonexistent/tau-lock.toml")).unwrap();
+    /// assert!(lf.packages.is_empty()); // lazy creation
+    /// ```
+    pub fn load(path: &Path) -> Result<Self, RegistryError> {
+        match fs::metadata(path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(LockFile::default());
+            }
+            Err(e) => {
+                return Err(RegistryError::Io {
+                    message: format!("reading lockfile metadata {}: {e}", path.display()),
+                });
+            }
+            Ok(_) => {}
+        }
+
+        let text = fs::read_to_string(path).map_err(|e| RegistryError::Io {
+            message: format!("reading lockfile {}: {e}", path.display()),
+        })?;
+
+        let parsed: LockFile = toml::from_str(&text).map_err(|e| RegistryError::Parse {
+            reason: e.to_string(),
+        })?;
+
+        if parsed.schema_version > MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION {
+            return Err(RegistryError::SchemaTooNew {
+                found: parsed.schema_version,
+                supported: MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION,
+            });
+        }
+
+        Ok(parsed)
+    }
+
+    /// Atomically write the lockfile to `path`.
+    ///
+    /// Implementation: write-to-temp-then-rename + `sync_all`. Creates the
+    /// parent directory if it doesn't exist. A crash between the write and
+    /// the rename leaves the target either non-existent or fully written —
+    /// never zero bytes.
+    ///
+    /// Note: `generated_at` is set at construction time ([`Self::default`]),
+    /// not at save time. Callers that want a fresh timestamp must set
+    /// `self.generated_at = SystemTime::now()` before calling `save`.
+    ///
+    /// Note: we do not fsync the parent directory after `persist`. On ext4
+    /// (`data=ordered`) and APFS/HFS+ the rename is journaled; a parent
+    /// fsync would be belt-and-suspenders. Revisit if tau-pkg targets
+    /// FAT32 or other non-journaled mounts.
+    ///
+    /// # Errors
+    ///
+    /// - [`RegistryError::Io`] — parent directory creation, temp-file
+    ///   creation, write, fsync, or rename failed.
+    /// - [`RegistryError::Internal`] — TOML serialization failed (should
+    ///   never happen in practice).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use std::path::Path;
+    /// use tau_pkg::lockfile::LockFile;
+    ///
+    /// let lf = LockFile::default();
+    /// lf.save(Path::new("/tmp/tau-lock.toml")).unwrap();
+    /// ```
+    pub fn save(&self, path: &Path) -> Result<(), RegistryError> {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+
+        fs::create_dir_all(parent).map_err(|e| RegistryError::Io {
+            message: format!("creating lockfile directory {}: {e}", parent.display()),
+        })?;
+
+        let text = toml::to_string_pretty(self).map_err(|e| RegistryError::Internal {
+            message: format!("lockfile serialization: {e}"),
+        })?;
+
+        let tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| RegistryError::Io {
+            message: format!("creating temp file in {}: {e}", parent.display()),
+        })?;
+
+        fs::write(tmp.path(), text.as_bytes()).map_err(|e| RegistryError::Io {
+            message: format!("writing temp lockfile {}: {e}", tmp.path().display()),
+        })?;
+
+        tmp.as_file().sync_all().map_err(|e| RegistryError::Io {
+            message: format!("fsync lockfile {}: {e}", tmp.path().display()),
+        })?;
+
+        tmp.persist(path).map_err(|e| RegistryError::Io {
+            message: format!(
+                "persisting lockfile {} -> {}: {}",
+                e.file.path().display(),
+                path.display(),
+                e.error,
+            ),
+        })?;
+
+        Ok(())
+    }
+
+    /// Find a package by name.
+    ///
+    /// Linear scan; O(n) with tiny n (packages per scope).
+    /// Returns `None` if the package is not in the lockfile.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tau_pkg::lockfile::LockFile;
+    ///
+    /// let lf = LockFile::default();
+    /// let name: tau_domain::PackageName = "acme-tool".parse().unwrap();
+    /// assert!(lf.find(&name).is_none());
+    /// ```
+    pub fn find(&self, name: &PackageName) -> Option<&LockedPackage> {
+        self.packages.iter().find(|p| p.name == *name)
+    }
+
+    /// Insert or update a package entry.
+    ///
+    /// If a package with the same name already exists, it is replaced
+    /// **in place** (preserving insertion order for other packages).
+    /// Otherwise the package is appended.
+    ///
+    /// Used by `install()` (Task 10).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tau_pkg::lockfile::LockFile;
+    ///
+    /// let mut lf = LockFile::default();
+    /// // lf.upsert(pkg);  // pkg: LockedPackage
+    /// ```
+    pub fn upsert(&mut self, package: LockedPackage) {
+        if let Some(existing) = self.packages.iter_mut().find(|p| p.name == package.name) {
+            *existing = package;
+        } else {
+            self.packages.push(package);
+        }
+    }
+
+    /// Remove a package entry by name.
+    ///
+    /// Returns the removed entry if present, `None` otherwise.
+    /// Preserves insertion order of the remaining entries
+    /// (`Vec::remove`, not `swap_remove`).
+    ///
+    /// Used by `uninstall()` (Task 11).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tau_pkg::lockfile::LockFile;
+    ///
+    /// let mut lf = LockFile::default();
+    /// let name: tau_domain::PackageName = "acme-tool".parse().unwrap();
+    /// assert!(lf.remove(&name).is_none());
+    /// ```
+    pub fn remove(&mut self, name: &PackageName) -> Option<LockedPackage> {
+        let pos = self.packages.iter().position(|p| p.name == *name)?;
+        Some(self.packages.remove(pos))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     use std::time::{Duration, UNIX_EPOCH};
+
+    use tempfile::TempDir;
+
+    use crate::error::RegistryError;
 
     fn fixture_locked_version() -> LockedVersion {
         LockedVersion {
@@ -296,5 +490,239 @@ mod tests {
         let toml_str = toml::to_string_pretty(&lv).unwrap();
         let parsed: LockedVersion = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.sha256, lv.sha256);
+    }
+
+    // ---- load() ----
+
+    #[test]
+    fn load_returns_default_when_file_missing() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("does-not-exist.toml");
+        let lf = LockFile::load(&path).unwrap();
+        assert!(lf.packages.is_empty());
+        assert_eq!(lf.schema_version, MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn load_round_trips_a_saved_lockfile() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tau-lock.toml");
+
+        let mut original = LockFile::default();
+        original.packages.push(fixture_locked_package());
+
+        original.save(&path).unwrap();
+
+        let loaded = LockFile::load(&path).unwrap();
+        assert_eq!(loaded.packages.len(), 1);
+        assert_eq!(loaded.packages[0].name.as_str(), "acme-tool");
+        assert_eq!(loaded.schema_version, original.schema_version);
+
+        // Verify the nested [[package.versions]] array-of-tables round-trips
+        // through the full save -> read_to_string -> from_str path (Task 6 only
+        // covered the in-memory toml round-trip).
+        assert_eq!(loaded.packages[0].installed_versions.len(), 1);
+        assert_eq!(
+            loaded.packages[0].installed_versions[0].resolved_commit,
+            original.packages[0].installed_versions[0].resolved_commit,
+        );
+    }
+
+    #[test]
+    fn load_rejects_too_new_schema_version() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tau-lock.toml");
+
+        let toml_str = r#"
+            schema_version = 999
+            generated_by_tau_version = "0.0.0"
+            generated_at = "2026-04-27T10:00:00Z"
+        "#;
+        std::fs::write(&path, toml_str).unwrap();
+
+        let err = LockFile::load(&path).unwrap_err();
+        assert!(matches!(
+            err,
+            RegistryError::SchemaTooNew {
+                found: 999,
+                supported: 1,
+            }
+        ));
+    }
+
+    #[test]
+    fn load_rejects_malformed_toml() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tau-lock.toml");
+        std::fs::write(&path, "this is not toml = = =").unwrap();
+
+        let err = LockFile::load(&path).unwrap_err();
+        assert!(matches!(err, RegistryError::Parse { .. }));
+    }
+
+    // ---- save() ----
+
+    #[test]
+    fn save_creates_parent_directory() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp
+            .path()
+            .join("nested")
+            .join("subdir")
+            .join("tau-lock.toml");
+
+        let lf = LockFile::default();
+        lf.save(&path).unwrap();
+
+        assert!(path.is_file(), "save should have created the file");
+        assert!(
+            path.parent().unwrap().is_dir(),
+            "save should have created the parent directory"
+        );
+    }
+
+    #[test]
+    fn save_is_atomic_no_temp_files_remain() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tau-lock.toml");
+
+        let lf = LockFile::default();
+        lf.save(&path).unwrap();
+
+        let entries: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        // Only the final lockfile should exist; no .tmp residue.
+        assert_eq!(entries, vec!["tau-lock.toml".to_string()]);
+    }
+
+    #[test]
+    fn save_overwrites_existing_file_atomically() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tau-lock.toml");
+
+        // Write an initial lockfile.
+        let lf1 = LockFile::default();
+        lf1.save(&path).unwrap();
+
+        // Write a different one.
+        let mut lf2 = LockFile::default();
+        lf2.packages.push(fixture_locked_package());
+        lf2.save(&path).unwrap();
+
+        // Reload and verify the second write took effect.
+        let loaded = LockFile::load(&path).unwrap();
+        assert_eq!(loaded.packages.len(), 1);
+    }
+
+    // ---- find() / upsert() / remove() ----
+
+    #[test]
+    fn find_returns_none_for_unknown_package() {
+        let lf = LockFile::default();
+        let name: tau_domain::PackageName = "nonexistent".parse().unwrap();
+        assert!(lf.find(&name).is_none());
+    }
+
+    #[test]
+    fn find_returns_some_for_known_package() {
+        let mut lf = LockFile::default();
+        lf.packages.push(fixture_locked_package());
+        let name: tau_domain::PackageName = "acme-tool".parse().unwrap();
+        let found = lf.find(&name);
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name.as_str(), "acme-tool");
+    }
+
+    #[test]
+    fn upsert_inserts_when_missing() {
+        let mut lf = LockFile::default();
+        lf.upsert(fixture_locked_package());
+        assert_eq!(lf.packages.len(), 1);
+        assert_eq!(lf.packages[0].name.as_str(), "acme-tool");
+    }
+
+    #[test]
+    fn upsert_replaces_when_present() {
+        let mut lf = LockFile::default();
+        lf.upsert(fixture_locked_package());
+
+        // Build a "newer" version of the same package.
+        let mut updated = fixture_locked_package();
+        updated.active_version = "2.0.0".parse().unwrap();
+
+        lf.upsert(updated);
+
+        assert_eq!(lf.packages.len(), 1, "upsert should not duplicate");
+        assert_eq!(lf.packages[0].active_version.to_string(), "2.0.0");
+    }
+
+    #[test]
+    fn upsert_preserves_insertion_order_for_other_packages() {
+        let mut lf = LockFile::default();
+
+        let mut pkg_a = fixture_locked_package();
+        pkg_a.name = "aaa-pkg".parse().unwrap();
+        let mut pkg_b = fixture_locked_package();
+        pkg_b.name = "bbb-pkg".parse().unwrap();
+
+        lf.upsert(pkg_a.clone());
+        lf.upsert(pkg_b.clone());
+
+        // Update aaa-pkg — should stay at index 0.
+        let mut pkg_a_updated = pkg_a.clone();
+        pkg_a_updated.active_version = "9.9.9".parse().unwrap();
+        lf.upsert(pkg_a_updated);
+
+        assert_eq!(lf.packages[0].name.as_str(), "aaa-pkg");
+        assert_eq!(lf.packages[0].active_version.to_string(), "9.9.9");
+        assert_eq!(lf.packages[1].name.as_str(), "bbb-pkg");
+    }
+
+    #[test]
+    fn remove_returns_none_for_unknown_package() {
+        let mut lf = LockFile::default();
+        lf.packages.push(fixture_locked_package());
+
+        let name: tau_domain::PackageName = "nonexistent".parse().unwrap();
+        assert!(lf.remove(&name).is_none());
+        assert_eq!(lf.packages.len(), 1, "should not remove anything");
+    }
+
+    #[test]
+    fn remove_returns_some_for_known_package() {
+        let mut lf = LockFile::default();
+        lf.packages.push(fixture_locked_package());
+
+        let name: tau_domain::PackageName = "acme-tool".parse().unwrap();
+        let removed = lf.remove(&name);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().name.as_str(), "acme-tool");
+        assert!(lf.packages.is_empty());
+    }
+
+    #[test]
+    fn remove_preserves_order_of_other_packages() {
+        let mut lf = LockFile::default();
+
+        let mut pkg_a = fixture_locked_package();
+        pkg_a.name = "aaa".parse().unwrap();
+        let mut pkg_b = fixture_locked_package();
+        pkg_b.name = "bbb".parse().unwrap();
+        let mut pkg_c = fixture_locked_package();
+        pkg_c.name = "ccc".parse().unwrap();
+
+        lf.packages.push(pkg_a);
+        lf.packages.push(pkg_b);
+        lf.packages.push(pkg_c);
+
+        // Remove bbb — aaa should still be at 0, ccc at 1 (not 2).
+        let name: tau_domain::PackageName = "bbb".parse().unwrap();
+        lf.remove(&name);
+
+        assert_eq!(lf.packages.len(), 2);
+        assert_eq!(lf.packages[0].name.as_str(), "aaa");
+        assert_eq!(lf.packages[1].name.as_str(), "ccc");
     }
 }
