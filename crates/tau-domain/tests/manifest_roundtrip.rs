@@ -36,7 +36,7 @@ rev = "v0.3.0"
 # A placeholder; the test below uses programmatic construction to avoid
 # TOML representation gymnastics for the url::Url internals.
 
-kind = { Custom = { kind = "tool" } }
+kind = "tool"
 capabilities = []
 "#;
 

@@ -81,7 +81,6 @@ pub struct PackageId {
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PackageKind {
     /// A package kind not yet typed in core.
     /// See: [escape-hatches.md#packagekind-custom](../../../../../docs/explanation/escape-hatches.md#packagekind-custom).
@@ -90,6 +89,53 @@ pub enum PackageKind {
         /// constants (e.g. `"llm-backend"`, `"tool"`).
         kind: String,
     },
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for PackageKind {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            PackageKind::Custom { kind } => serializer.serialize_str(kind),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for PackageKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = PackageKind;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a package kind string (e.g. \"tool\", \"llm-backend\")")
+            }
+            fn visit_str<E>(self, v: &str) -> Result<PackageKind, E>
+            where
+                E: serde::de::Error,
+            {
+                if v.is_empty() {
+                    return Err(E::custom("package kind cannot be empty"));
+                }
+                Ok(PackageKind::Custom { kind: v.to_owned() })
+            }
+            fn visit_string<E>(self, v: String) -> Result<PackageKind, E>
+            where
+                E: serde::de::Error,
+            {
+                if v.is_empty() {
+                    return Err(E::custom("package kind cannot be empty"));
+                }
+                Ok(PackageKind::Custom { kind: v })
+            }
+        }
+        deserializer.deserialize_str(Visitor)
+    }
 }
 
 /// Canonical kind strings for `PackageKind::Custom.kind` and manifest
