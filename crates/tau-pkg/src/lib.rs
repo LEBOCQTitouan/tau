@@ -2,4 +2,22 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
-//! Tau package manager. Resolves, installs, and verifies extension packages declared by users via tau install.
+//! Tau package manager. Resolves, installs, and verifies extension
+//! packages declared by users via `tau install`.
+//!
+//! tau-pkg implements:
+//!
+//! - **Scope detection** (G8): walks up from the cwd looking for a
+//!   `.tau/` directory, falls back to global scope (`~/.tau`).
+//! - **Manifest parsing** (G14): reads and structurally validates
+//!   `tau.toml` files from disk via `tau_domain::UncheckedManifest`.
+//! - **Install / uninstall**: shells out to `git clone`, materializes
+//!   the package source tree, updates the lockfile.
+//! - **Lockfile**: versioned TOML at `<project>/tau-lock.toml`
+//!   (committed) or `~/.tau/tau-lock.toml` (local).
+//!
+//! See `docs/decisions/0004-tau-pkg.md` for the design rationale.
+
+pub mod error;
+
+pub use error::{GitError, ManifestReadError, RegistryError, ScopeError};
