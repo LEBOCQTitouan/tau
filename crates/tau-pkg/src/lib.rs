@@ -20,4 +20,6 @@
 
 pub mod error;
 
-pub use error::{GitError, ManifestReadError, RegistryError, ScopeError};
+pub use error::{
+    GitError, InstallError, ManifestReadError, RegistryError, ScopeError, UninstallError,
+};
