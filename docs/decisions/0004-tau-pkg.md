@@ -1,6 +1,6 @@
 # ADR-0004: tau-pkg package manager — public API, storage layout, lockfile
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-04-27
 **Supersedes:** —
 
@@ -90,12 +90,13 @@ automatically. The hint is pure information; the user owns their gitignore.
 
 ### 7. Lockfile schema
 
-The lockfile is versioned (`schema_version = 1`). Each locked entry
-(`[[packages]]`) records `name`, `version`, `source`, `kind`, and `sha256`.
-At v0.1 the `sha256` slot is written as an empty string. Phase 1+ `tau verify`
-will populate it by hashing the installed package tree. The schema version
-field allows future readers to detect and reject or migrate incompatible
-formats.
+The lockfile is versioned (`schema_version = 1`). Each `[[package]]` entry
+records `name`, `active_version`, `source`, and a list of installed versions
+(`[[package.versions]]`). Each version entry records `version`, `rev`,
+`resolved_commit`, `sha256`, and `installed_at`. At v0.1 the `sha256` slot
+is written as an empty string. Phase 1+ `tau verify` will populate it by
+hashing the installed package tree. The schema version field allows future
+readers to detect and reject or migrate incompatible formats.
 
 ### 8. Public API verbs
 
@@ -110,7 +111,7 @@ avoid committing a signature before the implementation exists.
 cloned repository. This is a convention, not enforced by a config field.
 ADR-0002 established the manifest schema; ADR-0005 established its serde
 representation. tau-pkg reads the manifest using `read_manifest`, which
-returns a typed `UncheckedManifest`.
+parses to `UncheckedManifest`, validates it, and returns a `PackageManifest`.
 
 ### 10. No transitive dependency resolution at v0.1
 
@@ -126,13 +127,14 @@ chaining becomes a user pain point.
 
 ### 11. Concurrent install protection
 
-tau-pkg acquires an advisory exclusive file lock (`<scope>/.tau/tau-pkg.lock`)
-at the start of every mutating operation (`install`, `uninstall`) via
-`fs4::FileExt::lock_exclusive`. If `block_on_lock` is `false`, it uses
-`try_lock_exclusive` and returns an error immediately instead of blocking.
-The lock prevents two concurrent `tau install` invocations from corrupting
-the package tree (a real risk in CI pipelines that run multiple install
-scripts in parallel).
+tau-pkg acquires an advisory exclusive file lock at
+`Scope::install_lock_path()` (project: `<project>/.tau/locks/install.lock`;
+global: `~/.tau/locks/install.lock`) at the start of every mutating operation
+(`install`, `uninstall`) via `fs4::FileExt::lock_exclusive`. If
+`block_on_lock` is `false`, it uses `try_lock_exclusive` and returns an error
+immediately instead of blocking. The lock prevents two concurrent `tau
+install` invocations from corrupting the package tree (a real risk in CI
+pipelines that run multiple install scripts in parallel).
 
 The lock is advisory: it does not protect against callers that skip tau-pkg
 and write to `.tau/packages/` directly. This is acceptable; such callers
@@ -140,10 +142,12 @@ are outside the defined API.
 
 ### 12. Error taxonomy
 
-Each public operation has its own typed error enum (`InstallError`,
-`UninstallError`, `ListError`, `GetError`). There is no top-level `PkgError`
-umbrella. Variant composition uses `#[from]` so `?` propagation works without
-manual mapping. This mirrors the tau-domain and tau-ports error policy
+Six typed error enums cover the public surface: `ScopeError`, `GitError`,
+`ManifestReadError`, `RegistryError` (shared by `list`, `get`, and lockfile
+load/save), `InstallError`, `UninstallError`. There is no top-level
+`PkgError` umbrella. The composing errors (`InstallError`, `UninstallError`)
+use `#[from]` over the leaf errors so `?` propagation works without manual
+mapping. This mirrors the tau-domain and tau-ports error policy
 (see ADR-0003 §3).
 
 ### 13. `file://` scheme support in `PackageSource`
