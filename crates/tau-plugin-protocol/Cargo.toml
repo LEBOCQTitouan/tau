@@ -13,6 +13,7 @@ tau-domain = { workspace = true, features = ["serde"] }
 tau-ports  = { workspace = true }
 serde      = { workspace = true }
 rmp-serde  = { workspace = true }
+rmpv       = { workspace = true }
 bytes      = { workspace = true }
 thiserror  = { workspace = true }
 tokio      = { workspace = true }

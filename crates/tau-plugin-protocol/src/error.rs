@@ -1,5 +1,7 @@
-//! Errors emitted by the framing and codec layers.
+//! Errors emitted by the framing and codec layers, plus the
+//! MessagePack-RPC error envelope used inside [`crate::Frame`] responses.
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Failures from the framing and codec layers.
@@ -46,3 +48,56 @@ pub enum ProtocolError {
     #[error("body encode failed: {0}")]
     BodyEncodeFailed(#[from] rmp_serde::encode::Error),
 }
+
+/// MessagePack-RPC error envelope carried in the `error` slot of a
+/// response frame.
+///
+/// The `code` follows JSON-RPC 2.0 conventions (see the constants in
+/// this module). `message` is a short human-readable summary; `data`
+/// carries optional structured payload (e.g. a serialized port-specific
+/// error). Spec §4.7.
+///
+/// # Example
+///
+/// ```ignore
+/// use tau_plugin_protocol::{RpcErrorEnvelope, METHOD_NOT_FOUND};
+/// let env = RpcErrorEnvelope {
+///     code: METHOD_NOT_FOUND,
+///     message: "method not found".into(),
+///     data: None,
+/// };
+/// assert_eq!(env.code, -32601);
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RpcErrorEnvelope {
+    /// Numeric error code. See the `*_ERROR` / `*_DENIED` constants.
+    pub code: i32,
+    /// Short, human-readable error description.
+    pub message: String,
+    /// Optional structured payload. For port-specific errors (codes in
+    /// the [`PORT_SPECIFIC_ERROR_BASE`] range) this is the serialized
+    /// `tau-ports` error type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<rmpv::Value>,
+}
+
+/// Standard JSON-RPC parse-error code.
+pub const PARSE_ERROR: i32 = -32700;
+/// Standard JSON-RPC invalid-request code.
+pub const INVALID_REQUEST: i32 = -32600;
+/// Standard JSON-RPC method-not-found code.
+pub const METHOD_NOT_FOUND: i32 = -32601;
+/// Standard JSON-RPC invalid-params code.
+pub const INVALID_PARAMS: i32 = -32602;
+/// Standard JSON-RPC internal-error code.
+pub const INTERNAL_ERROR: i32 = -32603;
+/// Tau-specific: plugin contract violation.
+pub const PLUGIN_CONTRACT_VIOLATION: i32 = -32000;
+/// Tau-specific: capability check denied this method.
+pub const CAPABILITY_DENIED: i32 = -32001;
+
+/// Reserved range for port-specific recoverable errors. The `data`
+/// field of the envelope carries the serialized tau-ports
+/// `LlmError`/`ToolError`/etc. in this range.
+pub const PORT_SPECIFIC_ERROR_BASE: i32 = -32100;
