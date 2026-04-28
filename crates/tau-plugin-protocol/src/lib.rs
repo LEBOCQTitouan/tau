@@ -17,6 +17,9 @@ pub mod frame;
 pub mod framer;
 pub mod handshake;
 
+#[cfg(feature = "test-support")]
+pub mod test_support;
+
 pub use error::{
     ProtocolError, RpcErrorEnvelope, CAPABILITY_DENIED, INTERNAL_ERROR, INVALID_PARAMS,
     INVALID_REQUEST, METHOD_NOT_FOUND, PARSE_ERROR, PLUGIN_CONTRACT_VIOLATION,

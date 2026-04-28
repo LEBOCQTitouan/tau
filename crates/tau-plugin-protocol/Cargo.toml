@@ -20,12 +20,8 @@ thiserror  = { workspace = true }
 tokio      = { workspace = true }
 
 [features]
-default       = []
-test-support  = ["dep:tokio-test"]
-
-[dependencies.tokio-test]
-version  = "0.4"
-optional = true
+default      = []
+test-support = [] # no extra deps; just gates the module visibility
 
 [dev-dependencies]
 proptest    = { workspace = true }
