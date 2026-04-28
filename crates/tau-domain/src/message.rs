@@ -110,6 +110,44 @@ pub struct Message {
     pub payload: MessagePayload,
 }
 
+impl Message {
+    /// Construct a new [`Message`] with a fresh [`MessageId`], a
+    /// `created_at` of [`SystemTime::now`], no `parent_id`, and empty
+    /// `headers`.
+    ///
+    /// `Message` is `#[non_exhaustive]`: external crates (notably
+    /// tau-runtime, which assembles every message that flows through
+    /// the agent loop) cannot use struct-literal construction, so this
+    /// constructor is the canonical way to mint one. Callers wanting to
+    /// override `parent_id`, `headers`, or `created_at` mutate the
+    /// returned value via the `pub` fields.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use tau_domain::{Address, Message, MessagePayload};
+    ///
+    /// let m = Message::new(
+    ///     Address::User,
+    ///     Address::System,
+    ///     MessagePayload::Text { content: "hello".into() },
+    /// );
+    /// assert!(matches!(m.payload, MessagePayload::Text { .. }));
+    /// assert!(m.parent_id.is_none());
+    /// ```
+    pub fn new(sender: Address, recipient: Address, payload: MessagePayload) -> Self {
+        Self {
+            id: MessageId::new(),
+            sender,
+            recipient,
+            parent_id: None,
+            created_at: SystemTime::now(),
+            headers: BTreeMap::new(),
+            payload,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,5 +156,40 @@ mod tests {
     fn lifecycle_payload_holds_status() {
         let m = MessagePayload::Lifecycle(AgentStatus::Ready);
         assert!(matches!(m, MessagePayload::Lifecycle(AgentStatus::Ready)));
+    }
+
+    #[test]
+    fn new_constructs_with_fresh_id_and_no_parent() {
+        let m = Message::new(
+            Address::User,
+            Address::System,
+            MessagePayload::Text {
+                content: "hello".into(),
+            },
+        );
+        assert_eq!(m.sender, Address::User);
+        assert_eq!(m.recipient, Address::System);
+        assert!(m.parent_id.is_none());
+        assert!(m.headers.is_empty());
+        assert!(matches!(m.payload, MessagePayload::Text { .. }));
+    }
+
+    #[test]
+    fn new_message_ids_are_unique() {
+        let a = Message::new(
+            Address::User,
+            Address::System,
+            MessagePayload::Text {
+                content: "a".into(),
+            },
+        );
+        let b = Message::new(
+            Address::User,
+            Address::System,
+            MessagePayload::Text {
+                content: "b".into(),
+            },
+        );
+        assert_ne!(a.id, b.id);
     }
 }

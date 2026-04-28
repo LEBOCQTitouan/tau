@@ -97,3 +97,15 @@ jobs:
         run: cargo build -p tau-pkg --no-default-features
       - name: Test tau-pkg (no default features)
         run: cargo test -p tau-pkg --no-default-features --lib
+
+  no-default-features-runtime:
+    name: build (tau-runtime no-default-features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build tau-runtime (no default features)
+        run: cargo build -p tau-runtime --no-default-features
+      - name: Test tau-runtime (no default features)
+        run: cargo test -p tau-runtime --no-default-features --lib

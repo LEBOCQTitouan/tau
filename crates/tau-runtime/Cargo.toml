@@ -1,9 +1,30 @@
 [package]
 name = "tau-runtime"
 description = "Public Rust API surface for embedding tau as a library."
-version.workspace = true
-edition.workspace = true
+version.workspace      = true
+edition.workspace      = true
 rust-version.workspace = true
-license.workspace = true
-repository.workspace = true
-authors.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+
+[dependencies]
+tau-domain = { workspace = true, features = ["serde"] }
+tau-ports  = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+# `v4` for session-id minting in `Runtime::run` per spec §3.7; the
+# workspace alias only enables `v7` (used by id newtypes in tau-domain).
+uuid       = { workspace = true, features = ["v4"] }
+
+[features]
+default = []
+
+[dev-dependencies]
+tokio              = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+tau-domain         = { workspace = true, features = ["test-fixtures"] }
+tau-ports          = { workspace = true, features = ["test-fixtures"] }
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+proptest           = { workspace = true }
+serde              = { workspace = true }
+toml               = { workspace = true }

@@ -97,6 +97,90 @@ pub struct CompletionRequest {
     pub provider_specific: BTreeMap<String, Value>,
 }
 
+impl CompletionRequest {
+    /// Construct a [`CompletionRequest`] with all optional fields at
+    /// their defaults: `system = None`, `messages` and `tools` empty,
+    /// no sampling overrides, [`ToolChoice::Auto`], no stop sequences,
+    /// no provider-specific overrides.
+    ///
+    /// `CompletionRequest` is `#[non_exhaustive]`: external crates
+    /// (notably tau-runtime, which mints one of these per turn) cannot
+    /// use struct-literal construction. Callers populate the optional
+    /// fields by mutating the returned value via the public fields.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use tau_ports::CompletionRequest;
+    ///
+    /// let req = CompletionRequest::new("claude-3-5-sonnet".into());
+    /// assert_eq!(req.model, "claude-3-5-sonnet");
+    /// assert!(req.messages.is_empty());
+    /// ```
+    pub fn new(model: String) -> Self {
+        Self {
+            model,
+            system: None,
+            messages: Vec::new(),
+            tools: Vec::new(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            seed: None,
+            tool_choice: ToolChoice::Auto,
+            stop_sequences: Vec::new(),
+            provider_specific: BTreeMap::new(),
+        }
+    }
+}
+
+impl LlmProviderMessage {
+    /// Construct a [`LlmProviderMessage::User`] with the given content
+    /// blocks. `LlmProviderMessage` is `#[non_exhaustive]` so external
+    /// crates can't use struct-literal construction.
+    pub fn user(content: Vec<ContentBlock>) -> Self {
+        Self::User { content }
+    }
+
+    /// Construct a [`LlmProviderMessage::Assistant`] with the given
+    /// content blocks.
+    pub fn assistant(content: Vec<ContentBlock>) -> Self {
+        Self::Assistant { content }
+    }
+
+    /// Construct a [`LlmProviderMessage::ToolResult`] addressed to the
+    /// given `tool_use_id`. Pair with the `id` of the
+    /// [`LlmProviderMessage::Assistant`] tool-use this is answering.
+    pub fn tool_result(tool_use_id: String, content: Vec<ContentBlock>, is_error: bool) -> Self {
+        Self::ToolResult {
+            tool_use_id,
+            content,
+            is_error,
+        }
+    }
+}
+
+impl ToolUse {
+    /// Construct a [`ToolUse`]. Provided so external callers — notably
+    /// tau-runtime when projecting `MessagePayload::ToolCall` onto an
+    /// `LlmProviderMessage` — can build one without struct-literal
+    /// syntax (the type is `#[non_exhaustive]`).
+    pub fn new(id: String, name: String, input: Value) -> Self {
+        Self { id, name, input }
+    }
+}
+
+impl TokenUsage {
+    /// Construct a [`TokenUsage`] from the (input, output) totals
+    /// reported by an LLM backend.
+    pub fn new(input_tokens: u32, output_tokens: u32) -> Self {
+        Self {
+            input_tokens,
+            output_tokens,
+        }
+    }
+}
+
 /// Tool-selection policy for a [`CompletionRequest`].
 ///
 /// Defaults to [`ToolChoice::Auto`]: the model decides whether to call

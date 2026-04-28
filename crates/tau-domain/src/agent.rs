@@ -58,6 +58,31 @@ pub enum AgentStatus {
     },
 }
 
+impl AgentStatus {
+    /// Construct an [`AgentStatus::Failed`] with the given `kind` and
+    /// optional `detail`.
+    ///
+    /// `Failed` is variant-level `#[non_exhaustive]` (E0639), which
+    /// blocks struct-literal construction from outside `tau-domain`.
+    /// Callers (notably tau-runtime when reporting agent-level
+    /// failures from `Runtime::run`) use this constructor.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use tau_domain::{AgentStatus, FailureKind};
+    ///
+    /// let s = AgentStatus::failed(FailureKind::BackendError, Some("HTTP 503".into()));
+    /// match s {
+    ///     AgentStatus::Failed { kind: FailureKind::BackendError, .. } => {}
+    ///     _ => panic!(),
+    /// }
+    /// ```
+    pub fn failed(kind: FailureKind, detail: Option<String>) -> Self {
+        AgentStatus::Failed { kind, detail }
+    }
+}
+
 /// Categorical failure kinds. New typed kinds are added additively;
 /// `InternalError` is the catch-all escape hatch.
 ///

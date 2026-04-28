@@ -64,6 +64,31 @@ pub struct PackageId {
     pub version: Version,
 }
 
+impl PackageId {
+    /// Construct a [`PackageId`] from a validated name and version.
+    ///
+    /// `PackageId` is `#[non_exhaustive]`: external crates cannot use
+    /// struct-literal construction. Callers (notably tau-runtime
+    /// integration tests, which assemble `AgentDefinition`s by hand)
+    /// use this constructor.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use tau_domain::{PackageId, PackageName, Version};
+    /// use std::str::FromStr;
+    ///
+    /// let id = PackageId::new(
+    ///     PackageName::from_str("fs-tools").unwrap(),
+    ///     Version::parse("0.3.0").unwrap(),
+    /// );
+    /// assert_eq!(id.name.as_str(), "fs-tools");
+    /// ```
+    pub fn new(name: PackageName, version: Version) -> Self {
+        Self { name, version }
+    }
+}
+
 /// Package kind. Structural at v0.1: every kind goes through `Custom`.
 /// Typed variants land additively as tau-runtime gains plugin trait
 /// awareness for each kind.

@@ -53,6 +53,24 @@ pub struct SessionContext {
     pub deadline: Option<SystemTime>,
 }
 
+impl SessionContext {
+    /// Construct a [`SessionContext`]. Provided so external callers —
+    /// notably tau-runtime, which mints one per tool dispatch in
+    /// `Runtime::run` — can build one without struct-literal syntax
+    /// (the type is `#[non_exhaustive]`).
+    pub fn new(
+        agent_instance_id: AgentInstanceId,
+        session_id: Uuid,
+        deadline: Option<SystemTime>,
+    ) -> Self {
+        Self {
+            agent_instance_id,
+            session_id,
+            deadline,
+        }
+    }
+}
+
 /// Result of a single [`Tool::invoke`] call.
 ///
 /// Mirrors the MCP tool-result shape: a list of typed content blocks
@@ -152,6 +170,32 @@ pub trait Tool: Send + Sync {
     /// validation and for surfacing to the LLM via
     /// `CompletionRequest.tools`.
     fn schema(&self) -> ToolSpec;
+
+    /// Capabilities this tool requires the calling agent's package to declare.
+    /// Default: empty (tool is unrestricted; any agent can call it).
+    ///
+    /// The runtime checks: for every capability in this list, the agent's
+    /// package manifest must contain at least one capability that satisfies
+    /// it. See `tau_runtime::capability::check_capabilities` for the
+    /// satisfies-relation.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // `Capability` is `#[non_exhaustive]`; declared via the manifest path.
+    /// use tau_domain::Capability;
+    /// use tau_ports::Tool;
+    ///
+    /// struct MyFileTool;
+    /// // impl Tool for MyFileTool {
+    /// //     fn capabilities(&self) -> &[Capability] { &[] }
+    /// //     // ... other methods ...
+    /// // }
+    /// # let _ = std::any::type_name::<MyFileTool>();
+    /// ```
+    fn capabilities(&self) -> &[tau_domain::Capability] {
+        &[]
+    }
 
     /// Open a session. Called once before any `invoke`.
     async fn init(&self, ctx: SessionContext) -> Result<Self::Session, ToolError>;
