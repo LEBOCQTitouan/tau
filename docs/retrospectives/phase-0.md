@@ -297,15 +297,27 @@ can install but not actually run anything outside the test-mock.
 
 This is **the** most material gap in Phase 0's deliverables.
 
-### Windows snapshot tests still flaky after Phase 0 closes
+### Windows snapshot tests — fixed pre-retro-merge
 
 Sub-project 5's `help_snapshots.rs` snapshots passed locally on macOS
-but failed on Windows due to clap's terminal-width-dependent text
-wrapping. CRLF normalization was applied (commit `bd47d77`) but
-post-merge investigation suggests the wrapping difference, not just
-CRLF, is the root cause. Windows is non-blocking per Constitution G15
-so the merge proceeded; Phase 1 should either gate snapshots with
-`#[cfg(not(windows))]` or normalize the text more thoroughly.
+but initially failed on Windows. Two normalizations resolved them
+end-to-end (both shipped before this retrospective merged):
+
+1. **CRLF → LF** (commit `bd47d77`) — Windows writes `\r\n`, snapshots
+   were recorded with `\n`.
+2. **`tau.exe` → `tau`** (commit `8f614b6` on this retro branch) —
+   clap derives the binary name from `argv[0]`, so help text shows
+   `Usage: tau.exe init` on Windows.
+
+The earlier hypothesis (terminal-width-dependent text wrapping) was
+wrong; the wrapping is identical, only the binary-name and line-ending
+differ. With both normalizations in `capture_help`, the same `.snap`
+files are valid on every platform. All 14 CI jobs (incl. Windows
+stable + 1.91) green at retrospective merge time.
+
+This was the only outstanding non-blocking failure closing Phase 0.
+It's resolved; no Phase 1 work item required (originally listed as
+Tier 4 priority 16 — dropped).
 
 ### Other minor surprises
 
@@ -539,10 +551,6 @@ These need to ship before most other work makes sense.
     second public surface alongside the embeddable Rust API. Probably
     lands in `tau-app`. Coordinates with priority 1's plugin-loading
     mechanism if it picks IPC.
-16. **Windows test parity.** Windows is non-blocking per G15 but the
-    snapshot tests in sub-project 5 should pass everywhere they claim
-    to. Either fix the wrapping issue or scope-reduce the snapshots
-    that vary by terminal.
 
 ### Out of scope for Phase 1 (per Constitution NG1-NG12)
 

@@ -90,8 +90,6 @@ Tier ordering reflects criticality, not strict implementation order
 14. **`cargo audit` + `cargo-deny` in CI** (Constitution QG16).
 15. **Serve mode** (JSON-RPC over stdio; Constitution G6, QG12). Lives
     in `tau-app`.
-16. **Windows test parity.** Address the snapshot test wrapping issues
-    that close Phase 0 with non-blocking failures.
 
 ## Out of scope (forever)
 
