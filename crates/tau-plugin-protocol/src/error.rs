@@ -103,6 +103,17 @@ pub struct RpcErrorEnvelope {
     pub data: Option<rmpv::Value>,
 }
 
+impl RpcErrorEnvelope {
+    /// Construct an [`RpcErrorEnvelope`].
+    pub fn new(code: i32, message: String, data: Option<rmpv::Value>) -> Self {
+        Self {
+            code,
+            message,
+            data,
+        }
+    }
+}
+
 /// Standard JSON-RPC parse-error code.
 pub const PARSE_ERROR: i32 = -32700;
 /// Standard JSON-RPC invalid-request code.

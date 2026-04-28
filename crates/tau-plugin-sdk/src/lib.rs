@@ -15,9 +15,11 @@
 //! and ADR-0008 for the design rationale.
 
 pub mod error;
+pub mod handshake;
 pub mod tracing_layer;
 
 pub use error::SdkError;
+pub use handshake::{drive_handshake, PluginMeta};
 
 // Re-export framer types from tau-plugin-protocol so plugin authors
 // have one obvious crate to depend on.
