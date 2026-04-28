@@ -18,4 +18,4 @@
 
 pub mod error;
 
-pub use error::{BuildError, CapabilityDenial, PluginKind};
+pub use error::{BuildError, CapabilityDenial, PluginKind, RuntimeError};

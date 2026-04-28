@@ -118,6 +118,81 @@ impl std::fmt::Display for CapabilityDenial {
     }
 }
 
+/// Errors from `Runtime::run` (added in Task 10) — kernel-level
+/// operational failures.
+///
+/// Agent-level failures (capability denied, max turns reached) flow
+/// through `Ok(RunOutcome::Failed { status: AgentStatus::Failed{..} })`
+/// instead. See [`crate::error`] module-level docs for the dichotomy.
+///
+/// Plugin errors (`LlmError`, `ToolError`, `StorageError`, `SandboxError`)
+/// compose via `#[from]` for ergonomic `?`-propagation throughout the
+/// agent loop.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum RuntimeError {
+    /// Agent's `llm_backend` references a backend that wasn't registered.
+    #[error("LLM backend `{backend}` not registered (agent {agent_id} requested it)")]
+    LlmBackendNotRegistered {
+        /// The agent's `id` formatted via `Display`.
+        agent_id: String,
+        /// The backend name the agent requested.
+        backend: String,
+    },
+
+    /// LLM emitted a tool_use targeting a tool not in the registry.
+    #[error("tool `{tool_name}` not registered; registered: {registered:?}")]
+    ToolNotRegistered {
+        /// The tool name the LLM requested.
+        tool_name: String,
+        /// Names of registered tools (for diagnostics).
+        registered: Vec<String>,
+    },
+
+    /// Plugin returned successfully but its output violates the contract
+    /// (malformed JSON args from LLM, undeserializable content, etc.).
+    #[error("plugin contract violation: {plugin_kind} `{plugin_name}` returned malformed {what}: {detail}")]
+    PluginContractViolation {
+        /// The plugin kind ("llm", "tool", "storage", "sandbox").
+        plugin_kind: String,
+        /// The plugin name (its `name()` value).
+        plugin_name: String,
+        /// What was malformed ("tool_use args", "completion response", etc.).
+        what: String,
+        /// Human-readable detail.
+        detail: String,
+    },
+
+    /// LLM backend plugin returned an error.
+    #[error("llm: {0}")]
+    Llm(#[from] tau_ports::LlmError),
+
+    /// Tool plugin returned an error.
+    #[error("tool: {0}")]
+    Tool(#[from] tau_ports::ToolError),
+
+    /// Storage plugin returned an error.
+    #[error("storage: {0}")]
+    Storage(#[from] tau_ports::StorageError),
+
+    /// Sandbox plugin returned an error. Reserved for forward compat;
+    /// v0.1 doesn't wire `Sandbox::create` (Q7=A from the spec).
+    #[error("sandbox: {0}")]
+    Sandbox(#[from] tau_ports::SandboxError),
+
+    /// Manifest validation failed (caller-supplied manifest invalid).
+    #[error("manifest validation: {0}")]
+    Manifest(#[from] tau_domain::PackageManifestError),
+
+    /// Catch-all for invariant violations / unexpected states.
+    /// See: [escape-hatches.md#runtimeerror-internal](../docs/explanation/escape-hatches.md#runtimeerror-internal).
+    #[error("internal: {message}")]
+    Internal {
+        /// Human-readable message describing the internal failure.
+        message: String,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +239,104 @@ mod tests {
         assert!(s.contains("filesystem.read"), "got: {s}");
         assert!(s.contains("/etc/passwd"), "got: {s}");
         assert!(s.contains("file_read"), "got: {s}");
+    }
+
+    use tau_ports::{LlmError, StorageError, ToolError};
+
+    #[test]
+    fn runtime_error_llm_backend_not_registered_display() {
+        let err = RuntimeError::LlmBackendNotRegistered {
+            agent_id: "agent-1".into(),
+            backend: "anthropic".into(),
+        };
+        let s = format!("{err}");
+        assert!(s.contains("anthropic"), "got: {s}");
+        assert!(s.contains("agent-1"), "got: {s}");
+        assert!(s.contains("not registered"), "got: {s}");
+    }
+
+    #[test]
+    fn runtime_error_tool_not_registered_display() {
+        let err = RuntimeError::ToolNotRegistered {
+            tool_name: "ghost".into(),
+            registered: vec!["echo".into(), "file_read".into()],
+        };
+        let s = format!("{err}");
+        assert!(s.contains("ghost"), "got: {s}");
+        assert!(s.contains("echo"), "got: {s}");
+        assert!(s.contains("file_read"), "got: {s}");
+    }
+
+    #[test]
+    fn runtime_error_plugin_contract_violation_display() {
+        let err = RuntimeError::PluginContractViolation {
+            plugin_kind: "llm".into(),
+            plugin_name: "anthropic".into(),
+            what: "tool_use args".into(),
+            detail: "expected JSON object, got array".into(),
+        };
+        let s = format!("{err}");
+        assert!(s.contains("plugin contract violation"), "got: {s}");
+        assert!(s.contains("anthropic"), "got: {s}");
+        assert!(s.contains("tool_use args"), "got: {s}");
+    }
+
+    #[test]
+    fn runtime_error_composes_llm_via_from() {
+        let llm_err = LlmError::Internal {
+            message: "x".into(),
+        };
+        let runtime_err: RuntimeError = llm_err.into();
+        assert!(matches!(
+            runtime_err,
+            RuntimeError::Llm(LlmError::Internal { .. })
+        ));
+    }
+
+    #[test]
+    fn runtime_error_composes_tool_via_from() {
+        let tool_err = ToolError::Internal {
+            message: "x".into(),
+        };
+        let runtime_err: RuntimeError = tool_err.into();
+        assert!(matches!(
+            runtime_err,
+            RuntimeError::Tool(ToolError::Internal { .. })
+        ));
+    }
+
+    #[test]
+    fn runtime_error_composes_storage_via_from() {
+        let storage_err = StorageError::Internal {
+            message: "x".into(),
+        };
+        let runtime_err: RuntimeError = storage_err.into();
+        assert!(matches!(
+            runtime_err,
+            RuntimeError::Storage(StorageError::Internal { .. })
+        ));
+    }
+
+    #[test]
+    fn runtime_error_composes_sandbox_via_from() {
+        use tau_ports::SandboxError;
+        let sandbox_err = SandboxError::Internal {
+            message: "x".into(),
+        };
+        let runtime_err: RuntimeError = sandbox_err.into();
+        assert!(matches!(
+            runtime_err,
+            RuntimeError::Sandbox(SandboxError::Internal { .. })
+        ));
+    }
+
+    #[test]
+    fn runtime_error_internal_display() {
+        let err = RuntimeError::Internal {
+            message: "unexpected".into(),
+        };
+        let s = format!("{err}");
+        assert!(s.contains("internal"), "got: {s}");
+        assert!(s.contains("unexpected"), "got: {s}");
     }
 }
