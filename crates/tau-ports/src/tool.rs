@@ -153,6 +153,32 @@ pub trait Tool: Send + Sync {
     /// `CompletionRequest.tools`.
     fn schema(&self) -> ToolSpec;
 
+    /// Capabilities this tool requires the calling agent's package to declare.
+    /// Default: empty (tool is unrestricted; any agent can call it).
+    ///
+    /// The runtime checks: for every capability in this list, the agent's
+    /// package manifest must contain at least one capability that satisfies
+    /// it. See `tau_runtime::capability::check_capabilities` for the
+    /// satisfies-relation.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // `Capability` is `#[non_exhaustive]`; declared via the manifest path.
+    /// use tau_domain::Capability;
+    /// use tau_ports::Tool;
+    ///
+    /// struct MyFileTool;
+    /// // impl Tool for MyFileTool {
+    /// //     fn capabilities(&self) -> &[Capability] { &[] }
+    /// //     // ... other methods ...
+    /// // }
+    /// # let _ = std::any::type_name::<MyFileTool>();
+    /// ```
+    fn capabilities(&self) -> &[tau_domain::Capability] {
+        &[]
+    }
+
     /// Open a session. Called once before any `invoke`.
     async fn init(&self, ctx: SessionContext) -> Result<Self::Session, ToolError>;
 
