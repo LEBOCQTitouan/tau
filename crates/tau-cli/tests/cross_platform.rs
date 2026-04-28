@@ -22,9 +22,19 @@ use std::path::PathBuf;
 use assert_cmd::Command as AssertCmd;
 use predicates::prelude::*;
 
+/// Build an absolute path appropriate for the host OS. `Url::from_file_path`
+/// rejects relative or platform-mismatched paths (e.g. unix-style `/tmp/...`
+/// on Windows fails because Windows expects a drive letter or UNC prefix).
+fn host_absolute_path(rel: &str) -> PathBuf {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    tmp.path().join(rel)
+    // Note: tmp drops here, but the path string remains valid for URL
+    // construction — we don't open the path, just format it.
+}
+
 #[test]
 fn file_url_construction_uses_forward_slash() {
-    let path = PathBuf::from("/tmp/test/repo");
+    let path = host_absolute_path("repo");
     let url = url::Url::from_file_path(&path).expect("absolute path -> file URL");
     let url_str = url.as_str();
 
@@ -44,7 +54,7 @@ fn common_file_url_helper_matches_url_crate_for_simple_paths() {
     // list integration tests use to fabricate `file://` URLs. It
     // should agree with the `url` crate's canonical conversion for
     // simple absolute paths (no spaces, no special chars).
-    let path = PathBuf::from("/tmp/tau-fixture-repo");
+    let path = host_absolute_path("tau-fixture-repo");
     let our = common::file_url(&path);
     let theirs = url::Url::from_file_path(&path).unwrap().to_string();
     // The `url` crate may percent-encode trailing components or drop
