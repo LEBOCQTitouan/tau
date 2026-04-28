@@ -16,10 +16,12 @@
 //!
 //! See `docs/decisions/0006-tau-runtime.md` for the design rationale.
 
+pub mod builder;
 pub mod error;
 pub mod options;
 pub mod outcome;
 
+pub use builder::{Runtime, RuntimeBuilder};
 pub use error::{BuildError, CapabilityDenial, PluginKind, RuntimeError};
 pub use options::{RunOptions, TokenUsage};
 pub use outcome::RunOutcome;
