@@ -64,7 +64,7 @@
 - Modify: `Cargo.toml` (workspace root)
 - Modify: `crates/tau-runtime/Cargo.toml`
 
-- [ ] **Step 1.1: Add `tracing` to workspace deps**
+- [x] **Step 1.1: Add `tracing` to workspace deps**
 
 Open `/Users/titouanlebocq/code/tau/Cargo.toml`. Locate `[workspace.dependencies]`. Add the `tracing` line at the end:
 
@@ -89,7 +89,7 @@ tracing         = "0.1"
 
 (All other entries remain unchanged from prior sub-projects.)
 
-- [ ] **Step 1.2: Update `crates/tau-runtime/Cargo.toml`**
+- [x] **Step 1.2: Update `crates/tau-runtime/Cargo.toml`**
 
 Replace the file contents with:
 
@@ -130,7 +130,7 @@ proptest           = { workspace = true }
 - `tracing-subscriber` (dev only): captures emitted events in `tests/tracing_emission.rs`.
 - `proptest` (dev only): generative tests for capability satisfies-relation.
 
-- [ ] **Step 1.3: Verify the no-default-features build**
+- [x] **Step 1.3: Verify the no-default-features build**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -139,7 +139,7 @@ cargo build -p tau-runtime --no-default-features
 
 Expected: success. The current `lib.rs` is a doc-comment-only stub; nothing depends on the new deps yet.
 
-- [ ] **Step 1.4: Verify the all-features build**
+- [x] **Step 1.4: Verify the all-features build**
 
 ```bash
 cargo build -p tau-runtime --all-features
@@ -147,7 +147,7 @@ cargo build -p tau-runtime --all-features
 
 Expected: success.
 
-- [ ] **Step 1.5: Verify nothing else regressed**
+- [x] **Step 1.5: Verify nothing else regressed**
 
 ```bash
 cargo build --workspace --all-features
@@ -160,7 +160,7 @@ cargo fmt --all -- --check
 
 Expected: all exit 0.
 
-- [ ] **Step 1.6: Stage and commit**
+- [x] **Step 1.6: Stage and commit**
 
 ```bash
 git add Cargo.toml Cargo.lock crates/tau-runtime/Cargo.toml
@@ -189,7 +189,7 @@ Push to trigger CI on PR #5:
 git push origin feat/tau-runtime-spec
 ```
 
-- [ ] **Step 1.7: Verify CI on PR #5 is green**
+- [x] **Step 1.7: Verify CI on PR #5 is green**
 
 ```bash
 gh pr checks 5
@@ -209,7 +209,7 @@ This task adds the typed-capability declaration method to tau-ports' `Tool` trai
 
 ADR-0006 covers this amendment AND the kernel decisions in one bundled ADR (per spec §6) because they're tightly coupled — the trait amendment exists solely because tau-runtime needs typed enforcement.
 
-- [ ] **Step 2.1: Locate the `Tool` trait**
+- [x] **Step 2.1: Locate the `Tool` trait**
 
 Open `/Users/titouanlebocq/code/tau/crates/tau-ports/src/tool.rs`. Find the `Tool` trait definition (around line 145 per the existing file structure):
 
@@ -244,7 +244,7 @@ pub trait Tool: Send + Sync {
 }
 ```
 
-- [ ] **Step 2.2: Add the `capabilities()` default method**
+- [x] **Step 2.2: Add the `capabilities()` default method**
 
 Insert the new method between `schema()` and `init()`:
 
@@ -277,7 +277,7 @@ Insert the new method between `schema()` and `init()`:
 
 The default `&[]` makes this backwards-compatible: existing impls don't need to declare anything.
 
-- [ ] **Step 2.3: Verify tau-ports' existing tests pass**
+- [x] **Step 2.3: Verify tau-ports' existing tests pass**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -287,7 +287,7 @@ cargo test -p tau-ports --doc --all-features
 
 Expected: all green. The four mocks (`MockLlmBackend`, `MockTool`, `MockStorage`, `MockSandbox`) and any other `impl Tool` in the codebase continue to compile and pass without modification — they pick up the default `&[]`.
 
-- [ ] **Step 2.4: Verify the rest of the workspace**
+- [x] **Step 2.4: Verify the rest of the workspace**
 
 ```bash
 cargo build --workspace --all-features
@@ -297,7 +297,7 @@ cargo fmt --all -- --check
 
 Expected: all exit 0. tau-domain and tau-pkg don't depend on `Tool::capabilities()`; nothing should break.
 
-- [ ] **Step 2.5: Stage and commit**
+- [x] **Step 2.5: Stage and commit**
 
 ```bash
 git add crates/tau-ports/src/tool.rs
@@ -338,7 +338,7 @@ git push origin feat/tau-runtime-spec
 
 `BuildError` carries the `Internal` escape-hatch variant; per the policy enforced by `crates/tau-domain/tests/escape_hatch_registry.rs` (sub-project 1), the entry registers in this same commit.
 
-- [ ] **Step 3.1: Create `error.rs` with `PluginKind`, `BuildError`, `CapabilityDenial`**
+- [x] **Step 3.1: Create `error.rs` with `PluginKind`, `BuildError`, `CapabilityDenial`**
 
 Create `/Users/titouanlebocq/code/tau/crates/tau-runtime/src/error.rs`:
 
@@ -515,7 +515,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3.2: Wire the module into `lib.rs`**
+- [x] **Step 3.2: Wire the module into `lib.rs`**
 
 Replace `/Users/titouanlebocq/code/tau/crates/tau-runtime/src/lib.rs` contents with:
 
@@ -543,7 +543,7 @@ pub mod error;
 pub use error::{BuildError, CapabilityDenial, PluginKind};
 ```
 
-- [ ] **Step 3.3: Append `builderror-internal` to escape-hatches.md**
+- [x] **Step 3.3: Append `builderror-internal` to escape-hatches.md**
 
 Open `/Users/titouanlebocq/code/tau/docs/explanation/escape-hatches.md`. Locate the "Active escape hatches" table. Append one new row after the last existing row (which is `uninstallerror-internal` from sub-project 3):
 
@@ -551,7 +551,7 @@ Open `/Users/titouanlebocq/code/tau/docs/explanation/escape-hatches.md`. Locate 
 | <a id="builderror-internal"></a>`builderror-internal` | `BuildError::Internal { message }` | catch-all for invariant violations during `RuntimeBuilder::build()` not yet covered by typed variants | promote when 2+ distinct contexts surface | 4 |
 ```
 
-- [ ] **Step 3.4: Run unit tests**
+- [x] **Step 3.4: Run unit tests**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
@@ -560,7 +560,7 @@ cargo test -p tau-runtime --lib
 
 Expected: 4 tests pass (`plugin_kind_display`, `build_error_no_llm_backend_display`, `build_error_name_collision_display`, `capability_denial_display_includes_all_fields`).
 
-- [ ] **Step 3.5: Run doctests, clippy, fmt**
+- [x] **Step 3.5: Run doctests, clippy, fmt**
 
 ```bash
 cargo test -p tau-runtime --doc
@@ -570,7 +570,7 @@ cargo fmt --all -- --check
 
 Expected: all exit 0. Doctest count: 1 ignored (the `BuildError` example).
 
-- [ ] **Step 3.6: Verify the cross-crate registry gate**
+- [x] **Step 3.6: Verify the cross-crate registry gate**
 
 ```bash
 cargo test -p tau-domain --test escape_hatch_registry --all-features
@@ -578,7 +578,7 @@ cargo test -p tau-domain --test escape_hatch_registry --all-features
 
 Expected: pass. The `BuildError::Internal` variant in `crates/tau-runtime/src/error.rs` matches the newly-registered `builderror-internal` anchor in `escape-hatches.md`.
 
-- [ ] **Step 3.7: Verify no-default-features build**
+- [x] **Step 3.7: Verify no-default-features build**
 
 ```bash
 cargo build -p tau-runtime --no-default-features
@@ -586,7 +586,7 @@ cargo build -p tau-runtime --no-default-features
 
 Expected: success.
 
-- [ ] **Step 3.8: Stage and commit**
+- [x] **Step 3.8: Stage and commit**
 
 ```bash
 git add crates/tau-runtime/src/error.rs \
