@@ -22,6 +22,7 @@ pub(crate) mod dispatch;
 pub mod error;
 pub mod options;
 pub mod outcome;
+mod run;
 
 pub use builder::{Runtime, RuntimeBuilder};
 pub use error::{BuildError, CapabilityDenial, PluginKind, RuntimeError};

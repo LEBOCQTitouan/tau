@@ -15,11 +15,14 @@
 //!
 //! # Dead-code allow
 //!
-//! These helpers are exercised by the in-module `tests` submodule
-//! immediately, and will be wired into the runtime dispatcher in
-//! Task 9 (`dispatch.rs`). Until then, the non-test build sees only
-//! intra-module callers and would warn. The module-level
-//! `#[allow(dead_code)]` is removed in the dispatcher commit.
+//! Most helpers in this module are exercised both by the in-module
+//! `tests` submodule and by the runtime agent run loop ([`crate::run`],
+//! Task 10). A few internals (e.g. the per-namespace `*_satisfies`
+//! helpers) are reached only transitively through
+//! [`capability_satisfies`] and would warn under the
+//! `dead_code` lint when their direct callers are limited to tests; we
+//! keep the module-level `allow` to suppress those rather than
+//! one-by-one annotations.
 
 #![allow(dead_code)]
 

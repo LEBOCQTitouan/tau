@@ -6,11 +6,11 @@
 //!
 //! # Dead-code allow
 //!
-//! The helpers here are exercised by the in-module `tests` submodule
-//! immediately, and will be wired into the runtime dispatcher in
-//! Task 10 (the agent multi-turn run loop). Until then, the non-test
-//! build sees only intra-module callers and would warn. The module-
-//! level `#[allow(dead_code)]` is removed in the Task 10 commit.
+//! [`address_to_tool_name`] is reached only by the dispatcher (Task 10)
+//! and tests; the resolver methods on [`Runtime`] are exercised both by
+//! tests and the run loop. We keep the module-level `allow` so the
+//! v0.1 surface — small, with a few helpers that are used through
+//! transitive call sites — doesn't sprout one-off annotations.
 
 #![allow(dead_code)]
 

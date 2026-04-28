@@ -13,6 +13,9 @@ tau-domain = { workspace = true, features = ["serde"] }
 tau-ports  = { workspace = true }
 thiserror  = { workspace = true }
 tracing    = { workspace = true }
+# `v4` for session-id minting in `Runtime::run` per spec §3.7; the
+# workspace alias only enables `v7` (used by id newtypes in tau-domain).
+uuid       = { workspace = true, features = ["v4"] }
 
 [features]
 default = []

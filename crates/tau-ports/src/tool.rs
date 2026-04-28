@@ -53,6 +53,24 @@ pub struct SessionContext {
     pub deadline: Option<SystemTime>,
 }
 
+impl SessionContext {
+    /// Construct a [`SessionContext`]. Provided so external callers —
+    /// notably tau-runtime, which mints one per tool dispatch in
+    /// `Runtime::run` — can build one without struct-literal syntax
+    /// (the type is `#[non_exhaustive]`).
+    pub fn new(
+        agent_instance_id: AgentInstanceId,
+        session_id: Uuid,
+        deadline: Option<SystemTime>,
+    ) -> Self {
+        Self {
+            agent_instance_id,
+            session_id,
+            deadline,
+        }
+    }
+}
+
 /// Result of a single [`Tool::invoke`] call.
 ///
 /// Mirrors the MCP tool-result shape: a list of typed content blocks

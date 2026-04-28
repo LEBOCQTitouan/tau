@@ -248,9 +248,7 @@ impl<T: Storage + 'static> DynStorage for T {
 /// ```
 #[non_exhaustive]
 pub struct Runtime {
-    #[allow(dead_code)]
     llm_backends: HashMap<String, Arc<dyn DynLlmBackend>>,
-    #[allow(dead_code)]
     tools: HashMap<String, Arc<dyn DynTool>>,
     #[allow(dead_code)]
     storages: HashMap<String, Arc<dyn DynStorage>>,
@@ -264,21 +262,20 @@ impl Runtime {
     }
 
     /// Read-only access to the LLM-backend registry. Used by dispatch
-    /// resolution helpers (Task 9).
-    #[allow(dead_code)]
+    /// resolution helpers (Task 9) and the run loop (Task 10).
     pub(crate) fn llm_backends(&self) -> &HashMap<String, Arc<dyn DynLlmBackend>> {
         &self.llm_backends
     }
 
     /// Read-only access to the tool registry. Used by dispatch
-    /// resolution helpers (Task 9).
-    #[allow(dead_code)]
+    /// resolution helpers (Task 9) and the run loop (Task 10).
     pub(crate) fn tools(&self) -> &HashMap<String, Arc<dyn DynTool>> {
         &self.tools
     }
 
-    /// Read-only access to the storage registry. Used by dispatch
-    /// resolution helpers (Task 9).
+    /// Read-only access to the storage registry. Reserved for future
+    /// dispatch use — at v0.1 nothing in the kernel routes through
+    /// storage from the run loop.
     #[allow(dead_code)]
     pub(crate) fn storages(&self) -> &HashMap<String, Arc<dyn DynStorage>> {
         &self.storages
