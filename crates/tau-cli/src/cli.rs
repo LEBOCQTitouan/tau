@@ -84,11 +84,16 @@ pub struct ListArgs {
     #[arg(value_enum, default_value = "packages")]
     pub resource: ListResource,
     /// Restrict the listing to globally-installed entries.
+    /// (Ignored when `resource` is `agents`; agents are always project-scoped.)
     #[arg(long, conflicts_with = "all")]
     pub global: bool,
-    /// List both project and global entries.
+    /// List both project and global entries side-by-side.
+    /// (Ignored when `resource` is `agents`; agents are always project-scoped.)
     #[arg(long)]
     pub all: bool,
+    /// Rejected explicitly: `tau list` is read-only.
+    #[arg(long, hide = true)]
+    pub dry_run: bool,
 }
 
 /// Arguments for `tau run`.
