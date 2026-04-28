@@ -10,6 +10,7 @@ pub mod cli;
 pub mod cmd;
 pub mod exit;
 pub mod output;
+pub mod tracing;
 
 pub use exit::ExitCode;
 pub use output::{ColorChoice, Output};
@@ -25,6 +26,7 @@ use clap::Parser;
 /// an "unimplemented" error. Tasks 10-14 land the real handlers.
 pub async fn run_main() -> std::process::ExitCode {
     let cli = cli::Cli::parse();
+    tracing::install(&cli);
     match dispatch(cli).await {
         Ok(()) => ExitCode::Success.into(),
         Err(err) => {
