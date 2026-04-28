@@ -23,6 +23,7 @@
 
 mod common;
 
+#[cfg(feature = "test-mock")]
 use assert_cmd::Command as AssertCmd;
 
 #[cfg(feature = "test-mock")]
