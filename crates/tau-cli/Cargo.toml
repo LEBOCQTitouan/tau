@@ -42,3 +42,11 @@ tau-ports  = { workspace = true, features = ["test-fixtures"] }
 
 [features]
 default = []
+# Compile in a mock LLM backend + echo tool so `tau run` is functional
+# without real plugin loading (which lands in Phase 1+). Production
+# builds leave this off; the v0.1 binary surfaces
+# `BuildError::NoLlmBackend` until plugin loading exists. Pulls in the
+# `test-fixtures` constructors from tau-ports so the mock can build
+# `#[non_exhaustive]` `CompletionResponse` / `ToolUse` / `ToolResult`
+# values without struct-literal syntax (E0639).
+test-mock = ["tau-ports/test-fixtures"]

@@ -35,8 +35,18 @@ pub async fn run_main() -> std::process::ExitCode {
     match dispatch(cli).await {
         Ok(()) => ExitCode::Success.into(),
         Err(err) => {
-            eprintln!("error: {err}");
-            ExitCode::from(&err).into()
+            // The AgentFailed marker is emitted by `cmd::run` when the
+            // agent reaches `RunOutcome::Failed`. It must NOT print the
+            // generic "error:" prefix — the run handler has already
+            // emitted a structured failure to the user. All other
+            // errors are kernel/CLI failures; they get the prefix and
+            // map to `ExitCode::Error`.
+            if err.downcast_ref::<crate::cmd::run::AgentFailed>().is_some() {
+                ExitCode::AgentFailed.into()
+            } else {
+                eprintln!("error: {err}");
+                ExitCode::from(&err).into()
+            }
         }
     }
 }
