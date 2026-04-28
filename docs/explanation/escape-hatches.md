@@ -27,6 +27,7 @@ mechanically.
 | <a id="registryerror-internal"></a>`registryerror-internal` | `RegistryError::Internal { message }` | catch-all for lockfile / registry-read failures not yet covered by typed variants | promote when 2+ distinct contexts surface | 3 |
 | <a id="installerror-internal"></a>`installerror-internal` | `InstallError::Internal { message }` | catch-all for install lifecycle failures not reportable as `Git`, `Manifest`, `Registry`, `Scope`, `SourceManifestMismatch`, or `Locked` | promote when 2+ distinct contexts surface | 3 |
 | <a id="uninstallerror-internal"></a>`uninstallerror-internal` | `UninstallError::Internal { message }` | catch-all for uninstall failures not yet covered by typed variants | promote when 2+ distinct contexts surface | 3 |
+| <a id="builderror-internal"></a>`builderror-internal` | `BuildError::Internal { message }` | catch-all for invariant violations during `RuntimeBuilder::build()` not yet covered by typed variants | promote when 2+ distinct contexts surface | 4 |
 
 ## Promoted escape hatches
 
