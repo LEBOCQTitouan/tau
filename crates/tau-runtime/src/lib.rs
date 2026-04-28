@@ -18,6 +18,8 @@
 
 pub mod error;
 pub mod options;
+pub mod outcome;
 
 pub use error::{BuildError, CapabilityDenial, PluginKind, RuntimeError};
 pub use options::{RunOptions, TokenUsage};
+pub use outcome::RunOutcome;
