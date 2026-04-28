@@ -1,6 +1,6 @@
 # ADR-0007: tau-cli + tau-runtime amendments (capability filter, run_with_history)
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-04-28
 **Supersedes:** —
 **Amends:** ADR-0006 §7 and §11 (refines typed-capability story by
