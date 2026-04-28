@@ -13,7 +13,9 @@ fn capture_help(args: &[&str]) -> String {
     // Normalize line endings: snapshots are recorded with `\n` on
     // macOS/Linux; Windows captures `\r\n`. Convert before snapshotting
     // so the same `.snap` files are valid on every host.
-    String::from_utf8(output.stdout).expect("utf8").replace("\r\n", "\n")
+    String::from_utf8(output.stdout)
+        .expect("utf8")
+        .replace("\r\n", "\n")
 }
 
 #[test]
