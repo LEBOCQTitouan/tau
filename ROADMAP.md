@@ -7,42 +7,91 @@ PG4.
 For per-issue tracking, see [GitHub
 Issues](https://github.com/LEBOCQTitouan/tau/issues).
 
-## Current phase: 0 — bootstrap
+## Current phase: 1 — runnable runtime
+
+**Goal:** make the Phase 0 stack actually runnable end-to-end. Plugin
+loading mechanism, first real LLM-backend + tool plugins, capability
+override, transitive dependency resolution. The first sub-project of
+Phase 1 unblocks everything else.
+
+**Status:** planning. The retrospective at
+`docs/retrospectives/phase-0.md` ratifies Phase 1 priorities; the
+first sub-project (plugin loading) starts with a brainstorm.
+
+## Phase 0 (complete) — bootstrap + foundational sub-projects
 
 **Goal:** empty repo with green CI, full governance files, and the
-hexagonal workspace skeleton in place. No domain logic.
+hexagonal workspace skeleton in place; then five foundational
+sub-projects (tau-domain, tau-ports, tau-pkg, tau-runtime, tau-cli)
+producing working, testable software on its own per the
+brainstorm→spec→plan→implementation cycle.
 
-**Status:** in progress (this commit is part of the bootstrap).
+**Outcome:** all sub-projects shipped on schedule (2026-04-24 →
+2026-04-28). 6 ADRs Accepted. 464 workspace tests passing. 12 required
+CI status checks gating `main`. Hexagonal architecture realized across
+the 5-crate runtime surface (`tau-domain`, `tau-ports`, `tau-pkg`,
+`tau-runtime`, `tau-cli`); 3 stub crates (`tau-app`, `tau-infra`,
+`tau-observe`) reserved for Phase 1+ work.
 
-**Done when:** the bootstrap implementation plan
-(`docs/superpowers/plans/2026-04-24-repo-bootstrap.md`) is complete and
-CI is green on `main` for Linux, macOS, and Windows.
+**Material v0.1 limitation:** plugin loading is deferred to Phase 1+
+per ADR-0007 §18. `tau install` records source trees; the loader lands
+in Phase 1.
 
-## Near term — Phase 0 sub-projects
+| # | Sub-project | Produces | Merged |
+|---|---|---|---|
+| 0 | Repo bootstrap | Empty workspace + governance + CI | 2026-04-24 |
+| 1 | `tau-domain` Message + Agent + Package types ✅ | Pure-types crate with `thiserror` errors, doc tests, proptest for parsers | 2026-04-25 |
+| 2 | `tau-ports` plugin traits ✅ | Trait definitions for LLM backend, tool, storage, sandbox | 2026-04-26 |
+| 3 | `tau-pkg` package manager ✅ | `tau install` from git URLs, capability declarations parsed (G14), scope resolution (G8) | 2026-04-27 |
+| 4 | `tau-runtime` agent lifecycle + message passing ✅ | Spawn an agent, deliver messages, observe via structured logs (solo path only) | 2026-04-28 |
+| 5 | `tau-cli` real subcommands ✅ | `tau install`, `tau run`, `tau ls`, `tau init`, `tau chat` | 2026-04-28 |
 
-Each sub-project below produces working, testable software on its own
-and ships in its own brainstorm → spec → plan → implementation cycle.
+Phase 0 retrospective: [`docs/retrospectives/phase-0.md`](docs/retrospectives/phase-0.md).
 
-| # | Sub-project | Produces |
-|---|---|---|
-| 0 | Repo bootstrap *(this one)* | Empty workspace + governance + CI |
-| 1 | `tau-domain` Message + Agent + Package types ✅ | Pure-types crate with `thiserror` errors, doc tests, proptest for parsers *(complete — 2026-04-25)* |
-| 2 | `tau-ports` plugin traits ✅ | Trait definitions for LLM backend, tool, storage, sandbox *(complete — 2026-04-26)* |
-| 3 | `tau-pkg` package manager ✅ | `tau install` from git URLs, capability declarations parsed (G14), scope resolution (G8) *(complete — 2026-04-27)* |
-| 4 | `tau-runtime` agent lifecycle + message passing ✅ | Spawn an agent, deliver messages, observe via structured logs (solo path only) *(complete — 2026-04-28)* |
-| 5 | `tau-cli` real subcommands ✅ | `tau install`, `tau run`, `tau ls`, `tau init`, `tau chat` *(complete — 2026-04-28)* |
+## Phase 1 priorities
 
-Once 1–5 land, Phase 0 is complete. A retrospective per PG4 closes the
-phase and updates this file with Phase 1 priorities.
+Detailed motivation per priority is in
+[`docs/retrospectives/phase-0.md` §7](docs/retrospectives/phase-0.md).
+Tier ordering reflects criticality, not strict implementation order
+(some Tier 2/3 items can run in parallel with later Tier 1 items).
 
-## Phase 1 (preview)
+### Tier 1 — unblocks Phase 1 itself
 
-Subject to retrospective:
+1. **Plugin loading mechanism.** First sub-project; ADR-driven choice
+   between dlopen / abi_stable / out-of-process IPC / WASM.
+2. **First real LLM-backend plugin.** Validates the loading mechanism
+   end-to-end. Likely Anthropic / OpenAI HTTP via reqwest.
+3. **First real Tool plugin.** `fs-read` + `shell` initial set;
+   exercises capability checks at runtime.
 
-- Serve mode (JSON-RPC over stdio) — second public surface (G6, QG12)
-- Sandboxing implementation — fulfils G12 (mechanism TBD via ADR)
-- Performance budgets enforced in CI (QG14)
-- `cargo audit` and `cargo-deny` (QG16)
+### Tier 2 — completes Phase 0 deferrals
+
+4. **Capability override implementation** (project tau.toml
+   `[agents.<id>.capabilities]` with intersect-only semantics, per
+   ADR-0007 §4 reservation).
+5. **Transitive dependency resolution** (`requires.tools` auto-install,
+   per ADR-0004 §10 deferral).
+6. **Schema validation for tool args** (activates
+   `RuntimeError::PluginContractViolation`).
+7. **`tau update` / `tau verify` / `tau uninstall` subcommands.**
+8. **Streaming LLM responses** (`Runtime::run_streaming` additive).
+
+### Tier 3 — extends the runtime
+
+9. **Multi-agent orchestration** (G10's deferred half).
+10. **Workflow / pipeline runner** (deterministic step-by-step
+    pipelines; possibly new `tau-workflow` crate).
+11. **REPL persistence** (`tau chat --resume <id>`).
+12. **Sandboxing implementation** (Constitution G12).
+
+### Tier 4 — operational quality
+
+13. **Performance budgets enforced in CI** (Constitution QG14, G16).
+14. **`cargo audit` + `cargo-deny` in CI** (Constitution QG16).
+15. **Serve mode** (JSON-RPC over stdio; Constitution G6, QG12). Lives
+    in `tau-app`.
+16. **Windows test parity.** Address the snapshot test wrapping issues
+    that close Phase 0 with non-blocking failures.
 
 ## Out of scope (forever)
 
