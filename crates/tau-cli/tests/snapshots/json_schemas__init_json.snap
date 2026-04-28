@@ -1,0 +1,9 @@
+---
+source: crates/tau-cli/tests/json_schemas.rs
+expression: val
+---
+{
+  "created": "tau.toml",
+  "force": false,
+  "path": "[PATH]"
+}

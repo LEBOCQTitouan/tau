@@ -1,0 +1,12 @@
+---
+source: crates/tau-cli/tests/json_schemas.rs
+expression: val
+---
+[
+  {
+    "display_name": "Code Reviewer",
+    "id": "reviewer",
+    "llm_backend": "anthropic",
+    "package": "code-reviewer@^0.1"
+  }
+]
