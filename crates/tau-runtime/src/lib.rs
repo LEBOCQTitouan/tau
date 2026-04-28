@@ -18,6 +18,7 @@
 
 pub mod builder;
 pub(crate) mod capability;
+pub(crate) mod dispatch;
 pub mod error;
 pub mod options;
 pub mod outcome;

@@ -1,0 +1,178 @@
+//! Dispatch resolution helpers. Looks up plugin instances by name and
+//! converts [`tau_domain::Address`] to a tool name. Pure logic, no I/O.
+//!
+//! All helpers are kernel-internal (`pub(crate)`) — dispatch routing
+//! is not part of the public `tau-runtime` API surface.
+//!
+//! # Dead-code allow
+//!
+//! The helpers here are exercised by the in-module `tests` submodule
+//! immediately, and will be wired into the runtime dispatcher in
+//! Task 10 (the agent multi-turn run loop). Until then, the non-test
+//! build sees only intra-module callers and would warn. The module-
+//! level `#[allow(dead_code)]` is removed in the Task 10 commit.
+
+#![allow(dead_code)]
+
+use std::sync::Arc;
+
+use tau_domain::Address;
+
+use crate::builder::{DynLlmBackend, DynTool};
+use crate::error::RuntimeError;
+use crate::Runtime;
+
+impl Runtime {
+    /// Resolve an LLM backend by name. Returns
+    /// [`RuntimeError::LlmBackendNotRegistered`] if the agent's
+    /// requested backend is not in the registry.
+    pub(crate) fn resolve_llm_backend(
+        &self,
+        agent_id: &str,
+        backend_name: &str,
+    ) -> Result<&Arc<dyn DynLlmBackend>, RuntimeError> {
+        self.llm_backends()
+            .get(backend_name)
+            .ok_or_else(|| RuntimeError::LlmBackendNotRegistered {
+                agent_id: agent_id.to_owned(),
+                backend: backend_name.to_owned(),
+            })
+    }
+
+    /// Resolve a tool by name. On miss, returns
+    /// [`RuntimeError::ToolNotRegistered`] populated with the sorted
+    /// list of registered tool names for diagnostics.
+    pub(crate) fn resolve_tool(&self, tool_name: &str) -> Result<&Arc<dyn DynTool>, RuntimeError> {
+        self.tools().get(tool_name).ok_or_else(|| {
+            let mut registered: Vec<String> = self.tools().keys().cloned().collect();
+            registered.sort();
+            RuntimeError::ToolNotRegistered {
+                tool_name: tool_name.to_owned(),
+                registered,
+            }
+        })
+    }
+}
+
+/// Convert a recipient [`Address`] to a tool name. v0.1 only routes
+/// to tools (`Address::Tool`); other variants return `None`.
+pub(crate) fn address_to_tool_name(addr: &Address) -> Option<&str> {
+    match addr {
+        Address::Tool(name) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use tau_domain::{AgentInstanceId, Value};
+    use tau_ports::fixtures::{make_tool_spec, MockLlmBackend, MockTool};
+
+    fn empty_tool_spec(name: &str) -> tau_ports::ToolSpec {
+        make_tool_spec(
+            name.to_string(),
+            "mock tool".to_string(),
+            Value::Object(Default::default()),
+        )
+    }
+
+    #[test]
+    fn resolve_llm_backend_present_returns_arc() {
+        let runtime = Runtime::builder()
+            .with_llm_backend(MockLlmBackend::new("gpt-4"))
+            .build()
+            .expect("build runtime");
+
+        let backend = runtime
+            .resolve_llm_backend("agent-x", "gpt-4")
+            .expect("backend present");
+        assert_eq!(backend.name(), "gpt-4");
+    }
+
+    #[test]
+    fn resolve_llm_backend_absent_returns_error() {
+        let runtime = Runtime::builder()
+            .with_llm_backend(MockLlmBackend::new("gpt-4"))
+            .build()
+            .expect("build runtime");
+
+        let result = runtime.resolve_llm_backend("agent-x", "missing-backend");
+        // `Ok` side is `&Arc<dyn DynLlmBackend>` which is not `Debug`,
+        // so we can't `{result:?}` the whole `Result` — discriminate
+        // first, then debug-format only the `Err`.
+        let Err(err) = result else {
+            panic!("expected LlmBackendNotRegistered, got Ok")
+        };
+        let RuntimeError::LlmBackendNotRegistered {
+            agent_id, backend, ..
+        } = err
+        else {
+            panic!("expected LlmBackendNotRegistered: {err:?}")
+        };
+        assert_eq!(agent_id, "agent-x");
+        assert_eq!(backend, "missing-backend");
+    }
+
+    #[test]
+    fn resolve_tool_present_returns_arc() {
+        let runtime = Runtime::builder()
+            .with_llm_backend(MockLlmBackend::new("gpt-4"))
+            .with_tool(MockTool::new("echo", empty_tool_spec("echo")))
+            .build()
+            .expect("build runtime");
+
+        let tool = runtime.resolve_tool("echo").expect("tool present");
+        assert_eq!(tool.name(), "echo");
+    }
+
+    #[test]
+    fn resolve_tool_absent_returns_error_with_registered_list() {
+        let runtime = Runtime::builder()
+            .with_llm_backend(MockLlmBackend::new("gpt-4"))
+            .with_tool(MockTool::new("echo", empty_tool_spec("echo")))
+            .with_tool(MockTool::new("reverse", empty_tool_spec("reverse")))
+            .build()
+            .expect("build runtime");
+
+        let result = runtime.resolve_tool("missing");
+        // `Ok` side is `&Arc<dyn DynTool>` which is not `Debug`, so we
+        // can't `{result:?}` the whole `Result` — discriminate first,
+        // then debug-format only the `Err`.
+        let Err(err) = result else {
+            panic!("expected ToolNotRegistered, got Ok")
+        };
+        let RuntimeError::ToolNotRegistered {
+            tool_name,
+            registered,
+            ..
+        } = err
+        else {
+            panic!("expected ToolNotRegistered: {err:?}")
+        };
+        assert_eq!(tool_name, "missing");
+        assert_eq!(
+            registered,
+            vec!["echo".to_string(), "reverse".to_string()],
+            "registered list should contain both tools, sorted"
+        );
+    }
+
+    #[test]
+    fn address_to_tool_name_routes_only_tool_addresses() {
+        // Tool variant -> Some(name).
+        let tool_addr = Address::Tool("foo".into());
+        assert_eq!(address_to_tool_name(&tool_addr), Some("foo"));
+
+        // User -> None.
+        assert_eq!(address_to_tool_name(&Address::User), None);
+
+        // System -> None.
+        assert_eq!(address_to_tool_name(&Address::System), None);
+
+        // Agent -> None.
+        let agent_addr = Address::Agent(AgentInstanceId::new());
+        assert_eq!(address_to_tool_name(&agent_addr), None);
+    }
+}
