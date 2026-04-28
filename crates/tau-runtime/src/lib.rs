@@ -17,5 +17,7 @@
 //! See `docs/decisions/0006-tau-runtime.md` for the design rationale.
 
 pub mod error;
+pub mod options;
 
 pub use error::{BuildError, CapabilityDenial, PluginKind, RuntimeError};
+pub use options::{RunOptions, TokenUsage};
