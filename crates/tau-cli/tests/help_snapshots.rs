@@ -10,12 +10,16 @@ fn capture_help(args: &[&str]) -> String {
         .output()
         .expect("binary runs");
     // clap's `--help` exits with status 0 and writes to stdout.
-    // Normalize line endings: snapshots are recorded with `\n` on
-    // macOS/Linux; Windows captures `\r\n`. Convert before snapshotting
-    // so the same `.snap` files are valid on every host.
+    //
+    // Normalize platform variations so the same .snap files are valid
+    // everywhere:
+    //   1. CRLF → LF — Windows writes `\r\n`, macOS/Linux write `\n`.
+    //   2. `tau.exe` → `tau` — clap derives the binary name from
+    //      `argv[0]`, so `Usage:` shows `tau.exe` on Windows.
     String::from_utf8(output.stdout)
         .expect("utf8")
         .replace("\r\n", "\n")
+        .replace("tau.exe", "tau")
 }
 
 #[test]
