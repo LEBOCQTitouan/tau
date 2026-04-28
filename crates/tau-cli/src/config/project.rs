@@ -537,8 +537,11 @@ mod proptests {
     }
 
     /// Generate a non-empty free-form string (no quotes, no backslashes).
+    /// Excludes whitespace-only outputs since the validator trims and
+    /// rejects empty strings — strategy must produce values that survive
+    /// `.trim()` non-empty.
     fn safe_string_strategy() -> impl Strategy<Value = String> {
-        "[A-Za-z0-9 .]{1,30}"
+        "[A-Za-z0-9.]{1,30}"
     }
 
     fn agent_entry_strategy() -> impl Strategy<Value = (String, UncheckedAgent)> {

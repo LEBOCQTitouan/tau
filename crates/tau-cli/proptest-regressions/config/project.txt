@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ab5cb8a07307f97254ac8e04a9081350e84434c1348d4c5fad5ca43c6ceb2287 # shrinks to project_name = "a", agents = [("a", UncheckedAgent { display_name: " ", package: "a@^0.1", llm_backend: "a", requires: None, capabilities: None, config: None, prompt: None })]

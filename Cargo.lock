@@ -1481,6 +1481,7 @@ dependencies = [
  "predicates",
  "proptest",
  "rustyline",
+ "semver",
  "serde",
  "serde_json",
  "tau-domain",

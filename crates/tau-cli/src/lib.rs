@@ -13,7 +13,10 @@ pub mod exit;
 pub mod output;
 pub mod tracing;
 
-pub use config::{AgentEntry, ProjectConfig, ProjectConfigError, PromptEntry, RequiresEntry};
+pub use config::{
+    build_agent_definition, AgentEntry, AgentResolutionError, ProjectConfig, ProjectConfigError,
+    PromptEntry, RequiresEntry,
+};
 pub use exit::ExitCode;
 pub use output::{ColorChoice, Output};
 
