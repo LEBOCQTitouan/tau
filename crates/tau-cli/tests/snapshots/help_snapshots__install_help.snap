@@ -1,0 +1,43 @@
+---
+source: crates/tau-cli/tests/help_snapshots.rs
+expression: s
+---
+Install a package from a Git URL
+
+Usage: tau install [OPTIONS] <URL>
+
+Arguments:
+  <URL>
+          Git URL of the package to install
+
+Options:
+      --global
+          Install into the global scope (~/.tau) instead of the project scope
+
+      --dry-run
+          Validate the install without writing to disk or updating the lockfile
+
+  -v, --verbose...
+          Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
+
+  -q, --quiet
+          Suppress non-error output (sets tracing to WARN)
+
+      --debug
+          Show full error chain + DEBUG-level tracing on failures
+
+      --color <COLOR>
+          Color mode for terminal output
+
+          Possible values:
+          - always: Always emit ANSI color codes
+          - auto:   Auto-detect based on terminal capabilities
+          - never:  Never emit color codes
+          
+          [default: auto]
+
+      --json
+          Emit structured JSON output instead of human-readable. Only supported on `install`, `list`, `run`, `init`
+
+  -h, --help
+          Print help (see a summary with '-h')

@@ -1,0 +1,43 @@
+---
+source: crates/tau-cli/tests/help_snapshots.rs
+expression: s
+---
+Open a REPL chat session with an agent
+
+Usage: tau chat [OPTIONS] <AGENT_ID>
+
+Arguments:
+  <AGENT_ID>
+          Identifier of the agent to chat with
+
+Options:
+      --max-turns <MAX_TURNS>
+          Override RunOptions::max_turns
+
+      --dry-run
+          Validate setup without entering the REPL
+
+  -v, --verbose...
+          Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
+
+  -q, --quiet
+          Suppress non-error output (sets tracing to WARN)
+
+      --debug
+          Show full error chain + DEBUG-level tracing on failures
+
+      --color <COLOR>
+          Color mode for terminal output
+
+          Possible values:
+          - always: Always emit ANSI color codes
+          - auto:   Auto-detect based on terminal capabilities
+          - never:  Never emit color codes
+          
+          [default: auto]
+
+      --json
+          Emit structured JSON output instead of human-readable. Only supported on `install`, `list`, `run`, `init`
+
+  -h, --help
+          Print help (see a summary with '-h')

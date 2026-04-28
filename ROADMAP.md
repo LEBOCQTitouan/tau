@@ -30,7 +30,7 @@ and ships in its own brainstorm → spec → plan → implementation cycle.
 | 2 | `tau-ports` plugin traits ✅ | Trait definitions for LLM backend, tool, storage, sandbox *(complete — 2026-04-26)* |
 | 3 | `tau-pkg` package manager ✅ | `tau install` from git URLs, capability declarations parsed (G14), scope resolution (G8) *(complete — 2026-04-27)* |
 | 4 | `tau-runtime` agent lifecycle + message passing ✅ | Spawn an agent, deliver messages, observe via structured logs (solo path only) *(complete — 2026-04-28)* |
-| 5 | `tau-cli` real subcommands | `tau install`, `tau run`, `tau ls` |
+| 5 | `tau-cli` real subcommands ✅ | `tau install`, `tau run`, `tau ls`, `tau init`, `tau chat` *(complete — 2026-04-28)* |
 
 Once 1–5 land, Phase 0 is complete. A retrospective per PG4 closes the
 phase and updates this file with Phase 1 priorities.

@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
-//! tau command-line interface entry point.
-//!
-//! Phase 0 bootstrap: prints "tau" and exits. Subcommands land in later sub-projects.
+//! tau command-line entry point.
 
-fn main() {
-    println!("tau");
+#[tokio::main]
+async fn main() -> std::process::ExitCode {
+    tau_cli::run_main().await
 }

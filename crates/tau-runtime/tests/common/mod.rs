@@ -16,8 +16,8 @@
 use std::str::FromStr;
 
 use tau_domain::{
-    Address, AgentDefinition, AgentId, Message, MessagePayload, PackageId, PackageManifest,
-    PackageName, UncheckedManifest, Value, Version,
+    Address, AgentDefinition, AgentId, AgentInstanceId, Message, MessagePayload, PackageId,
+    PackageManifest, PackageName, UncheckedManifest, Value, Version,
 };
 use tau_ports::fixtures::make_tool_spec;
 use tau_ports::ToolSpec;
@@ -82,6 +82,15 @@ pub fn manifest_from_toml(toml_body: &str) -> PackageManifest {
     unchecked
         .validate()
         .expect("test manifest must satisfy validation")
+}
+
+/// Mint a fresh `Address::Agent(...)` for tests that need to fabricate
+/// prior conversation history. The run loop generates its own per-run
+/// `AgentInstanceId` internally; this helper is for *fixture* messages
+/// that pre-date the run (e.g. REPL history threaded into
+/// [`Runtime::run_with_history`]).
+pub fn agent_address() -> Address {
+    Address::Agent(AgentInstanceId::new())
 }
 
 /// Build a fresh user-authored `Message` with the given text payload.

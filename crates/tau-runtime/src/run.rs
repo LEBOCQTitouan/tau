@@ -48,11 +48,26 @@ use crate::outcome::RunOutcome;
 const PREVIEW_CHARS: usize = 256;
 
 impl Runtime {
-    /// Run an agent through one solo-path multi-turn iteration.
+    /// Run an agent with a pre-existing conversation history.
     ///
-    /// The loop is:
+    /// Identical to [`Runtime::run`] except `history` is pre-loaded into
+    /// the messages buffer for turn 1: the kernel projects `history`
+    /// (plus the new `initial_message`) onto the
+    /// [`CompletionRequest::messages`] list before the first LLM call.
+    /// Subsequent turns evolve the buffer normally — assistant text,
+    /// tool calls, tool results — exactly as in
+    /// [`Runtime::run`].
     ///
-    /// 1. Build a [`CompletionRequest`] from the conversation so far.
+    /// This is the entry point used by `tau chat` (sub-project 5) to
+    /// thread REPL conversation history across user turns. Per NG6
+    /// ("no persistent agent memory in core"), the kernel itself does
+    /// not retain history between calls — the CLI accumulates a
+    /// `Vec<Message>` and passes it back in on each turn.
+    ///
+    /// The loop is otherwise identical to [`Runtime::run`]:
+    ///
+    /// 1. Build a [`CompletionRequest`] from `history + initial_message`
+    ///    on turn 1; from the evolving buffer on later turns.
     /// 2. Call the LLM backend.
     /// 3. Append the assistant text to the history.
     /// 4. If no tool_uses were emitted, return
@@ -68,6 +83,18 @@ impl Runtime {
     /// denial ([`FailureKind::PolicyDenied`]) and max turns reached
     /// ([`FailureKind::OutOfResources`]). Plugin and dispatch errors
     /// bubble up as `Err(RuntimeError)` per ADR-0006.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // RunOutcome and AgentDefinition are #[non_exhaustive]; doctests
+    /// // can't construct them via struct-literal syntax. Example illustrative.
+    /// use tau_runtime::{Runtime, RunOptions};
+    ///
+    /// let outcome = runtime
+    ///     .run_with_history(agent_def, manifest, history, initial_message, RunOptions::default())
+    ///     .await?;
+    /// ```
     #[instrument(
         name = "runtime.agent_run",
         skip_all,
@@ -77,12 +104,14 @@ impl Runtime {
             package_id = %agent_def.package.name,
             llm_backend_name = %agent_def.llm_backend,
             max_turns = options.max_turns,
+            history_len = history.len(),
         ),
     )]
-    pub async fn run(
+    pub async fn run_with_history(
         &self,
         agent_def: AgentDefinition,
         package_manifest: PackageManifest,
+        history: Vec<Message>,
         initial_message: Message,
         options: RunOptions,
     ) -> Result<RunOutcome, RuntimeError> {
@@ -104,11 +133,51 @@ impl Runtime {
             .resolve_llm_backend(agent_def.id.as_str(), agent_def.llm_backend.as_str())?
             .clone();
 
-        let mut messages: Vec<Message> = build_initial_messages(initial_message);
+        // Pre-load `history` into the messages buffer so the very first
+        // `CompletionRequest.messages` carries the prior conversation
+        // before the new `initial_message`. With `history = vec![]` this
+        // collapses to the original `vec![initial_message]` behavior.
+        let mut messages: Vec<Message> = Vec::with_capacity(history.len() + 1);
+        messages.extend(history);
+        messages.push(initial_message);
         let mut total_turns: u32 = 0;
         let mut aggregated_tokens = TokenUsage::default();
 
-        let tool_specs: Vec<ToolSpec> = self.tools().values().map(|t| t.schema()).collect();
+        // Capability-filter the tools exposed to the LLM (spec §3.10).
+        //
+        // Each registered tool's `Tool::capabilities()` is checked against
+        // the agent package's grants; tools with at least one unsatisfied
+        // requirement are dropped from `CompletionRequest.tools` before
+        // the loop starts. This shrinks the LLM prompt and prevents
+        // spurious tool_uses that would otherwise be denied at invoke
+        // time. The capability check inside the dispatch loop stays as
+        // defense-in-depth — it catches bugs in the filter and any
+        // future tools whose required capabilities depend on per-call
+        // arguments.
+        let mut tool_specs: Vec<ToolSpec> = Vec::with_capacity(self.tools().len());
+        let mut filtered_count: usize = 0;
+        for (name, tool) in self.tools().iter() {
+            let required = tool.capabilities();
+            if let Some(missing) = check_capabilities(granted, required) {
+                let kind = capability_kind_str(missing);
+                warn!(
+                    name = "runtime.tool_filtered",
+                    tool_name = name.as_str(),
+                    missing_kind = %kind,
+                    "tool filtered out: missing capability",
+                );
+                filtered_count += 1;
+                continue;
+            }
+            tool_specs.push(tool.schema());
+        }
+        debug!(
+            name = "runtime.tools_filtered",
+            granted_count = granted.len(),
+            total_tools = self.tools().len(),
+            exposed_tools = tool_specs.len(),
+            filtered_count = filtered_count,
+        );
 
         while total_turns < options.max_turns {
             total_turns += 1;
@@ -374,6 +443,31 @@ impl Runtime {
         Ok(outcome)
     }
 
+    /// Run an agent through one solo-path multi-turn iteration with no
+    /// prior conversation history.
+    ///
+    /// Thin wrapper around [`Runtime::run_with_history`] with
+    /// `history = vec![]`. See `run_with_history` for the full loop
+    /// semantics, error/failure dichotomy, and tracing vocabulary.
+    /// Existing callers that don't need history threading should
+    /// continue to use this entry point.
+    pub async fn run(
+        &self,
+        agent_def: AgentDefinition,
+        package_manifest: PackageManifest,
+        initial_message: Message,
+        options: RunOptions,
+    ) -> Result<RunOutcome, RuntimeError> {
+        self.run_with_history(
+            agent_def,
+            package_manifest,
+            Vec::new(),
+            initial_message,
+            options,
+        )
+        .await
+    }
+
     /// Convenience: [`Runtime::run`] with [`RunOptions::default`].
     pub async fn run_default(
         &self,
@@ -394,14 +488,6 @@ impl Runtime {
 // ---------------------------------------------------------------------------
 // Internal helpers (named per the plan; each has a unit test below)
 // ---------------------------------------------------------------------------
-
-/// Wrap the single initial message in the conversation history. v0.1
-/// is trivial (`vec![initial]`); the helper exists so the run loop
-/// reads cleanly and so future bootstrap steps (system-prompt
-/// projection, scratchpad seeding) have a stable hook point.
-pub(crate) fn build_initial_messages(initial: Message) -> Vec<Message> {
-    vec![initial]
-}
 
 /// Validate tool-call arguments emitted by the LLM against the tool's
 /// expected shape.
@@ -696,16 +782,6 @@ mod tests {
         )
     }
 
-    // -------------------- build_initial_messages --------------------
-
-    #[test]
-    fn build_initial_messages_wraps_initial_in_singleton_vec() {
-        let m = user_text_message("hello");
-        let out = build_initial_messages(m.clone());
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].id, m.id);
-    }
-
     // -------------------- deserialize_tool_args --------------------
 
     #[test]
@@ -832,6 +908,29 @@ mod tests {
         assert_eq!(truncate_to_chars(s, 3), "ééé");
         assert_eq!(truncate_to_chars(s, 100), "éééééé");
         assert_eq!(truncate_to_chars(s, 0), "");
+    }
+
+    #[test]
+    fn capability_kind_str_for_filesystem_read() {
+        // Round-trip an `fs.read` capability through the manifest wire
+        // form (variant-level `#[non_exhaustive]` blocks struct-literal
+        // construction from outside `tau-domain`) and assert the
+        // top-level kind projection matches the existing dot-namespaced
+        // taxonomy used by `CapabilityDenial::required_kind` and the
+        // `runtime.tool_filtered` event.
+        #[derive(serde::Deserialize)]
+        struct CapWrapper {
+            cap: Capability,
+        }
+        let cap = toml::from_str::<CapWrapper>(
+            r#"[cap]
+kind = "fs.read"
+paths = ["**"]
+"#,
+        )
+        .expect("test fs.read capability TOML must parse")
+        .cap;
+        assert_eq!(capability_kind_str(&cap), "fs.read");
     }
 
     #[test]

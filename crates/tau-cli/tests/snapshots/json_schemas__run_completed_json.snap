@@ -1,0 +1,13 @@
+---
+source: crates/tau-cli/tests/json_schemas.rs
+expression: val
+---
+{
+  "final_message": "ok",
+  "outcome": "completed",
+  "token_usage": {
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "total_turns": 1
+}

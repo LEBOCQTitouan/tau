@@ -1,0 +1,49 @@
+---
+source: crates/tau-cli/tests/help_snapshots.rs
+expression: s
+---
+List installed packages or available agents
+
+Usage: tau list [OPTIONS] [RESOURCE]
+
+Arguments:
+  [RESOURCE]
+          What to list. Defaults to `packages`
+
+          Possible values:
+          - packages: List installed packages
+          - agents:   List available agents
+          
+          [default: packages]
+
+Options:
+      --global
+          Restrict the listing to globally-installed entries. (Ignored when `resource` is `agents`; agents are always project-scoped.)
+
+      --all
+          List both project and global entries side-by-side. (Ignored when `resource` is `agents`; agents are always project-scoped.)
+
+  -v, --verbose...
+          Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
+
+  -q, --quiet
+          Suppress non-error output (sets tracing to WARN)
+
+      --debug
+          Show full error chain + DEBUG-level tracing on failures
+
+      --color <COLOR>
+          Color mode for terminal output
+
+          Possible values:
+          - always: Always emit ANSI color codes
+          - auto:   Auto-detect based on terminal capabilities
+          - never:  Never emit color codes
+          
+          [default: auto]
+
+      --json
+          Emit structured JSON output instead of human-readable. Only supported on `install`, `list`, `run`, `init`
+
+  -h, --help
+          Print help (see a summary with '-h')

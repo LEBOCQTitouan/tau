@@ -1,0 +1,10 @@
+---
+source: crates/tau-cli/tests/json_schemas.rs
+expression: val
+---
+{
+  "name": "hello-tool",
+  "path": "[PATH]",
+  "scope": "global",
+  "version": "0.1.0"
+}
