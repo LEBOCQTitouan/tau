@@ -8,6 +8,9 @@
 
 pub mod cli;
 pub mod cmd;
+pub mod exit;
+
+pub use exit::ExitCode;
 
 use clap::Parser;
 
@@ -21,10 +24,10 @@ use clap::Parser;
 pub async fn run_main() -> std::process::ExitCode {
     let cli = cli::Cli::parse();
     match dispatch(cli).await {
-        Ok(()) => std::process::ExitCode::SUCCESS,
+        Ok(()) => ExitCode::Success.into(),
         Err(err) => {
             eprintln!("error: {err}");
-            std::process::ExitCode::from(2)
+            ExitCode::from(&err).into()
         }
     }
 }
