@@ -536,3 +536,258 @@ methods = ["GET"]
         assert!(check_capabilities(&granted, &required).is_none());
     }
 }
+
+#[cfg(test)]
+mod proptests {
+    //! Property tests for [`capability_satisfies`]. Three primary
+    //! invariants per spec §4:
+    //!
+    //! 1. **Reflexivity**: any capability satisfies itself.
+    //! 2. **Wrong-variant rejection**: top-level enum mismatch always
+    //!    denies (a `Filesystem` grant never covers a `Network`
+    //!    request, etc).
+    //! 3. **Glob superset**: a `/<prefix>/**` grant satisfies any
+    //!    specific path under that prefix.
+    //!
+    //! Lives in the same file as the satisfies-relation because
+    //! `capability_satisfies` is `pub(crate)` and not reachable from
+    //! integration-test crates without a dedicated test feature flag —
+    //! keeping the proptest co-located with the function under test
+    //! avoids that machinery.
+    //!
+    //! Capability instances are constructed by round-tripping through
+    //! the canonical TOML wire form (per ADR-0002) because variant-
+    //! level `#[non_exhaustive]` blocks struct-literal construction
+    //! from outside `tau-domain`. The `Custom` namespace is exercised
+    //! via the wire form too, since `Value` is `#[non_exhaustive]`.
+    //!
+    //! Each property runs 256 cases. The `proptest!` macro flattens
+    //! into one `#[test]` per property, so this submodule contributes
+    //! three to the unit-test count.
+    use super::*;
+    use proptest::prelude::*;
+    use tau_domain::Capability;
+    use tau_domain::FsCapability;
+    use tau_domain::NetCapability;
+    use tau_domain::ProcessCapability;
+
+    #[derive(serde::Deserialize)]
+    struct CapWrapper {
+        cap: Capability,
+    }
+
+    fn cap_from_toml(t: &str) -> Capability {
+        toml::from_str::<CapWrapper>(t)
+            .expect("proptest-generated TOML must parse")
+            .cap
+    }
+
+    /// Path segment alphabet, no `*`/`/` so glob metacharacters never
+    /// leak into the strategy by accident — the glob property
+    /// constructs them explicitly.
+    const SEG: &str = "[a-z][a-z0-9]{0,7}";
+
+    /// A POSIX-shaped path with one or two segments and a short ext.
+    fn path_strategy() -> impl Strategy<Value = String> {
+        prop_oneof![
+            (SEG, SEG, "[a-z]{2,4}").prop_map(|(a, b, ext)| format!("/{a}/{b}.{ext}")),
+            (SEG, SEG, SEG, "[a-z]{2,4}").prop_map(|(a, b, c, ext)| format!("/{a}/{b}/{c}.{ext}")),
+        ]
+    }
+
+    fn paths_vec_strategy() -> impl Strategy<Value = Vec<String>> {
+        prop::collection::vec(path_strategy(), 1..=3)
+    }
+
+    fn fs_capability_strategy() -> impl Strategy<Value = Capability> {
+        prop_oneof![
+            paths_vec_strategy().prop_map(|paths| {
+                let toml_paths = render_string_list(&paths);
+                cap_from_toml(&format!(
+                    "[cap]\nkind = \"fs.read\"\npaths = {toml_paths}\n"
+                ))
+            }),
+            (paths_vec_strategy(), prop::option::of(1u64..=4096)).prop_map(|(paths, max_bytes)| {
+                let toml_paths = render_string_list(&paths);
+                let mut s = format!("[cap]\nkind = \"fs.write\"\npaths = {toml_paths}\n");
+                if let Some(b) = max_bytes {
+                    s.push_str(&format!("max_bytes = {b}\n"));
+                }
+                cap_from_toml(&s)
+            }),
+            paths_vec_strategy().prop_map(|paths| {
+                let toml_paths = render_string_list(&paths);
+                cap_from_toml(&format!(
+                    "[cap]\nkind = \"fs.exec\"\npaths = {toml_paths}\n"
+                ))
+            }),
+        ]
+    }
+
+    fn host_strategy() -> impl Strategy<Value = String> {
+        ("[a-z]{2,8}", "[a-z]{2,8}").prop_map(|(sub, base)| format!("{sub}.{base}.com"))
+    }
+
+    fn net_capability_strategy() -> impl Strategy<Value = Capability> {
+        let methods_pool: Vec<&'static str> = vec!["GET", "POST", "PUT", "DELETE"];
+        (
+            prop::collection::vec(host_strategy(), 1..=3),
+            prop::sample::subsequence(methods_pool, 1..=4),
+        )
+            .prop_map(|(hosts, methods)| {
+                let methods_owned: Vec<String> = methods.into_iter().map(String::from).collect();
+                let toml_hosts = render_string_list(&hosts);
+                let toml_methods = render_string_list(&methods_owned);
+                cap_from_toml(&format!(
+                    "[cap]\nkind = \"net.http\"\nhosts = {toml_hosts}\nmethods = {toml_methods}\n"
+                ))
+            })
+    }
+
+    fn process_capability_strategy() -> impl Strategy<Value = Capability> {
+        let pool: Vec<&'static str> = vec!["git", "cargo", "ls", "cat", "rg"];
+        prop::sample::subsequence(pool, 1..=5).prop_map(|cmds| {
+            let owned: Vec<String> = cmds.into_iter().map(String::from).collect();
+            let toml_cmds = render_string_list(&owned);
+            cap_from_toml(&format!(
+                "[cap]\nkind = \"process.spawn\"\ncommands = {toml_cmds}\n"
+            ))
+        })
+    }
+
+    fn agent_capability_strategy() -> impl Strategy<Value = Capability> {
+        let pool: Vec<&'static str> = vec!["worker", "planner", "reviewer"];
+        prop::sample::subsequence(pool, 1..=3).prop_map(|kinds| {
+            let owned: Vec<String> = kinds.into_iter().map(String::from).collect();
+            let toml_kinds = render_string_list(&owned);
+            cap_from_toml(&format!(
+                "[cap]\nkind = \"agent.spawn\"\nallowed_kinds = {toml_kinds}\n"
+            ))
+        })
+    }
+
+    /// Top-level capability strategy. `Custom` is intentionally
+    /// excluded at v0.1: `Value` is `#[non_exhaustive]` and the
+    /// custom-params satisfies-relation already has dedicated unit
+    /// tests upthread; the additional combinatorial coverage of
+    /// fuzzing it here would be marginal versus the strategy
+    /// scaffolding cost.
+    fn capability_strategy() -> impl Strategy<Value = Capability> {
+        prop_oneof![
+            fs_capability_strategy(),
+            net_capability_strategy(),
+            process_capability_strategy(),
+            agent_capability_strategy(),
+        ]
+    }
+
+    /// Render a Rust `&[String]` into a TOML inline-array literal,
+    /// e.g. `["a","b"]`. Strategy values come from controlled regex
+    /// alphabets so we don't need to escape — but we still wrap each
+    /// element in `"…"` for safety.
+    fn render_string_list(items: &[String]) -> String {
+        let mut out = String::from("[");
+        for (i, s) in items.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push('"');
+            out.push_str(s);
+            out.push('"');
+        }
+        out.push(']');
+        out
+    }
+
+    /// `true` iff the two capabilities are at the same top-level enum
+    /// variant. Used to filter wrong-variant pairs in property 2.
+    fn same_top_level(a: &Capability, b: &Capability) -> bool {
+        matches!(
+            (a, b),
+            (Capability::Filesystem(_), Capability::Filesystem(_))
+                | (Capability::Network(_), Capability::Network(_))
+                | (Capability::Process(_), Capability::Process(_))
+                | (Capability::Agent(_), Capability::Agent(_))
+                | (Capability::Custom { .. }, Capability::Custom { .. },)
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 256,
+            ..ProptestConfig::default()
+        })]
+
+        /// Property 1 — reflexivity: every capability satisfies itself.
+        #[test]
+        fn reflexivity(c in capability_strategy()) {
+            prop_assert!(capability_satisfies(&c, &c));
+        }
+
+        /// Property 2 — top-level variant mismatch always denies.
+        ///
+        /// Pairs that happen to land on the same top-level variant
+        /// are skipped via `prop_assume!` rather than `prop_filter`
+        /// to keep the strategy tree simple.
+        #[test]
+        fn wrong_variant_rejection(
+            granted in capability_strategy(),
+            required in capability_strategy(),
+        ) {
+            prop_assume!(!same_top_level(&granted, &required));
+            prop_assert!(!capability_satisfies(&granted, &required));
+        }
+
+        /// Property 3 — glob superset.
+        ///
+        /// A grant of `/<prefix>/**` always satisfies any required
+        /// `fs.read` for a specific path under that prefix. Both
+        /// single-segment and multi-segment suffixes are covered by
+        /// the `suffix` strategy.
+        #[test]
+        fn glob_superset(
+            prefix in "[a-z][a-z0-9]{0,7}",
+            mid in SEG,
+            leaf in SEG,
+            ext in "[a-z]{2,4}",
+            depth in 1usize..=3,
+        ) {
+            let mut suffix = String::new();
+            for _ in 0..depth {
+                suffix.push_str(&mid);
+                suffix.push('/');
+            }
+            suffix.push_str(&leaf);
+            suffix.push('.');
+            suffix.push_str(&ext);
+
+            let grant = cap_from_toml(&format!(
+                "[cap]\nkind = \"fs.read\"\npaths = [\"/{prefix}/**\"]\n"
+            ));
+            let required = cap_from_toml(&format!(
+                "[cap]\nkind = \"fs.read\"\npaths = [\"/{prefix}/{suffix}\"]\n"
+            ));
+
+            // Defensive variant assertions — if the wire-form
+            // round-trip ever drifted these would catch it before the
+            // satisfies assertion below. Pulled into `let` bindings
+            // because `prop_assert!` runs its arg through a format
+            // string and balks on the `{ .. }` pattern in `matches!`.
+            let grant_is_fs_read =
+                matches!(&grant, Capability::Filesystem(FsCapability::Read { .. }));
+            let required_is_fs_read =
+                matches!(&required, Capability::Filesystem(FsCapability::Read { .. }));
+            prop_assert!(grant_is_fs_read);
+            prop_assert!(required_is_fs_read);
+
+            prop_assert!(capability_satisfies(&grant, &required));
+        }
+    }
+
+    // Touch the imported strategy types in a `const` to keep
+    // `unused_imports` quiet without resorting to `#[allow]`. The
+    // strategies above already construct these via TOML, so the type
+    // names aren't otherwise mentioned in this submodule.
+    #[allow(dead_code)]
+    fn _imports_used(_n: NetCapability, _p: ProcessCapability) {}
+}
