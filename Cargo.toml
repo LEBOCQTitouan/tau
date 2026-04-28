@@ -21,6 +21,7 @@ authors = ["Titouan Lebocq <75916953+LEBOCQTitouan@users.noreply.github.com>"]
 
 [workspace.dependencies]
 tau-domain      = { path = "crates/tau-domain", version = "0.0.0" }
+tau-ports       = { path = "crates/tau-ports",  version = "0.0.0" }
 thiserror       = "2"
 semver          = { version = "1" }
 uuid            = { version = "1", features = ["v7"] }
@@ -34,3 +35,4 @@ toml            = "0.8"
 fs4             = "0.8"
 humantime-serde = "1"
 tempfile        = "3"
+tracing         = "0.1"
