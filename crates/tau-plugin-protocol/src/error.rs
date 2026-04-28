@@ -47,6 +47,27 @@ pub enum ProtocolError {
     /// Body encoding failed.
     #[error("body encode failed: {0}")]
     BodyEncodeFailed(#[from] rmp_serde::encode::Error),
+
+    /// A `Frame` slot that must carry rmp-serde-encoded MessagePack
+    /// bytes (e.g. `params` on a request/notification or a non-`None`
+    /// `result` on a response) was passed to [`crate::Frame::encode`]
+    /// as an empty slice. The smallest legitimate payload is a
+    /// one-byte `[0x90]` (empty MessagePack array); empty input would
+    /// otherwise round-trip asymmetrically through `Value::Nil`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use tau_plugin_protocol::{Frame, ProtocolError};
+    /// let frame = Frame::Request { id: 1, method: "m".into(), params: vec![] };
+    /// let err = frame.encode().unwrap_err();
+    /// assert!(matches!(err, ProtocolError::EmptyFrameSlot { slot: "params" }));
+    /// ```
+    #[error("empty frame slot: {slot} must contain rmp-serde-encoded bytes")]
+    EmptyFrameSlot {
+        /// Which slot was empty: `"params"` or `"result"`.
+        slot: &'static str,
+    },
 }
 
 /// MessagePack-RPC error envelope carried in the `error` slot of a

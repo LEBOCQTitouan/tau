@@ -103,21 +103,38 @@ impl Frame {
     }
 
     /// Encode this frame to MessagePack-RPC wire bytes.
+    ///
+    /// Returns [`ProtocolError::EmptyFrameSlot`] if `params`
+    /// (Request/Notification) or a `Some(_)` `result` (Response) is
+    /// empty — legitimate callers always pass non-empty
+    /// rmp-serde-encoded bytes (smallest is `[0x90]` for an empty
+    /// array), and accepting empty input would round-trip
+    /// asymmetrically through `Value::Nil`.
     pub fn encode(self) -> Result<Vec<u8>, ProtocolError> {
         let value = match self {
-            Frame::Request { id, method, params } => Value::Array(vec![
-                Value::Integer(TYPE_REQUEST.into()),
-                Value::Integer(u64::from(id).into()),
-                Value::String(method.into()),
-                bytes_to_value(&params)?,
-            ]),
+            Frame::Request { id, method, params } => {
+                if params.is_empty() {
+                    return Err(ProtocolError::EmptyFrameSlot { slot: "params" });
+                }
+                Value::Array(vec![
+                    Value::Integer(TYPE_REQUEST.into()),
+                    Value::Integer(u64::from(id).into()),
+                    Value::String(method.into()),
+                    bytes_to_value(&params)?,
+                ])
+            }
             Frame::Response { id, error, result } => {
                 let error_val = match error {
                     Some(env) => rmpv::ext::to_value(&env).map_err(encode_err)?,
                     None => Value::Nil,
                 };
                 let result_val = match result {
-                    Some(bytes) => bytes_to_value(&bytes)?,
+                    Some(bytes) => {
+                        if bytes.is_empty() {
+                            return Err(ProtocolError::EmptyFrameSlot { slot: "result" });
+                        }
+                        bytes_to_value(&bytes)?
+                    }
                     None => Value::Nil,
                 };
                 Value::Array(vec![
@@ -127,11 +144,16 @@ impl Frame {
                     result_val,
                 ])
             }
-            Frame::Notification { method, params } => Value::Array(vec![
-                Value::Integer(TYPE_NOTIFICATION.into()),
-                Value::String(method.into()),
-                bytes_to_value(&params)?,
-            ]),
+            Frame::Notification { method, params } => {
+                if params.is_empty() {
+                    return Err(ProtocolError::EmptyFrameSlot { slot: "params" });
+                }
+                Value::Array(vec![
+                    Value::Integer(TYPE_NOTIFICATION.into()),
+                    Value::String(method.into()),
+                    bytes_to_value(&params)?,
+                ])
+            }
         };
 
         let mut out = Vec::new();
@@ -203,11 +225,11 @@ fn value_to_bytes(value: &Value) -> Result<Vec<u8>, ProtocolError> {
 
 /// Decode raw MessagePack bytes back into an `rmpv::Value`. Used when
 /// re-encoding a `Frame` to splice opaque `params`/`result` blobs into
-/// the outer array. Empty `params` decodes to `Value::Nil`.
+/// the outer array. Callers in [`Frame::encode`] reject empty input
+/// before reaching this helper (see [`ProtocolError::EmptyFrameSlot`]),
+/// so this function assumes `bytes` is non-empty rmp-serde-encoded
+/// MessagePack.
 fn bytes_to_value(bytes: &[u8]) -> Result<Value, ProtocolError> {
-    if bytes.is_empty() {
-        return Ok(Value::Nil);
-    }
     let mut cursor = bytes;
     rmpv::decode::read_value(&mut cursor).map_err(decode_err)
 }
@@ -307,6 +329,40 @@ mod tests {
     }
 
     #[test]
+    fn response_error_round_trip_with_data() {
+        let envelope = RpcErrorEnvelope {
+            code: -32100,
+            message: "rate_limited".to_string(),
+            data: Some(rmpv::Value::Map(vec![
+                (
+                    rmpv::Value::String("retry_after".into()),
+                    rmpv::Value::Integer(60.into()),
+                ),
+                (
+                    rmpv::Value::String("limit".into()),
+                    rmpv::Value::Integer(100.into()),
+                ),
+            ])),
+        };
+        let frame = Frame::Response {
+            id: 99,
+            error: Some(envelope.clone()),
+            result: None,
+        };
+        let bytes = frame.clone().encode().unwrap();
+        let decoded = Frame::decode(&bytes).unwrap();
+        assert_eq!(decoded, frame);
+        // Extra assertion that data round-trips bit-for-bit
+        let Frame::Response {
+            error: Some(env), ..
+        } = decoded
+        else {
+            panic!()
+        };
+        assert_eq!(env, envelope);
+    }
+
+    #[test]
     fn notification_round_trip() {
         let frame = Frame::Notification {
             method: "stream.chunk".into(),
@@ -360,6 +416,44 @@ mod tests {
         assert!(
             matches!(err, ProtocolError::BodyDecodeFailed(_)),
             "expected BodyDecodeFailed, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn encode_rejects_empty_params() {
+        let frame = Frame::Request {
+            id: 1,
+            method: "m".into(),
+            params: vec![],
+        };
+        let err = frame.encode().unwrap_err();
+        assert!(
+            matches!(err, ProtocolError::EmptyFrameSlot { slot: "params" }),
+            "expected EmptyFrameSlot {{ slot: \"params\" }}, got {err:?}"
+        );
+
+        let notif = Frame::Notification {
+            method: "n".into(),
+            params: vec![],
+        };
+        let err = notif.encode().unwrap_err();
+        assert!(
+            matches!(err, ProtocolError::EmptyFrameSlot { slot: "params" }),
+            "expected EmptyFrameSlot {{ slot: \"params\" }}, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn encode_rejects_empty_result() {
+        let frame = Frame::Response {
+            id: 1,
+            error: None,
+            result: Some(vec![]),
+        };
+        let err = frame.encode().unwrap_err();
+        assert!(
+            matches!(err, ProtocolError::EmptyFrameSlot { slot: "result" }),
+            "expected EmptyFrameSlot {{ slot: \"result\" }}, got {err:?}"
         );
     }
 }
