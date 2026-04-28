@@ -29,7 +29,7 @@ use crate::config::ProjectConfig;
 use crate::output::Output;
 
 #[cfg(feature = "test-mock")]
-mod mock_backend;
+pub(crate) mod mock_backend;
 
 /// Marker error: the agent ran but reported [`RunOutcome::Failed`].
 ///
