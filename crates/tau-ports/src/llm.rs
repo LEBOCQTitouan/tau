@@ -68,6 +68,7 @@ use crate::error::LlmError;
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CompletionRequest {
     /// Model identifier (provider-specific; e.g. `"claude-3-5-sonnet"`).
     pub model: String,
@@ -187,6 +188,7 @@ impl TokenUsage {
 /// a tool.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ToolChoice {
     /// Model decides whether to call a tool (default).
     #[default]
@@ -208,6 +210,7 @@ pub enum ToolChoice {
 /// separation.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LlmProviderMessage {
     /// User-authored message content.
     User {
@@ -241,6 +244,7 @@ pub enum LlmProviderMessage {
 /// image, audio, document, and reasoning blocks without a major bump.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ContentBlock {
     /// Plain-text content.
     Text(String),
@@ -251,6 +255,7 @@ pub enum ContentBlock {
 /// Batch (non-streaming) completion result.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CompletionResponse {
     /// Concatenated assistant text. May be empty if the model only
     /// emitted tool-use blocks.
@@ -273,6 +278,7 @@ pub struct CompletionResponse {
 /// JSON-delta-buffering helper.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CompletionChunk {
     /// Streamed text delta to append to the assistant response.
     Text {
@@ -293,6 +299,7 @@ pub enum CompletionChunk {
 /// One tool-use request emitted by the model.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ToolUse {
     /// Provider-supplied identifier; round-tripped to
     /// [`LlmProviderMessage::ToolResult::tool_use_id`].
@@ -307,6 +314,7 @@ pub struct ToolUse {
 /// Specification of a tool the model may call.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ToolSpec {
     /// Tool name. Must be unique within a [`CompletionRequest::tools`].
     pub name: String,
@@ -325,6 +333,7 @@ pub struct ToolSpec {
 /// indicates the trait method itself failed.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum StopReason {
     /// Model finished naturally.
     EndTurn,
@@ -342,6 +351,7 @@ pub enum StopReason {
 /// Token-usage report for a completion.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TokenUsage {
     /// Tokens consumed from the input (system + messages + tools).
     pub input_tokens: u32,

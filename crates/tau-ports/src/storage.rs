@@ -28,6 +28,11 @@ use crate::error::{KeyError, NamespaceError, StorageError};
 /// assert_eq!(ns.as_str(), "global:cache");
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(into = "String", try_from = "String")
+)]
 pub struct Namespace(String);
 
 impl Namespace {
@@ -66,6 +71,20 @@ impl fmt::Display for Namespace {
     }
 }
 
+impl From<Namespace> for String {
+    fn from(ns: Namespace) -> Self {
+        ns.0
+    }
+}
+
+impl TryFrom<String> for Namespace {
+    type Error = NamespaceError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_new(value)
+    }
+}
+
 /// Validated storage key. Within a namespace, opaque content.
 ///
 /// Validation rules:
@@ -83,6 +102,11 @@ impl fmt::Display for Namespace {
 /// assert_eq!(k.as_str(), "agent:01890000-0000-7000-8000-000000000001");
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(into = "String", try_from = "String")
+)]
 pub struct Key(String);
 
 impl Key {
@@ -118,6 +142,20 @@ impl Key {
 impl fmt::Display for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+impl From<Key> for String {
+    fn from(k: Key) -> Self {
+        k.0
+    }
+}
+
+impl TryFrom<String> for Key {
+    type Error = KeyError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_new(value)
     }
 }
 

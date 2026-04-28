@@ -41,6 +41,7 @@ use crate::llm::ToolSpec;
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SessionContext {
     /// Identity of the agent instance opening this tool session.
     pub agent_instance_id: AgentInstanceId,
@@ -100,6 +101,7 @@ impl SessionContext {
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ToolResult {
     /// Multi-block content describing the tool's output.
     pub content: Vec<ToolContent>,
@@ -131,6 +133,7 @@ pub struct ToolResult {
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ToolContent {
     /// Plain-text content.
     Text {

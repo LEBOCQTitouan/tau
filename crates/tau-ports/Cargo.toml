@@ -9,13 +9,15 @@ repository.workspace   = true
 authors.workspace      = true
 
 [dependencies]
-tau-domain   = { workspace = true, features = ["serde"] }
+tau-domain   = { workspace = true }
 thiserror    = { workspace = true }
 futures-core = { workspace = true }
 uuid         = { workspace = true }
+serde        = { workspace = true, optional = true }
 
 [features]
 default       = []
+serde         = ["dep:serde", "tau-domain/serde", "uuid/serde"]
 test-fixtures = []
 
 [dev-dependencies]
