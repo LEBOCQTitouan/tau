@@ -14,4 +14,11 @@
 //! See `docs/superpowers/specs/2026-04-28-plugin-loading-design.md` §5
 //! and ADR-0008 for the design rationale.
 
-// Modules and re-exports populate as Tasks 7 — 10 land.
+pub mod error;
+pub mod tracing_layer;
+
+pub use error::SdkError;
+
+// Re-export framer types from tau-plugin-protocol so plugin authors
+// have one obvious crate to depend on.
+pub use tau_plugin_protocol::{FramedReader, FramedWriter, FramerOptions};
