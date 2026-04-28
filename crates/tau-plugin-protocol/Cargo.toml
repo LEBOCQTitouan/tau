@@ -1,0 +1,31 @@
+[package]
+name = "tau-plugin-protocol"
+description = "Wire-format types and framing primitives for the tau plugin protocol (MessagePack-RPC over stdio)."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+
+[dependencies]
+tau-domain = { workspace = true, features = ["serde"] }
+tau-ports  = { workspace = true }
+serde      = { workspace = true }
+rmp-serde  = { workspace = true }
+bytes      = { workspace = true }
+thiserror  = { workspace = true }
+tokio      = { workspace = true }
+
+[features]
+default       = []
+test-support  = ["dep:tokio-test"]
+
+[dependencies.tokio-test]
+version  = "0.4"
+optional = true
+
+[dev-dependencies]
+proptest    = { workspace = true }
+serde_json  = "1"
+tokio       = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -1,0 +1,16 @@
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+
+//! Wire-format types and framing primitives for the tau plugin protocol.
+//!
+//! Plugins talk to the tau runtime over MessagePack-RPC on stdio with
+//! length-prefixed framing. This crate is shared by the host (in
+//! `tau-runtime::plugin_host`) and the SDK (in `tau-plugin-sdk`); it
+//! contains pure types and IO helpers, no tracing, no process management.
+//!
+//! See `docs/superpowers/specs/2026-04-28-plugin-loading-design.md` §4
+//! and ADR-0008 for the design rationale.
+
+// Modules and re-exports populate as Tasks 3 — 6 land. For Task 1 we
+// only assert the crate compiles.
