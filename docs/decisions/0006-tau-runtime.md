@@ -1,6 +1,6 @@
 # ADR-0006: tau-runtime kernel + Tool capabilities amendment
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-04-28
 **Supersedes:** —
 **Amends:** ADR-0003 §2 "Four trait shapes" (the `Tool` trait gains an
