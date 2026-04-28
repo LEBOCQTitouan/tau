@@ -16,10 +16,17 @@
 
 pub mod error;
 pub mod handshake;
+pub mod runners;
+pub mod streaming;
 pub mod tracing_layer;
 
 pub use error::SdkError;
 pub use handshake::{drive_handshake, PluginMeta};
+pub use runners::{
+    run_llm_backend, run_llm_backend_with_io, run_sandbox, run_sandbox_with_io, run_storage,
+    run_storage_with_io, run_tool, run_tool_with_io,
+};
+pub use streaming::stream_completion;
 
 // Re-export framer types from tau-plugin-protocol so plugin authors
 // have one obvious crate to depend on.

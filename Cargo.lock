@@ -1716,6 +1716,8 @@ dependencies = [
 name = "tau-plugin-sdk"
 version = "0.0.0"
 dependencies = [
+ "futures-core",
+ "futures-util",
  "proptest",
  "rmp-serde",
  "serde",
@@ -1727,6 +1729,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

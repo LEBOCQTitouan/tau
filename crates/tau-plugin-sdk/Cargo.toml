@@ -19,11 +19,15 @@ thiserror          = { workspace = true }
 tokio              = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "json"] }
+futures-core       = { workspace = true }
+futures-util       = "0.3"
 
 [features]
 default = []
 
 [dev-dependencies]
 tau-plugin-protocol = { workspace = true, features = ["test-support"] }
+tau-ports           = { workspace = true, features = ["serde", "test-fixtures"] }
 proptest            = { workspace = true }
 tokio               = { workspace = true, features = ["macros", "rt-multi-thread"] }
+uuid                = { workspace = true }

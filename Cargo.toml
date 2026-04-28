@@ -47,4 +47,4 @@ tracing         = "0.1"
 rmp-serde       = "1"
 rmpv            = { version = "1", features = ["with-serde"] }
 bytes           = "1"
-tokio           = { version = "1", features = ["macros", "rt", "rt-multi-thread", "io-util", "process", "sync", "time"] }
+tokio           = { version = "1", features = ["macros", "rt", "rt-multi-thread", "io-util", "io-std", "process", "sync", "time"] }

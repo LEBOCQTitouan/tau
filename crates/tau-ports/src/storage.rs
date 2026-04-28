@@ -29,10 +29,7 @@ use crate::error::{KeyError, NamespaceError, StorageError};
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(into = "String", try_from = "String")
-)]
+#[cfg_attr(feature = "serde", serde(into = "String", try_from = "String"))]
 pub struct Namespace(String);
 
 impl Namespace {
@@ -103,10 +100,7 @@ impl TryFrom<String> for Namespace {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(into = "String", try_from = "String")
-)]
+#[cfg_attr(feature = "serde", serde(into = "String", try_from = "String"))]
 pub struct Key(String);
 
 impl Key {
