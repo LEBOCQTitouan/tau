@@ -38,3 +38,4 @@ require ADRs and are recorded in commit messages and PR discussion (PG3).
 | [0004](0004-tau-pkg.md) | tau-pkg package manager — public API, storage layout, lockfile | Accepted |
 | [0005](0005-package-source-and-kind-serde.md) | Custom serde for PackageSource and PackageKind | Accepted |
 | [0006](0006-tau-runtime.md) | tau-runtime kernel + Tool capabilities amendment | Accepted |
+| [0007](0007-tau-cli.md) | tau-cli + tau-runtime amendments (capability filter, run_with_history) | Proposed |
