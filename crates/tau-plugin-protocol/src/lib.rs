@@ -12,5 +12,8 @@
 //! See `docs/superpowers/specs/2026-04-28-plugin-loading-design.md` §4
 //! and ADR-0008 for the design rationale.
 
-// Modules and re-exports populate as Tasks 3 — 6 land. For Task 1 we
-// only assert the crate compiles.
+pub mod error;
+pub mod framer;
+
+pub use error::ProtocolError;
+pub use framer::{FramedReader, FramedWriter, FramerOptions};
