@@ -9,8 +9,10 @@
 pub mod cli;
 pub mod cmd;
 pub mod exit;
+pub mod output;
 
 pub use exit::ExitCode;
+pub use output::{ColorChoice, Output};
 
 use clap::Parser;
 
