@@ -29,7 +29,7 @@ struct StreamSummary {
 /// terminating with a [`Frame::Response`] carrying the final summary
 /// or an error envelope.
 ///
-/// The `msgid` is the originating `llm.complete_streaming` request id.
+/// The `msgid` is the originating `llm.stream` request id.
 /// Each [`tau_ports::CompletionChunk`] yielded by the stream is encoded
 /// as the second element of a `(msgid, chunk)` `stream.chunk`
 /// notification. When the stream ends cleanly, a single
