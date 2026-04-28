@@ -108,7 +108,41 @@ impl Runtime {
         let mut total_turns: u32 = 0;
         let mut aggregated_tokens = TokenUsage::default();
 
-        let tool_specs: Vec<ToolSpec> = self.tools().values().map(|t| t.schema()).collect();
+        // Capability-filter the tools exposed to the LLM (spec §3.10).
+        //
+        // Each registered tool's `Tool::capabilities()` is checked against
+        // the agent package's grants; tools with at least one unsatisfied
+        // requirement are dropped from `CompletionRequest.tools` before
+        // the loop starts. This shrinks the LLM prompt and prevents
+        // spurious tool_uses that would otherwise be denied at invoke
+        // time. The capability check inside the dispatch loop stays as
+        // defense-in-depth — it catches bugs in the filter and any
+        // future tools whose required capabilities depend on per-call
+        // arguments.
+        let mut tool_specs: Vec<ToolSpec> = Vec::with_capacity(self.tools().len());
+        let mut filtered_count: usize = 0;
+        for (name, tool) in self.tools().iter() {
+            let required = tool.capabilities();
+            if let Some(missing) = check_capabilities(granted, required) {
+                let kind = capability_kind_str(missing);
+                warn!(
+                    name = "runtime.tool_filtered",
+                    tool_name = name.as_str(),
+                    missing_kind = %kind,
+                    "tool filtered out: missing capability",
+                );
+                filtered_count += 1;
+                continue;
+            }
+            tool_specs.push(tool.schema());
+        }
+        debug!(
+            name = "runtime.tools_filtered",
+            granted_count = granted.len(),
+            total_tools = self.tools().len(),
+            exposed_tools = tool_specs.len(),
+            filtered_count = filtered_count,
+        );
 
         while total_turns < options.max_turns {
             total_turns += 1;
@@ -832,6 +866,29 @@ mod tests {
         assert_eq!(truncate_to_chars(s, 3), "ééé");
         assert_eq!(truncate_to_chars(s, 100), "éééééé");
         assert_eq!(truncate_to_chars(s, 0), "");
+    }
+
+    #[test]
+    fn capability_kind_str_for_filesystem_read() {
+        // Round-trip an `fs.read` capability through the manifest wire
+        // form (variant-level `#[non_exhaustive]` blocks struct-literal
+        // construction from outside `tau-domain`) and assert the
+        // top-level kind projection matches the existing dot-namespaced
+        // taxonomy used by `CapabilityDenial::required_kind` and the
+        // `runtime.tool_filtered` event.
+        #[derive(serde::Deserialize)]
+        struct CapWrapper {
+            cap: Capability,
+        }
+        let cap = toml::from_str::<CapWrapper>(
+            r#"[cap]
+kind = "fs.read"
+paths = ["**"]
+"#,
+        )
+        .expect("test fs.read capability TOML must parse")
+        .cap;
+        assert_eq!(capability_kind_str(&cap), "fs.read");
     }
 
     #[test]
