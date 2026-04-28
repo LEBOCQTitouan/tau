@@ -48,11 +48,26 @@ use crate::outcome::RunOutcome;
 const PREVIEW_CHARS: usize = 256;
 
 impl Runtime {
-    /// Run an agent through one solo-path multi-turn iteration.
+    /// Run an agent with a pre-existing conversation history.
     ///
-    /// The loop is:
+    /// Identical to [`Runtime::run`] except `history` is pre-loaded into
+    /// the messages buffer for turn 1: the kernel projects `history`
+    /// (plus the new `initial_message`) onto the
+    /// [`CompletionRequest::messages`] list before the first LLM call.
+    /// Subsequent turns evolve the buffer normally — assistant text,
+    /// tool calls, tool results — exactly as in
+    /// [`Runtime::run`].
     ///
-    /// 1. Build a [`CompletionRequest`] from the conversation so far.
+    /// This is the entry point used by `tau chat` (sub-project 5) to
+    /// thread REPL conversation history across user turns. Per NG6
+    /// ("no persistent agent memory in core"), the kernel itself does
+    /// not retain history between calls — the CLI accumulates a
+    /// `Vec<Message>` and passes it back in on each turn.
+    ///
+    /// The loop is otherwise identical to [`Runtime::run`]:
+    ///
+    /// 1. Build a [`CompletionRequest`] from `history + initial_message`
+    ///    on turn 1; from the evolving buffer on later turns.
     /// 2. Call the LLM backend.
     /// 3. Append the assistant text to the history.
     /// 4. If no tool_uses were emitted, return
@@ -68,6 +83,18 @@ impl Runtime {
     /// denial ([`FailureKind::PolicyDenied`]) and max turns reached
     /// ([`FailureKind::OutOfResources`]). Plugin and dispatch errors
     /// bubble up as `Err(RuntimeError)` per ADR-0006.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // RunOutcome and AgentDefinition are #[non_exhaustive]; doctests
+    /// // can't construct them via struct-literal syntax. Example illustrative.
+    /// use tau_runtime::{Runtime, RunOptions};
+    ///
+    /// let outcome = runtime
+    ///     .run_with_history(agent_def, manifest, history, initial_message, RunOptions::default())
+    ///     .await?;
+    /// ```
     #[instrument(
         name = "runtime.agent_run",
         skip_all,
@@ -77,12 +104,14 @@ impl Runtime {
             package_id = %agent_def.package.name,
             llm_backend_name = %agent_def.llm_backend,
             max_turns = options.max_turns,
+            history_len = history.len(),
         ),
     )]
-    pub async fn run(
+    pub async fn run_with_history(
         &self,
         agent_def: AgentDefinition,
         package_manifest: PackageManifest,
+        history: Vec<Message>,
         initial_message: Message,
         options: RunOptions,
     ) -> Result<RunOutcome, RuntimeError> {
@@ -104,7 +133,13 @@ impl Runtime {
             .resolve_llm_backend(agent_def.id.as_str(), agent_def.llm_backend.as_str())?
             .clone();
 
-        let mut messages: Vec<Message> = build_initial_messages(initial_message);
+        // Pre-load `history` into the messages buffer so the very first
+        // `CompletionRequest.messages` carries the prior conversation
+        // before the new `initial_message`. With `history = vec![]` this
+        // collapses to the original `vec![initial_message]` behavior.
+        let mut messages: Vec<Message> = Vec::with_capacity(history.len() + 1);
+        messages.extend(history);
+        messages.push(initial_message);
         let mut total_turns: u32 = 0;
         let mut aggregated_tokens = TokenUsage::default();
 
@@ -408,6 +443,31 @@ impl Runtime {
         Ok(outcome)
     }
 
+    /// Run an agent through one solo-path multi-turn iteration with no
+    /// prior conversation history.
+    ///
+    /// Thin wrapper around [`Runtime::run_with_history`] with
+    /// `history = vec![]`. See `run_with_history` for the full loop
+    /// semantics, error/failure dichotomy, and tracing vocabulary.
+    /// Existing callers that don't need history threading should
+    /// continue to use this entry point.
+    pub async fn run(
+        &self,
+        agent_def: AgentDefinition,
+        package_manifest: PackageManifest,
+        initial_message: Message,
+        options: RunOptions,
+    ) -> Result<RunOutcome, RuntimeError> {
+        self.run_with_history(
+            agent_def,
+            package_manifest,
+            Vec::new(),
+            initial_message,
+            options,
+        )
+        .await
+    }
+
     /// Convenience: [`Runtime::run`] with [`RunOptions::default`].
     pub async fn run_default(
         &self,
@@ -428,14 +488,6 @@ impl Runtime {
 // ---------------------------------------------------------------------------
 // Internal helpers (named per the plan; each has a unit test below)
 // ---------------------------------------------------------------------------
-
-/// Wrap the single initial message in the conversation history. v0.1
-/// is trivial (`vec![initial]`); the helper exists so the run loop
-/// reads cleanly and so future bootstrap steps (system-prompt
-/// projection, scratchpad seeding) have a stable hook point.
-pub(crate) fn build_initial_messages(initial: Message) -> Vec<Message> {
-    vec![initial]
-}
 
 /// Validate tool-call arguments emitted by the LLM against the tool's
 /// expected shape.
@@ -728,16 +780,6 @@ mod tests {
                 content: content.into(),
             },
         )
-    }
-
-    // -------------------- build_initial_messages --------------------
-
-    #[test]
-    fn build_initial_messages_wraps_initial_in_singleton_vec() {
-        let m = user_text_message("hello");
-        let out = build_initial_messages(m.clone());
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].id, m.id);
     }
 
     // -------------------- deserialize_tool_args --------------------
