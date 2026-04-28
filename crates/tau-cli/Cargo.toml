@@ -38,6 +38,7 @@ insta      = { version = "1", features = ["yaml", "json"] }
 predicates = "3"
 proptest   = { workspace = true }
 tempfile   = "3"
+url        = { workspace = true }
 tau-ports  = { workspace = true, features = ["test-fixtures"] }
 
 [features]

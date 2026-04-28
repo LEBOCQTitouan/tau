@@ -32,6 +32,12 @@ use clap::Parser;
 pub async fn run_main() -> std::process::ExitCode {
     let cli = cli::Cli::parse();
     tracing::install(&cli);
+    // Capture `cli.debug` before `dispatch` consumes the parsed `Cli`.
+    // When set, the error path renders the full `anyhow` chain via
+    // `{err:?}` instead of the single-line top-level message. This is
+    // the integration-level surface for `--debug` (the tracing module
+    // already promotes the filter to DEBUG independently).
+    let debug = cli.debug;
     match dispatch(cli).await {
         Ok(()) => ExitCode::Success.into(),
         Err(err) => {
@@ -44,7 +50,11 @@ pub async fn run_main() -> std::process::ExitCode {
             if err.downcast_ref::<crate::cmd::run::AgentFailed>().is_some() {
                 ExitCode::AgentFailed.into()
             } else {
-                eprintln!("error: {err}");
+                if debug {
+                    eprintln!("error: {err:?}");
+                } else {
+                    eprintln!("error: {err}");
+                }
                 ExitCode::from(&err).into()
             }
         }

@@ -6,6 +6,9 @@
 //! global-scope installs do not leak across tests or pollute the
 //! developer's real `~/.tau`.
 //!
+//! Fixture builders live in `tests/common/mod.rs` (Task 15) so the
+//! `tau list` and cross-cutting suites can share them.
+//!
 //! Fixes preserved from sub-project 3 Task 14:
 //! - `git symbolic-ref HEAD refs/heads/main` on the bare repo so the
 //!   downstream clone checks out the right branch regardless of the
@@ -15,98 +18,12 @@
 
 mod common;
 
-use std::path::{Path, PathBuf};
-use std::process::Command as StdCommand;
-
 use assert_cmd::Command;
 use predicates::prelude::*;
 
-/// Run `git` with `args` in `cwd`, panicking with stderr/stdout on failure.
-fn run_git(cwd: &Path, args: &[&str]) {
-    let output = StdCommand::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .unwrap_or_else(|e| panic!("git {args:?} spawn failure: {e}"));
-    assert!(
-        output.status.success(),
-        "git {args:?} in {cwd:?} failed:\nstderr: {}\nstdout: {}",
-        String::from_utf8_lossy(&output.stderr),
-        String::from_utf8_lossy(&output.stdout),
-    );
-}
-
-/// Build a `file://` URL from a path, with forward slashes for portability.
-fn file_url(path: &Path) -> String {
-    let forward = path
-        .to_string_lossy()
-        .replace(std::path::MAIN_SEPARATOR, "/");
-    if forward.starts_with('/') {
-        format!("file://{forward}")
-    } else {
-        format!("file:///{forward}")
-    }
-}
-
-/// Set up a bare git repository containing a minimal package `tau.toml`.
-///
-/// Returns `(tempdir, file_url, bare_path)`. The tempdir owns both the
-/// bare repo and the working repo; both go away when it drops.
-///
-/// The manifest's declared `source` matches the bare repo's `file://`
-/// URL so tau-pkg's source/manifest match check passes.
-fn setup_local_package_fixture(name: &str, version: &str) -> (tempfile::TempDir, String, PathBuf) {
-    setup_local_package_fixture_with_kind(name, version, "tool")
-}
-
-/// Same as [`setup_local_package_fixture`] but with an explicit `kind`.
-fn setup_local_package_fixture_with_kind(
-    name: &str,
-    version: &str,
-    kind: &str,
-) -> (tempfile::TempDir, String, PathBuf) {
-    let dir = tempfile::tempdir().expect("tempdir");
-
-    // Bare repo (clone target).
-    let bare = dir.path().join(format!("{name}.git"));
-    std::fs::create_dir_all(&bare).unwrap();
-    run_git(&bare, &["init", "--bare", "-q"]);
-    // Force the bare HEAD to refs/heads/main so `git clone` checks out the
-    // right branch regardless of the host's init.defaultBranch.
-    run_git(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
-    let url = file_url(&bare);
-
-    // Working repo where we author the initial commit.
-    let work = dir.path().join(format!("{name}-work"));
-    std::fs::create_dir_all(&work).unwrap();
-    run_git(&work, &["init", "-q", "-b", "main"]);
-    run_git(&work, &["config", "user.email", "test@example.com"]);
-    run_git(&work, &["config", "user.name", "Test User"]);
-
-    let manifest = format!(
-        r#"name = "{name}"
-version = "{version}"
-description = "test fixture"
-authors = ["Test <test@example.com>"]
-source = "{url}"
-kind = "{kind}"
-dependencies = []
-capabilities = []
-"#
-    );
-    std::fs::write(work.join("tau.toml"), manifest).unwrap();
-
-    run_git(&work, &["add", "tau.toml"]);
-    run_git(&work, &["commit", "-q", "-m", "initial"]);
-    run_git(&work, &["remote", "add", "origin", &bare.to_string_lossy()]);
-    run_git(&work, &["push", "-q", "origin", "main"]);
-
-    (dir, url, bare)
-}
-
 #[test]
 fn install_local_file_url_writes_to_global_scope() {
-    let (fixture, url, _bare) = setup_local_package_fixture("hello-tool", "0.1.0");
+    let (fixture, url, _bare) = common::setup_local_package_fixture("hello-tool", "0.1.0");
     let global_dir = fixture.path().join("scope-global");
     std::fs::create_dir_all(&global_dir).unwrap();
 
@@ -137,7 +54,7 @@ fn install_local_file_url_writes_to_global_scope() {
 
 #[test]
 fn install_dry_run_does_not_write() {
-    let (fixture, url, _bare) = setup_local_package_fixture("hello-tool", "0.1.0");
+    let (fixture, url, _bare) = common::setup_local_package_fixture("hello-tool", "0.1.0");
     let global_dir = fixture.path().join("scope-global");
     std::fs::create_dir_all(&global_dir).unwrap();
 
@@ -186,7 +103,7 @@ fn install_bad_url_fails_with_exit_2() {
 
 #[test]
 fn install_json_output_includes_name_version_scope_path() {
-    let (fixture, url, _bare) = setup_local_package_fixture("hello-tool", "0.1.0");
+    let (fixture, url, _bare) = common::setup_local_package_fixture("hello-tool", "0.1.0");
     let global_dir = fixture.path().join("scope-global");
     std::fs::create_dir_all(&global_dir).unwrap();
 
