@@ -8,10 +8,12 @@
 
 pub mod cli;
 pub mod cmd;
+pub mod config;
 pub mod exit;
 pub mod output;
 pub mod tracing;
 
+pub use config::{AgentEntry, ProjectConfig, ProjectConfigError, PromptEntry, RequiresEntry};
 pub use exit::ExitCode;
 pub use output::{ColorChoice, Output};
 
