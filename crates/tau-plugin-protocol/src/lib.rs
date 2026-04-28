@@ -15,6 +15,7 @@
 pub mod error;
 pub mod frame;
 pub mod framer;
+pub mod handshake;
 
 pub use error::{
     ProtocolError, RpcErrorEnvelope, CAPABILITY_DENIED, INTERNAL_ERROR, INVALID_PARAMS,
@@ -23,3 +24,6 @@ pub use error::{
 };
 pub use frame::Frame;
 pub use framer::{FramedReader, FramedWriter, FramerOptions};
+pub use handshake::{
+    meta, HandshakeRequest, HandshakeResponse, MethodSchema, TraceContext, PROTOCOL_VERSION,
+};

@@ -12,6 +12,7 @@ authors.workspace      = true
 tau-domain = { workspace = true, features = ["serde"] }
 tau-ports  = { workspace = true }
 serde      = { workspace = true }
+serde_json = "1"
 rmp-serde  = { workspace = true }
 rmpv       = { workspace = true }
 bytes      = { workspace = true }
@@ -28,5 +29,4 @@ optional = true
 
 [dev-dependencies]
 proptest    = { workspace = true }
-serde_json  = "1"
 tokio       = { workspace = true, features = ["macros", "rt-multi-thread"] }
