@@ -23,3 +23,5 @@ tau-domain         = { workspace = true, features = ["test-fixtures"] }
 tau-ports          = { workspace = true, features = ["test-fixtures"] }
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 proptest           = { workspace = true }
+serde              = { workspace = true }
+toml               = { workspace = true }

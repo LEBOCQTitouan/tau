@@ -17,6 +17,7 @@
 //! See `docs/decisions/0006-tau-runtime.md` for the design rationale.
 
 pub mod builder;
+pub(crate) mod capability;
 pub mod error;
 pub mod options;
 pub mod outcome;
