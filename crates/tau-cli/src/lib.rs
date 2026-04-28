@@ -1,0 +1,40 @@
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+
+//! tau-cli internals. The `tau` binary is a thin wrapper around
+//! [`run_main`]; this lib exists so integration tests can drive
+//! command logic without subprocess overhead.
+
+pub mod cli;
+pub mod cmd;
+
+use clap::Parser;
+
+/// Top-level entry point used by `main` and integration tests.
+///
+/// Parses CLI arguments, dispatches to the appropriate `cmd::*::run`
+/// handler, and maps the result to a process exit code.
+///
+/// At v0.1 of Task 4, all subcommand handlers are stubs that return
+/// an "unimplemented" error. Tasks 10-14 land the real handlers.
+pub async fn run_main() -> std::process::ExitCode {
+    let cli = cli::Cli::parse();
+    match dispatch(cli).await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("error: {err}");
+            std::process::ExitCode::from(2)
+        }
+    }
+}
+
+async fn dispatch(cli: cli::Cli) -> anyhow::Result<()> {
+    match cli.command {
+        cli::Command::Init(args) => cmd::init::run(&args).await,
+        cli::Command::Install(args) => cmd::install::run(&args).await,
+        cli::Command::List(args) => cmd::list::run(&args).await,
+        cli::Command::Run(args) => cmd::run::run(&args).await,
+        cli::Command::Chat(args) => cmd::chat::run(&args).await,
+    }
+}
