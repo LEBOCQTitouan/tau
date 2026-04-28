@@ -52,6 +52,7 @@ pub fn any_unchecked_manifest() -> UncheckedManifest {
         },
         dependencies: vec![],
         capabilities: vec![],
+        plugin: None,
     }
 }
 

@@ -39,6 +39,51 @@ use crate::lockfile::{LockFile, LockedPackage, LockedVersion};
 use crate::manifest::read_manifest;
 use crate::scope::Scope;
 
+/// Options governing plugin builds during install.
+///
+/// Used by [`InstallOptions::build`] to control the `cargo build` step
+/// for plugin packages (those with a `[plugin]` table in `tau.toml`).
+/// For data-only packages, these options are ignored.
+///
+/// `#[non_exhaustive]`: future fields are non-breaking. External
+/// callers construct via [`BuildOptions::new`] / [`BuildOptions::default`]
+/// and mutate fields by name.
+///
+/// # Example
+///
+/// ```ignore
+/// use tau_pkg::BuildOptions;
+///
+/// let mut opts = BuildOptions::default();
+/// opts.skip_build = true;
+/// assert!(opts.skip_build);
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, Default)]
+pub struct BuildOptions {
+    /// Skip the build step entirely. Used by tests that synthesize
+    /// lockfiles against pre-built binaries, and by
+    /// `tau install --no-build`.
+    pub skip_build: bool,
+    /// Override the cargo binary path. Defaults to the `cargo` on PATH.
+    pub cargo_path: Option<PathBuf>,
+    /// Extra arguments passed through to `cargo build`
+    /// (e.g., `--features foo`).
+    pub extra_args: Vec<String>,
+}
+
+impl BuildOptions {
+    /// Construct a fresh `BuildOptions` with defaults: build enabled,
+    /// `cargo` discovered on PATH, no extra args.
+    ///
+    /// `BuildOptions` is `#[non_exhaustive]`; external callers use this
+    /// constructor (or [`BuildOptions::default`]) and mutate fields by
+    /// name.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 /// Options for [`install_with_options`].
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -51,6 +96,12 @@ pub struct InstallOptions {
     /// already exists. Default: `false` (idempotent — skip clone if
     /// the dir exists and the lockfile already records this version).
     pub force: bool,
+    /// Plugin-build options, applied during the build step for
+    /// packages whose `tau.toml` contains a `[plugin]` table.
+    ///
+    /// Defaults: build enabled, `cargo` from PATH, no extra args.
+    /// Ignored for data-only packages (no `[plugin]` table).
+    pub build: BuildOptions,
 }
 
 impl Default for InstallOptions {
@@ -58,6 +109,7 @@ impl Default for InstallOptions {
         Self {
             block_on_lock: true,
             force: false,
+            build: BuildOptions::default(),
         }
     }
 }
@@ -521,6 +573,31 @@ mod tests {
         let opts = InstallOptions::default();
         assert!(opts.block_on_lock);
         assert!(!opts.force);
+    }
+
+    #[test]
+    fn build_options_default_does_not_skip() {
+        let opts = BuildOptions::default();
+        assert!(!opts.skip_build);
+        assert!(opts.cargo_path.is_none());
+        assert!(opts.extra_args.is_empty());
+    }
+
+    #[test]
+    fn build_options_new_matches_default() {
+        let new_opts = BuildOptions::new();
+        let default_opts = BuildOptions::default();
+        assert_eq!(new_opts.skip_build, default_opts.skip_build);
+        assert_eq!(new_opts.cargo_path, default_opts.cargo_path);
+        assert_eq!(new_opts.extra_args, default_opts.extra_args);
+    }
+
+    #[test]
+    fn install_options_default_includes_default_build_options() {
+        let opts = InstallOptions::default();
+        assert!(!opts.build.skip_build);
+        assert!(opts.build.cargo_path.is_none());
+        assert!(opts.build.extra_args.is_empty());
     }
 
     #[test]
