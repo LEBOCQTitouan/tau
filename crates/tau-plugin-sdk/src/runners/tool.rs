@@ -27,6 +27,7 @@ use tau_plugin_protocol::{
 use tau_ports::{SessionContext, Tool};
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::configure::Configure;
 use crate::error::SdkError;
 use crate::handshake::{drive_handshake, PluginMeta};
 use crate::tracing_layer;
@@ -88,6 +89,89 @@ where
     let _request = drive_handshake(reader, writer, plugin_meta).await?;
 
     // 2. Dispatch loop.
+    loop {
+        let body = match reader.next_frame().await? {
+            Some(b) => b,
+            None => break,
+        };
+        let frame = Frame::decode(&body)?;
+        match frame {
+            Frame::Request { id, method, params } => {
+                dispatch_tool(plugin.clone(), writer, id, &method, &params).await?;
+            }
+            Frame::Notification { method, .. } if method == meta::SHUTDOWN_METHOD => {
+                tracing::info!(target: "tau_plugin_sdk", "received meta.shutdown");
+                break;
+            }
+            _ => { /* ignore */ }
+        }
+    }
+
+    Ok(())
+}
+
+/// Variant of [`run_tool`] that constructs the plugin via
+/// [`Configure::from_config`] using the JSON config field from the
+/// handshake.
+///
+/// Plugin authors call this when their plugin needs static config from
+/// the host. The runner reads the handshake first, deserializes the
+/// `config` field as `P::Config`, calls [`Configure::from_config`],
+/// then proceeds into the regular dispatch loop.
+///
+/// ```ignore
+/// // In plugin main.rs:
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     tau_plugin_sdk::run_tool_with_config::<MyTool>(
+///         env!("CARGO_PKG_NAME"),
+///         env!("CARGO_PKG_VERSION"),
+///     ).await?;
+///     Ok(())
+/// }
+/// ```
+pub async fn run_tool_with_config<P>(
+    plugin_name: &str,
+    plugin_version: &str,
+) -> Result<(), SdkError>
+where
+    P: Tool + Configure + Send + Sync + 'static,
+{
+    tracing_layer::install();
+
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+    let mut reader = FramedReader::new(stdin, FramerOptions::default());
+    let mut writer = FramedWriter::new(stdout);
+
+    run_tool_with_config_with_io::<_, _, P>(&mut reader, &mut writer, plugin_name, plugin_version)
+        .await
+}
+
+/// Same as [`run_tool_with_config`] but accepts an explicit reader and
+/// writer. Used by integration tests over
+/// [`tau_plugin_protocol::test_support::FakeStdioPeer`].
+pub async fn run_tool_with_config_with_io<R, W, P>(
+    reader: &mut FramedReader<R>,
+    writer: &mut FramedWriter<W>,
+    plugin_name: &str,
+    plugin_version: &str,
+) -> Result<(), SdkError>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+    P: Tool + Configure + Send + Sync + 'static,
+{
+    // 1. Drive handshake; capture HandshakeRequest.config.
+    let plugin_meta = build_tool_meta(plugin_name, plugin_version);
+    let request = drive_handshake(reader, writer, plugin_meta).await?;
+
+    // 2. Deserialize JSON config and construct the plugin.
+    let config: P::Config = serde_json::from_value(request.config)?;
+    let plugin = P::from_config(config)?;
+    let plugin = Arc::new(plugin);
+
+    // 3. Dispatch loop (same as run_tool_with_io).
     loop {
         let body = match reader.next_frame().await? {
             Some(b) => b,

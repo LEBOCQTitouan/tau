@@ -12,7 +12,14 @@ mod sandbox;
 mod storage;
 mod tool;
 
-pub use llm_backend::{run_llm_backend, run_llm_backend_with_io};
-pub use sandbox::{run_sandbox, run_sandbox_with_io};
-pub use storage::{run_storage, run_storage_with_io};
-pub use tool::{run_tool, run_tool_with_io};
+pub use llm_backend::{
+    run_llm_backend, run_llm_backend_with_config, run_llm_backend_with_config_with_io,
+    run_llm_backend_with_io,
+};
+pub use sandbox::{
+    run_sandbox, run_sandbox_with_config, run_sandbox_with_config_with_io, run_sandbox_with_io,
+};
+pub use storage::{
+    run_storage, run_storage_with_config, run_storage_with_config_with_io, run_storage_with_io,
+};
+pub use tool::{run_tool, run_tool_with_config, run_tool_with_config_with_io, run_tool_with_io};

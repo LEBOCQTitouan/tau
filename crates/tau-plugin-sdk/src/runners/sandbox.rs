@@ -20,6 +20,7 @@ use tau_plugin_protocol::{
 use tau_ports::Sandbox;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::configure::Configure;
 use crate::error::SdkError;
 use crate::handshake::{drive_handshake, PluginMeta};
 use crate::tracing_layer;
@@ -72,6 +73,83 @@ where
 
     let plugin_meta = build_sandbox_meta(plugin_name, plugin_version);
     let _request = drive_handshake(reader, writer, plugin_meta).await?;
+
+    loop {
+        let body = match reader.next_frame().await? {
+            Some(b) => b,
+            None => break,
+        };
+        let frame = Frame::decode(&body)?;
+        match frame {
+            Frame::Request { id, method, .. } => {
+                let envelope = RpcErrorEnvelope::new(
+                    METHOD_NOT_FOUND,
+                    format!("sandbox runner does not yet dispatch: {method}"),
+                    None,
+                );
+                let response = Frame::Response {
+                    id,
+                    error: Some(envelope),
+                    result: None,
+                };
+                writer.write_frame(&response.encode()?).await?;
+            }
+            Frame::Notification { method, .. } if method == meta::SHUTDOWN_METHOD => {
+                tracing::info!(target: "tau_plugin_sdk", "received meta.shutdown");
+                break;
+            }
+            _ => { /* ignore */ }
+        }
+    }
+
+    Ok(())
+}
+
+/// Variant of [`run_sandbox`] that constructs the plugin via
+/// [`Configure::from_config`] using the JSON config field from the
+/// handshake. v0.1 stub: same dispatch shape as [`run_sandbox`] —
+/// handshake-and-loop with `METHOD_NOT_FOUND` for `sandbox.*`.
+pub async fn run_sandbox_with_config<P>(
+    plugin_name: &str,
+    plugin_version: &str,
+) -> Result<(), SdkError>
+where
+    P: Sandbox + Configure + Send + Sync + 'static,
+{
+    tracing_layer::install();
+
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+    let mut reader = FramedReader::new(stdin, FramerOptions::default());
+    let mut writer = FramedWriter::new(stdout);
+
+    run_sandbox_with_config_with_io::<_, _, P>(
+        &mut reader,
+        &mut writer,
+        plugin_name,
+        plugin_version,
+    )
+    .await
+}
+
+/// Same as [`run_sandbox_with_config`] but accepts an explicit reader
+/// and writer.
+pub async fn run_sandbox_with_config_with_io<R, W, P>(
+    reader: &mut FramedReader<R>,
+    writer: &mut FramedWriter<W>,
+    plugin_name: &str,
+    plugin_version: &str,
+) -> Result<(), SdkError>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+    P: Sandbox + Configure + Send + Sync + 'static,
+{
+    let plugin_meta = build_sandbox_meta(plugin_name, plugin_version);
+    let request = drive_handshake(reader, writer, plugin_meta).await?;
+
+    let config: P::Config = serde_json::from_value(request.config)?;
+    let _plugin = Arc::new(P::from_config(config)?);
 
     loop {
         let body = match reader.next_frame().await? {

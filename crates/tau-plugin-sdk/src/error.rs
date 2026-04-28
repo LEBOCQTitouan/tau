@@ -35,6 +35,11 @@ pub enum SdkError {
     #[error("config decode failed: {0}")]
     ConfigDecodeFailed(#[from] serde_json::Error),
 
+    /// Plugin's [`crate::configure::Configure::from_config`] returned
+    /// an error during runner startup.
+    #[error("config initialization failed: {0}")]
+    Configure(#[from] crate::configure::ConfigError),
+
     /// IO error reading/writing stdio (typically EOF on stdin meaning
     /// host exited).
     #[error("stdio io error: {0}")]
