@@ -1,5 +1,12 @@
 # Plugin Loading (Phase 1 sub-project 1) Implementation Plan
 
+> **STATUS — COMPLETE.** All 26 tasks shipped via subagent-driven
+> execution on branch `feat/plugin-loading-spec`. ADR-0008 Accepted at
+> commit `ddf8057`. Per the project's plan-checkbox-reconciliation
+> convention, individual `- [ ]` checkboxes below remain unticked —
+> the authoritative record is the git log on this branch. PR #9
+> squash-merged into `main` 2026-04-28.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Land the plugin loading mechanism — out-of-process IPC over MessagePack-RPC on stdio with long-lived multiplexed plugin processes — and exercise it end-to-end with two toy plugins (`echo-llm`, `echo-tool`). Closes the [ADR-0007](../../decisions/0007-tau-cli.md) §18 "plugin loading deferred" gap. First sub-project of Phase 1.
