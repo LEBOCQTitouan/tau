@@ -1,0 +1,11 @@
+- request:
+    method: POST
+    uri: /v1/chat/completions
+    body: |-
+      placeholder
+  response:
+    status: 200
+    headers:
+      content-type: application/json
+    body: |-
+      {"id":"chatcmpl-sys","object":"chat.completion","created":1700000001,"model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"Concise."},"finish_reason":"stop"}],"usage":{"prompt_tokens":15,"completion_tokens":2,"total_tokens":17}}
