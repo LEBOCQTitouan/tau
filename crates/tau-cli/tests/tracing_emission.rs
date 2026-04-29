@@ -23,11 +23,10 @@
 
 mod common;
 
-#[cfg(feature = "test-mock")]
 use assert_cmd::Command as AssertCmd;
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_emits_run_started_event_at_info() {
     let dir = common::setup_project_with_installed_agent(
         "reviewer",
@@ -59,8 +58,8 @@ fn run_emits_run_started_event_at_info() {
     );
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_emits_turn_lifecycle_events_at_debug() {
     let dir = common::setup_project_with_installed_agent(
         "reviewer",

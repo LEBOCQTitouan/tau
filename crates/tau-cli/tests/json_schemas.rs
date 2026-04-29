@@ -90,8 +90,8 @@ llm_backend  = "anthropic"
     assert_json_snapshot!("list_agents_json", val);
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn json_schema_run_completed() {
     let dir = common::setup_project_with_installed_agent(
         "reviewer",
@@ -120,8 +120,8 @@ fn json_schema_run_completed() {
     assert_json_snapshot!("run_completed_json", val);
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn json_schema_run_failed() {
     let dir = common::setup_project_with_installed_agent(
         "reviewer",

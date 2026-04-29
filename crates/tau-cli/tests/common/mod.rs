@@ -9,9 +9,12 @@
 //!   `.tau/` lockfile + on-disk package tree, mirroring the unit-test
 //!   `install_fixture` from `crates/tau-cli/src/config/agent.rs`. These
 //!   keep the `tau run` / `tau chat` integration suites hermetic — no
-//!   `git`, no network — and let every test exercise the binary
-//!   end-to-end through the compiled-in mock LLM backend (gated by
-//!   `--features test-mock`).
+//!   `git`, no network. NOTE: as of Task 19 (test-mock retirement),
+//!   the lockfile entries written here have no `[plugin]` table, so
+//!   any test that actually drives `tau run` / `tau chat` past
+//!   plugin-loading will fail. Task 21 rewrites those tests against
+//!   real `echo-llm` / `echo-tool` binary spawns; the suites that need
+//!   it stay marked `#[ignore]` until then.
 //! - [`run_git`] / [`file_url`] / [`setup_local_package_fixture`]: the
 //!   bare-repo + working-repo `file://` git fixture used by `tau install`
 //!   and `tau list` integration tests. Honours the `init.defaultBranch`
@@ -128,8 +131,10 @@ generated_at = "{now_rfc3339}"
 /// single agent and the matching package + LLM backend pre-installed
 /// in the project's `.tau/` lockfile.
 ///
-/// The `[agents.<id>]` table is pre-populated with the names the
-/// test-mock backend expects.
+/// NOTE: the lockfile entries written here carry no `[plugin]` table,
+/// so any test that drives `tau run` / `tau chat` past plugin loading
+/// will surface an error from `cmd::plugin_loader`. Task 21 rewrites
+/// those tests against real `echo-llm` / `echo-tool` binary spawns.
 pub fn setup_project_with_installed_agent(
     agent_id: &str,
     pkg_name: &str,

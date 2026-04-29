@@ -1,14 +1,18 @@
 //! Integration tests for `tau chat`.
 //!
-//! Same hand-author fixture pattern as `cmd_run.rs` (sub-project 9):
-//! write a project `tau.toml` plus an installed package + LLM-backend
-//! lockfile entry, then drive the binary via `assert_cmd`. Each REPL
-//! interaction is a `write_stdin` payload terminated by `/exit\n` so
-//! the loop returns cleanly. Mock-backend-driven tests gate on
-//! `feature = "test-mock"` for parity with `cmd_run.rs`.
+//! Same hand-author fixture pattern as `cmd_run.rs`: write a project
+//! `tau.toml` plus an installed package + LLM-backend lockfile entry,
+//! then drive the binary via `assert_cmd`. Each REPL interaction is a
+//! `write_stdin` payload terminated by `/exit\n` so the loop returns
+//! cleanly.
 //!
-//! Fixture builders live in `tests/common/mod.rs` (Task 15) so they can
-//! be shared with the cross-cutting suites.
+//! Tests that exercise the actual REPL loop are marked
+//! `#[ignore = "TODO(task-21): ..."]`: the v0.1 transitional
+//! `--features test-mock` mock backend was retired in Task 19, and
+//! Task 21 rewrites these against real `echo-llm` / `echo-tool`
+//! binary spawns.
+//!
+//! Fixture builders live in `tests/common/mod.rs`.
 
 mod common;
 
@@ -56,10 +60,10 @@ fn chat_missing_agent_id_exits_two() {
         .stderr(predicate::str::contains("nonexistent"));
 }
 
-// ---- mock-backend-driven tests ----------------------------------------------
+// ---- REPL-driven tests (ignored until Task 21 rewires real plugin spawn) ----
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn chat_dry_run_skips_repl() {
     let dir = common::setup_project();
     let global_dir = dir.path().join("global");
@@ -76,8 +80,8 @@ fn chat_dry_run_skips_repl() {
         .stderr(predicate::str::contains("no session opened"));
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn chat_repl_one_round_via_stdin_pipe() {
     let dir = common::setup_project();
     let global_dir = dir.path().join("global");
@@ -96,8 +100,8 @@ fn chat_repl_one_round_via_stdin_pipe() {
         .stderr(predicate::str::contains("Welcome to tau chat"));
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn chat_help_command_lists_slash_commands() {
     let dir = common::setup_project();
     let global_dir = dir.path().join("global");
@@ -115,8 +119,8 @@ fn chat_help_command_lists_slash_commands() {
         .stdout(predicate::str::contains("/history"));
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn chat_clear_resets_history() {
     let dir = common::setup_project();
     let global_dir = dir.path().join("global");
@@ -135,8 +139,8 @@ fn chat_clear_resets_history() {
         .stderr(predicate::str::contains("history cleared"));
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn chat_eof_ends_session_with_summary() {
     // Closing stdin without /exit should still print the session summary
     // and exit successfully.
@@ -155,8 +159,8 @@ fn chat_eof_ends_session_with_summary() {
         .stderr(predicate::str::contains("session ended"));
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn chat_unknown_slash_is_forwarded_as_prompt() {
     // Per parser docs: `/foo` is not recognised, so it goes to the LLM
     // as a normal prompt. The mock echoes back our configured text;
@@ -176,8 +180,8 @@ fn chat_unknown_slash_is_forwarded_as_prompt() {
         .stdout(predicate::str::contains("passthrough-response"));
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn chat_history_threads_across_turns() {
     // Two prompts in a row; after both, /history should show 4 entries
     // (user1, assistant1, user2, assistant2). This verifies

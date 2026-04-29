@@ -77,8 +77,8 @@ fn list_dry_run_rejected_is_two() {
 
 // ---- run --------------------------------------------------------------------
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_completed_is_zero() {
     let dir = common::setup_project_with_installed_agent(
         "reviewer",
@@ -104,8 +104,8 @@ fn run_completed_is_zero() {
     );
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_failed_max_turns_is_one() {
     // The mock backend emits a tool_use on turn 0 only; with
     // --max-turns 1 the agent dispatches the tool then runs out
@@ -214,8 +214,8 @@ fn init_existing_without_force_is_two() {
 
 // ---- chat -------------------------------------------------------------------
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn chat_dry_run_is_zero() {
     let dir = common::setup_project();
     let global_dir = dir.path().join("global");

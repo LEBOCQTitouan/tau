@@ -3,14 +3,16 @@
 //! Hand-authors the package fixture (lockfile + `tau.toml`) directly
 //! rather than going through `tau install`, mirroring the
 //! `install_fixture` helper from `crates/tau-cli/src/config/agent.rs`'s
-//! unit tests. The fixture builders themselves now live in
-//! `tests/common/mod.rs` (Task 15) so `cmd_chat.rs` and the cross-cutting
-//! suites can share them; this file only orchestrates the assertions.
+//! unit tests. The fixture builders themselves live in
+//! `tests/common/mod.rs` so `cmd_chat.rs` and the cross-cutting suites
+//! can share them; this file only orchestrates the assertions.
 //!
-//! Tests that require the mock backend gate themselves with
-//! `#[cfg(feature = "test-mock")]` so a no-features `cargo test
-//! --test cmd_run` still compiles. The "easy" tests
-//! (agent_id_not_found, missing_project_tau_toml) run regardless.
+//! Tests that exercise the actual run loop are marked
+//! `#[ignore = "TODO(task-21): ..."]` because the v0.1 transitional
+//! `--features test-mock` mock backend was retired in Task 19. Task 21
+//! rewrites them against real `echo-llm` / `echo-tool` binary spawns.
+//! The "easy" tests (agent_id_not_found, missing_project_tau_toml)
+//! still run unconditionally.
 
 mod common;
 
@@ -61,18 +63,16 @@ llm_backend  = "anthropic"
         .stderr(predicate::str::contains("ghost"));
 }
 
-// ---- mock-backend-driven tests ----------------------------------------------
+// ---- run-loop tests (ignored until Task 21 rewires real plugin spawn) ------
 //
-// These require the binary to be built with `--features test-mock` so
-// the mock LLM backend is compiled in. Without the feature,
-// `RuntimeBuilder::build` errors with `BuildError::NoLlmBackend` and
-// the tests would fail with a kernel error rather than the asserted
-// behavior. We gate the test items on the feature so a no-features
-// `cargo test --test cmd_run` is green and `cargo test --test cmd_run
-// --features test-mock` exercises the rest.
+// These tests previously relied on `--features test-mock`'s in-process
+// mock LLM backend; the feature was retired in Task 19 and the tests
+// are kept (marked `#[ignore]`) as a checklist for Task 21, which
+// rewrites them against real `echo-llm` / `echo-tool` subprocess
+// spawns through `tau_runtime::plugin_host::load_*`.
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_dry_run_prints_preview_and_makes_no_llm_call() {
     let dir = common::setup_project_with_installed_agent(
         "reviewer",
@@ -95,8 +95,8 @@ fn run_dry_run_prints_preview_and_makes_no_llm_call() {
         .stderr(predicate::str::contains("no LLM call"));
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_completed_happy_path_emits_text() {
     let dir = common::setup_project_with_installed_agent(
         "reviewer",
@@ -127,8 +127,8 @@ fn run_completed_happy_path_emits_text() {
     );
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_with_tool_call_dispatches_echo_and_completes() {
     let dir = common::setup_project_with_installed_agent(
         "reviewer",
@@ -159,8 +159,8 @@ fn run_with_tool_call_dispatches_echo_and_completes() {
     assert!(stdout.contains("done after tool"), "stdout: {stdout}");
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_max_turns_reached_when_llm_loops_forever() {
     // Per `MockLlmBackend::build_response`, tool_uses are emitted on
     // turn 0 only — so an "infinite" tool-loop isn't reachable through
@@ -200,8 +200,8 @@ fn run_max_turns_reached_when_llm_loops_forever() {
     );
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
+#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_json_completed_emits_outcome_payload() {
     let dir = common::setup_project_with_installed_agent(
         "reviewer",
