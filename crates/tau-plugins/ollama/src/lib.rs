@@ -11,5 +11,6 @@
 //! for the design rationale.
 
 pub mod config;
+pub(crate) mod error;
 pub(crate) mod request;
 pub(crate) mod response;
