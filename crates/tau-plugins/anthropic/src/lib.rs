@@ -6,10 +6,8 @@
 //!
 //! The binary entrypoint at `src/main.rs` calls
 //! `tau_plugin_sdk::run_llm_backend_with_config::<AnthropicPlugin>(...)`.
-//! Modules below populate as Tasks 3 — 9 land.
 //!
 //! See `docs/superpowers/specs/2026-04-29-anthropic-plugin-design.md`
 //! for the design rationale.
 
-// Modules populate progressively across Tasks 3-9. For Task 1 the
-// crate just compiles to an empty library + stub binary.
+pub mod config;
