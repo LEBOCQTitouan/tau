@@ -1,5 +1,12 @@
 # Anthropic LLM-backend Plugin Implementation Plan
 
+> **STATUS — COMPLETE.** All 16 tasks shipped via subagent-driven
+> execution on branch `feat/anthropic-plugin-spec`. Per the project's
+> plan-checkbox-reconciliation convention, individual `- [ ]`
+> checkboxes below remain unticked — the authoritative record is the
+> git log on this branch. PR #12 squash-merged into `main`
+> 2026-04-29.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Land the first real LLM-backend plugin for tau — an in-tree Anthropic Claude Messages API client at `crates/tau-plugins/anthropic/`. Validates the IPC plugin loading mechanism (ADR-0008) end-to-end against real network traffic, real authentication, real provider error envelopes, and real SSE streaming.

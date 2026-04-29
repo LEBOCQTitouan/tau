@@ -21,6 +21,7 @@ natural next sub-project.
 | # | Sub-project | Produces | Merged |
 |---|---|---|---|
 | 1 | Plugin loading mechanism ✅ | Out-of-process IPC over MessagePack-RPC; tau-plugin-protocol + tau-plugin-sdk crates; plugin_host module in tau-runtime; tau-pkg build-on-install; debug-tier subcommands; echo-llm + echo-tool toy plugins | 2026-04-28 |
+| 2a | Anthropic LLM-backend plugin ✅ | First real LLM-backend plugin: Anthropic Claude Messages API client at `crates/tau-plugins/anthropic/`; day-1 streaming + tool-use; cassette-replay test harness + env-gated live smoke; in-plugin retry honoring Retry-After; ConfigError::InvalidEnvVar SDK amendment | 2026-04-29 |
 
 ## Phase 0 (complete) — bootstrap + foundational sub-projects
 
@@ -66,8 +67,11 @@ Tier ordering reflects criticality, not strict implementation order
    IPC over MessagePack-RPC + tau-pkg/tau-runtime/tau-domain
    amendments. 15 required CI checks gating `main` (was 12 in Phase
    0).
-2. **First real LLM-backend plugin.** Validates the loading mechanism
-   end-to-end. Likely Anthropic / OpenAI HTTP via reqwest.
+2. **First real LLM-backend plugin.** Anthropic shipped 2026-04-29 as
+   priority 2a (see [ADR-0008](docs/decisions/0008-plugin-loading.md)
+   first real consumer). Ollama (priority 2b) and OpenAI (priority 2c)
+   follow as their own sub-projects. 16 required CI checks gating
+   `main` (was 15).
 3. **First real Tool plugin.** `fs-read` + `shell` initial set;
    exercises capability checks at runtime.
 
