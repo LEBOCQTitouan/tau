@@ -13,11 +13,14 @@
 //! a Storage / Sandbox package as a tool will surface a typed error
 //! at `RuntimeBuilder::build` rather than silently being skipped.
 
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
 use anyhow::Context;
 use tau_domain::PortKind;
 use tau_pkg::{LockFile, LockedPlugin, Scope};
 use tau_plugin_protocol::handshake::TraceContext;
-use tau_runtime::plugin_host::{self, PluginHostOptions};
+use tau_runtime::plugin_host::{self, PluginHostOptions, RecorderHandle, RecordingSink};
 use tau_runtime::RuntimeBuilder;
 
 use crate::config::AgentEntry;
@@ -29,6 +32,61 @@ pub(crate) struct LoadedPlugins {
     /// Builder pre-populated with the LLM backend and any tool plugins.
     /// The caller is expected to call [`RuntimeBuilder::build`] on it.
     pub(crate) builder: RuntimeBuilder,
+    /// Per-plugin protocol recorders, when `--record-protocol` is set.
+    /// The caller flushes them on exit via [`flush_recorders`] to drain
+    /// the tokio file buffers (which otherwise discard pending writes
+    /// on `Drop`).
+    pub(crate) recorder_ledger: Arc<Mutex<Vec<RecorderHandle>>>,
+}
+
+/// Build a [`PluginHostOptions`] tuned for the CLI:
+///
+/// * If `record_protocol` is `Some(path)`, the returned options carry
+///   a `RecordingSink::JsonlFile { path }` plus a fresh
+///   `recorder_ledger`. The same `Arc<Mutex<Vec<RecorderHandle>>>` is
+///   returned to the caller so it can flush every per-plugin recorder
+///   on exit (Task 20: `--record-protocol` flush wiring).
+/// * If `record_protocol` is `None`, the options carry no recording
+///   sink and an empty (but still allocated, for symmetry) ledger.
+pub(crate) fn build_host_options(
+    record_protocol: Option<&Path>,
+) -> (PluginHostOptions, Arc<Mutex<Vec<RecorderHandle>>>) {
+    let ledger: Arc<Mutex<Vec<RecorderHandle>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut options = PluginHostOptions::default();
+    if let Some(path) = record_protocol {
+        options.recording = Some(RecordingSink::JsonlFile {
+            path: path.to_path_buf(),
+        });
+        options.recorder_ledger = Some(ledger.clone());
+    }
+    (options, ledger)
+}
+
+/// Flush every recorder registered in `ledger`. Called by `cmd::run` /
+/// `cmd::chat` after the runtime is dropped (and thus every plugin
+/// process is reaped) so the JSONL recording file observes every line
+/// the host wrote, even those still buffered inside the tokio
+/// `tokio::fs::File` write half.
+///
+/// Best-effort: a poisoned mutex is logged, never bubbled.
+pub(crate) async fn flush_recorders(ledger: Arc<Mutex<Vec<RecorderHandle>>>) {
+    // Drain under the synchronous mutex so we don't hold it across the
+    // async `flush().await` boundary (which would either require a
+    // tokio::sync::Mutex or be a deadlock hazard).
+    let recorders: Vec<RecorderHandle> = match ledger.lock() {
+        Ok(mut g) => std::mem::take(&mut *g),
+        Err(e) => {
+            tracing::warn!(
+                target: "tau_cli::plugin_loader",
+                err = %e,
+                "recorder_ledger mutex poisoned; skipping flush"
+            );
+            return;
+        }
+    };
+    for r in recorders {
+        r.flush().await;
+    }
 }
 
 /// Resolve and load every plugin declared by `entry` against the given
@@ -64,6 +122,10 @@ pub(crate) async fn load_plugins(
     trace_context: TraceContext,
     host_options: PluginHostOptions,
 ) -> anyhow::Result<LoadedPlugins> {
+    let recorder_ledger = host_options
+        .recorder_ledger
+        .clone()
+        .unwrap_or_else(|| Arc::new(Mutex::new(Vec::new())));
     let lockfile = LockFile::load(&scope.lockfile_path())
         .with_context(|| format!("loading lockfile {}", scope.lockfile_path().display()))?;
 
@@ -110,7 +172,10 @@ pub(crate) async fn load_plugins(
         builder = builder.with_dyn_tool(tool);
     }
 
-    Ok(LoadedPlugins { builder })
+    Ok(LoadedPlugins {
+        builder,
+        recorder_ledger,
+    })
 }
 
 /// Resolve a package name to its [`LockedPlugin`], checking that

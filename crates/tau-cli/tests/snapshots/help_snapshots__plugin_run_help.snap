@@ -2,23 +2,20 @@
 source: crates/tau-cli/tests/help_snapshots.rs
 expression: s
 ---
-Invoke an agent one-shot
+Run a plugin standalone (without an agent context)
 
-Usage: tau run [OPTIONS] <AGENT_ID> [PROMPT]
+Usage: tau plugin run [OPTIONS] <BINARY>
 
 Arguments:
-  <AGENT_ID>
-          Identifier of the agent to invoke
-
-  [PROMPT]
-          Prompt for the agent. If omitted, read from stdin
+  <BINARY>
+          Path to the plugin binary
 
 Options:
-      --max-turns <MAX_TURNS>
-          Override RunOptions::max_turns
+      --interactive
+          REPL mode: read `<method> <json-args>` lines from stdin
 
-      --dry-run
-          Validate setup without invoking the LLM
+      --script <PATH>
+          Scripted mode: read input from a JSONL file (one `{ "method": "...", "params": [...] }` object per line)
 
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)

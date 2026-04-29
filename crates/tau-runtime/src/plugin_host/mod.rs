@@ -72,6 +72,88 @@ pub mod __internals {
     pub use super::recording::{Recorder, RecorderHandle};
 }
 
+pub use recording::{Recorder, RecorderHandle};
+
+/// Spawn a plugin, drive the handshake, and immediately shut it down,
+/// returning the validated [`tau_plugin_protocol::HandshakeResponse`].
+///
+/// Used by `tau plugin describe` (spec §9 debug tier) so the CLI can
+/// print a plugin's advertised metadata + per-method schemas without
+/// keeping the subprocess alive. Equivalent to one full lifecycle:
+///
+/// 1. Spawn the plugin binary with the same env scrubbing as the
+///    `load_*` paths.
+/// 2. Drive `meta.handshake` against the requested
+///    [`tau_domain::PortKind`].
+/// 3. Send `meta.shutdown` and wait for the child to exit
+///    (escalating to SIGTERM/SIGKILL per the standard
+///    [`PluginHostOptions::shutdown_timeout`] budget).
+///
+/// `expected_port` is taken from the plugin's manifest by the caller;
+/// `required_methods` is left empty so the host doesn't reject plugins
+/// that omit the conventional `*.complete`/`*.call` methods (the
+/// describe command's purpose is exactly to *report* what's there).
+///
+/// Errors mirror [`load_llm_backend`]: spawn / handshake failures
+/// surface typed [`RuntimeError`] variants.
+pub async fn describe_plugin(
+    plugin: &LockedPlugin,
+    trace_context: TraceContext,
+    options: PluginHostOptions,
+) -> Result<tau_plugin_protocol::HandshakeResponse, RuntimeError> {
+    let plugin_name = plugin.manifest.bin.clone();
+    let run_id = trace_context.run_id.clone();
+    let agent_id = trace_context.agent_id.clone();
+    let trace_for_handshake = trace_context.clone();
+    let plugin_name_for_handshake = plugin_name.clone();
+    let handshake_timeout = options.handshake_timeout;
+    let mut framer_options = FramerOptions::default();
+    framer_options.max_message_size = options.max_message_size;
+    let recorder = build_recorder(&plugin_name, &options).await;
+    let expected_port = plugin.manifest.provides;
+
+    let (process, response) = process::PluginProcess::spawn_and_handshake(
+        &plugin.binary_path,
+        plugin_name.clone(),
+        &run_id,
+        &agent_id,
+        framer_options,
+        options.shutdown_timeout,
+        recorder.clone(),
+        |reader, writer| {
+            Box::pin(async move {
+                handshake::drive_handshake(
+                    reader,
+                    writer,
+                    &plugin_name_for_handshake,
+                    expected_port,
+                    &[],
+                    serde_json::Value::Null,
+                    trace_for_handshake,
+                    handshake_timeout,
+                )
+                .await
+            })
+        },
+    )
+    .await?;
+
+    // Cleanly shut the plugin down: send `meta.shutdown` and wait for
+    // the child to exit. This deviates from the long-lived `load_*`
+    // path in that we don't keep the `PluginProcess` around — describe
+    // is one-shot.
+    process.shutdown().await;
+
+    // Best-effort: flush the recorder so the JSONL file is durable
+    // before the function returns (matches the `--record-protocol`
+    // flush wired in `cmd::run` / `cmd::chat`).
+    if let Some(recorder) = recorder {
+        recorder.flush().await;
+    }
+
+    Ok(response)
+}
+
 /// Build a [`recording::RecorderHandle`] from
 /// [`PluginHostOptions::recording`]. Failures to open the recording
 /// file are logged at WARN and yield `Ok(None)` so plugin loading
@@ -80,7 +162,7 @@ async fn build_recorder(
     plugin_name: &str,
     options: &PluginHostOptions,
 ) -> Option<recording::RecorderHandle> {
-    match &options.recording {
+    let handle = match &options.recording {
         Some(RecordingSink::JsonlFile { path }) => {
             match recording::Recorder::open_jsonl(plugin_name, path).await {
                 Ok(r) => Some(Arc::new(r)),
@@ -97,7 +179,25 @@ async fn build_recorder(
             }
         }
         None => None,
+    };
+    // Register the freshly-opened recorder with the CLI-side ledger
+    // (if any) so `--record-protocol` can flush every per-plugin
+    // recorder on exit. Best-effort: a poisoned mutex is logged but
+    // does not abort plugin loading.
+    if let (Some(h), Some(ledger)) = (handle.as_ref(), options.recorder_ledger.as_ref()) {
+        match ledger.lock() {
+            Ok(mut guard) => guard.push(h.clone()),
+            Err(e) => {
+                tracing::warn!(
+                    target: "tau_runtime::plugin_host::recording",
+                    plugin = plugin_name,
+                    err = %e,
+                    "recorder_ledger mutex poisoned; flush coordination disabled for this plugin"
+                );
+            }
+        }
     }
+    handle
 }
 
 /// Optional protocol-recording sink. Currently only
@@ -159,6 +259,17 @@ pub struct PluginHostOptions {
     /// supplied sink. Used by `tau --record-protocol <path>` (Task 20)
     /// and integration-test golden files. Defaults to `None`.
     pub recording: Option<RecordingSink>,
+
+    /// Shared ledger of every recorder the host opens against
+    /// [`PluginHostOptions::recording`]. When `Some(_)`, each per-plugin
+    /// `Recorder` is appended here so the caller can later call
+    /// [`Recorder::flush`] on every entry to drain the tokio file
+    /// buffers (which otherwise discard pending writes on `Drop`).
+    ///
+    /// Used by `tau --record-protocol` (Task 20) on `cmd::run` /
+    /// `cmd::chat` exit paths. Defaults to `None`; non-CLI embedders
+    /// don't need it.
+    pub recorder_ledger: Option<Arc<std::sync::Mutex<Vec<RecorderHandle>>>>,
 }
 
 impl Default for PluginHostOptions {
@@ -171,6 +282,7 @@ impl Default for PluginHostOptions {
             // sides of the wire.
             max_message_size: 64 * 1024 * 1024,
             recording: None,
+            recorder_ledger: None,
         }
     }
 }

@@ -9,5 +9,6 @@ pub mod chat;
 pub mod init;
 pub mod install;
 pub mod list;
+pub mod plugin;
 pub(crate) mod plugin_loader;
 pub mod run;

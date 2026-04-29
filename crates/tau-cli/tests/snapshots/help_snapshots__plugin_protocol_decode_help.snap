@@ -2,23 +2,26 @@
 source: crates/tau-cli/tests/help_snapshots.rs
 expression: s
 ---
-Invoke an agent one-shot
+Decode a JSONL recording into a human-readable transcript
 
-Usage: tau run [OPTIONS] <AGENT_ID> [PROMPT]
+Usage: tau plugin protocol decode [OPTIONS] <PATH>
 
 Arguments:
-  <AGENT_ID>
-          Identifier of the agent to invoke
-
-  [PROMPT]
-          Prompt for the agent. If omitted, read from stdin
+  <PATH>
+          Path to the recording file
 
 Options:
-      --max-turns <MAX_TURNS>
-          Override RunOptions::max_turns
+      --filter <K=V>
+          Filter by `key=value` predicate (e.g. `plugin=echo-llm`, `method=llm.complete`, `dir=h2p`). May be supplied multiple times; frames must satisfy every predicate to be emitted
 
-      --dry-run
-          Validate setup without invoking the LLM
+      --from <FROM>
+          Time-range start (Unix timestamp seconds, fractional ok)
+
+      --to <TO>
+          Time-range end (Unix timestamp seconds, fractional ok)
+
+      --json
+          Emit one decoded JSON object per line (machine-readable)
 
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
@@ -38,9 +41,6 @@ Options:
           - never:  Never emit color codes
           
           [default: auto]
-
-      --json
-          Emit structured JSON output instead of human-readable. Only supported on `install`, `list`, `run`, `init`
 
       --record-protocol <PATH>
           Mirror every plugin protocol frame to a JSONL file at this path.

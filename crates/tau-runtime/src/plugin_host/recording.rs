@@ -69,6 +69,14 @@ pub struct Recorder {
     file: Mutex<tokio::fs::File>,
 }
 
+impl std::fmt::Debug for Recorder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Recorder")
+            .field("plugin_name", &self.plugin_name)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Recorder {
     /// Open a `JsonlFile` sink for the named plugin. Creates the parent
     /// directory if necessary; opens the file in append mode (creating

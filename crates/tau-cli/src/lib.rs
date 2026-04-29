@@ -63,11 +63,15 @@ pub async fn run_main() -> std::process::ExitCode {
 
 async fn dispatch(cli: cli::Cli) -> anyhow::Result<()> {
     let mut output = Output::from_cli(&cli);
+    let record_protocol = cli.record_protocol.clone();
     match cli.command {
         cli::Command::Init(args) => cmd::init::run(&args, &mut output).await,
         cli::Command::Install(args) => cmd::install::run(&args, &mut output).await,
         cli::Command::List(args) => cmd::list::run(&args, &mut output).await,
-        cli::Command::Run(args) => cmd::run::run(&args, &mut output).await,
-        cli::Command::Chat(args) => cmd::chat::run(&args, &mut output).await,
+        cli::Command::Run(args) => cmd::run::run(&args, record_protocol, &mut output).await,
+        cli::Command::Chat(args) => cmd::chat::run(&args, record_protocol, &mut output).await,
+        cli::Command::Plugin { action } => {
+            cmd::plugin::dispatch(action, record_protocol, &mut output).await
+        }
     }
 }

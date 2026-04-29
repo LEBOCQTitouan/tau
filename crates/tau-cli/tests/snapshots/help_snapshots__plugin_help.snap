@@ -2,24 +2,17 @@
 source: crates/tau-cli/tests/help_snapshots.rs
 expression: s
 ---
-Invoke an agent one-shot
+Plugin debugging utilities (spec §9 debug tier)
 
-Usage: tau run [OPTIONS] <AGENT_ID> [PROMPT]
+Usage: tau plugin [OPTIONS] <COMMAND>
 
-Arguments:
-  <AGENT_ID>
-          Identifier of the agent to invoke
-
-  [PROMPT]
-          Prompt for the agent. If omitted, read from stdin
+Commands:
+  describe  Print a plugin's handshake metadata + per-method schemas
+  run       Run a plugin standalone (without an agent context)
+  protocol  Inspect or transform plugin-protocol recordings
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --max-turns <MAX_TURNS>
-          Override RunOptions::max_turns
-
-      --dry-run
-          Validate setup without invoking the LLM
-
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
 

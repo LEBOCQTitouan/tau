@@ -1,10 +1,13 @@
 //! Command-line argument parser. clap v4 derive.
 //!
-//! [`Cli`] is the top-level parser; [`Command`] enumerates the five
-//! v0.1 subcommands. Each subcommand has its own `*Args` struct.
+//! [`Cli`] is the top-level parser; [`Command`] enumerates the v0.1
+//! subcommands plus the debug-tier `plugin` subcommand group. Each
+//! subcommand has its own `*Args` struct.
 //!
-//! Global flags (verbose, quiet, debug, color, json) are accessible
-//! from any subcommand via the parsed [`Cli`].
+//! Global flags (verbose, quiet, debug, color, json, record-protocol)
+//! are accessible from any subcommand via the parsed [`Cli`].
+
+use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -36,6 +39,15 @@ pub struct Cli {
     /// Only supported on `install`, `list`, `run`, `init`.
     #[arg(long, global = true)]
     pub json: bool,
+
+    /// Mirror every plugin protocol frame to a JSONL file at this path.
+    ///
+    /// Useful for debugging plugin behavior and replaying via
+    /// `tau plugin protocol decode <path>`. The recording is best-effort
+    /// per spec §7.8: write/open failures are logged but never abort the
+    /// invocation.
+    #[arg(long, global = true, value_name = "PATH")]
+    pub record_protocol: Option<PathBuf>,
 }
 
 /// All v0.1 subcommands.
@@ -51,6 +63,76 @@ pub enum Command {
     Run(RunArgs),
     /// Open a REPL chat session with an agent.
     Chat(ChatArgs),
+    /// Plugin debugging utilities (spec §9 debug tier).
+    Plugin {
+        /// Sub-action within the plugin group.
+        #[command(subcommand)]
+        action: PluginAction,
+    },
+}
+
+/// `tau plugin <action>` — debug-tier helpers per spec §9.
+#[derive(Subcommand, Debug)]
+pub enum PluginAction {
+    /// Print a plugin's handshake metadata + per-method schemas.
+    Describe(PluginDescribeArgs),
+    /// Run a plugin standalone (without an agent context).
+    Run(PluginRunArgs),
+    /// Inspect or transform plugin-protocol recordings.
+    Protocol {
+        /// Sub-action within the protocol group.
+        #[command(subcommand)]
+        action: PluginProtocolAction,
+    },
+}
+
+/// `tau plugin describe` arguments.
+#[derive(Args, Debug)]
+pub struct PluginDescribeArgs {
+    /// Plugin package name (must be installed in the project or global scope).
+    pub name: String,
+}
+
+/// `tau plugin run` arguments.
+#[derive(Args, Debug)]
+pub struct PluginRunArgs {
+    /// Path to the plugin binary.
+    pub binary: PathBuf,
+    /// REPL mode: read `<method> <json-args>` lines from stdin.
+    #[arg(long, conflicts_with = "script")]
+    pub interactive: bool,
+    /// Scripted mode: read input from a JSONL file (one
+    /// `{ "method": "...", "params": [...] }` object per line).
+    #[arg(long, value_name = "PATH")]
+    pub script: Option<PathBuf>,
+}
+
+/// `tau plugin protocol <action>` — recording-related utilities.
+#[derive(Subcommand, Debug)]
+pub enum PluginProtocolAction {
+    /// Decode a JSONL recording into a human-readable transcript.
+    Decode(PluginProtocolDecodeArgs),
+}
+
+/// `tau plugin protocol decode` arguments.
+#[derive(Args, Debug)]
+pub struct PluginProtocolDecodeArgs {
+    /// Path to the recording file.
+    pub path: PathBuf,
+    /// Filter by `key=value` predicate (e.g. `plugin=echo-llm`,
+    /// `method=llm.complete`, `dir=h2p`). May be supplied multiple times;
+    /// frames must satisfy every predicate to be emitted.
+    #[arg(long, value_name = "K=V")]
+    pub filter: Vec<String>,
+    /// Time-range start (Unix timestamp seconds, fractional ok).
+    #[arg(long)]
+    pub from: Option<f64>,
+    /// Time-range end (Unix timestamp seconds, fractional ok).
+    #[arg(long)]
+    pub to: Option<f64>,
+    /// Emit one decoded JSON object per line (machine-readable).
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for `tau init`.
@@ -263,5 +345,117 @@ mod tests {
     fn list_global_and_all_are_mutually_exclusive() {
         let result = Cli::try_parse_from(["tau", "list", "--global", "--all"]);
         assert!(result.is_err(), "expected mutual exclusion error");
+    }
+
+    #[test]
+    fn parses_record_protocol_global_flag() {
+        let cli = Cli::parse_from(["tau", "--record-protocol", "/tmp/p.jsonl", "list"]);
+        assert_eq!(
+            cli.record_protocol.as_deref().and_then(|p| p.to_str()),
+            Some("/tmp/p.jsonl")
+        );
+    }
+
+    #[test]
+    fn parses_plugin_describe() {
+        let cli = Cli::parse_from(["tau", "plugin", "describe", "anthropic"]);
+        let Command::Plugin {
+            action: PluginAction::Describe(args),
+        } = cli.command
+        else {
+            panic!("expected Plugin::Describe: {:?}", cli.command);
+        };
+        assert_eq!(args.name, "anthropic");
+    }
+
+    #[test]
+    fn parses_plugin_run_interactive() {
+        let cli = Cli::parse_from([
+            "tau",
+            "plugin",
+            "run",
+            "/usr/local/bin/echo-llm",
+            "--interactive",
+        ]);
+        let Command::Plugin {
+            action: PluginAction::Run(args),
+        } = cli.command
+        else {
+            panic!()
+        };
+        assert!(args.interactive);
+        assert!(args.script.is_none());
+        assert_eq!(args.binary.to_str(), Some("/usr/local/bin/echo-llm"));
+    }
+
+    #[test]
+    fn parses_plugin_run_script() {
+        let cli = Cli::parse_from([
+            "tau",
+            "plugin",
+            "run",
+            "/usr/local/bin/echo-llm",
+            "--script",
+            "/tmp/script.jsonl",
+        ]);
+        let Command::Plugin {
+            action: PluginAction::Run(args),
+        } = cli.command
+        else {
+            panic!()
+        };
+        assert!(!args.interactive);
+        assert_eq!(
+            args.script.as_deref().and_then(|p| p.to_str()),
+            Some("/tmp/script.jsonl")
+        );
+    }
+
+    #[test]
+    fn plugin_run_interactive_and_script_are_mutually_exclusive() {
+        let result = Cli::try_parse_from([
+            "tau",
+            "plugin",
+            "run",
+            "/bin/x",
+            "--interactive",
+            "--script",
+            "/tmp/x.jsonl",
+        ]);
+        assert!(result.is_err(), "expected mutual exclusion error");
+    }
+
+    #[test]
+    fn parses_plugin_protocol_decode_with_filters() {
+        let cli = Cli::parse_from([
+            "tau",
+            "plugin",
+            "protocol",
+            "decode",
+            "/tmp/rec.jsonl",
+            "--filter",
+            "plugin=echo",
+            "--filter",
+            "method=llm.complete",
+            "--from",
+            "1.5",
+            "--to",
+            "2.5",
+            "--json",
+        ]);
+        let Command::Plugin {
+            action:
+                PluginAction::Protocol {
+                    action: PluginProtocolAction::Decode(args),
+                },
+        } = cli.command
+        else {
+            panic!()
+        };
+        assert_eq!(args.path.to_str(), Some("/tmp/rec.jsonl"));
+        assert_eq!(args.filter, vec!["plugin=echo", "method=llm.complete"]);
+        assert_eq!(args.from, Some(1.5));
+        assert_eq!(args.to, Some(2.5));
+        assert!(args.json);
     }
 }

@@ -42,12 +42,13 @@
 //! `--json` is rejected at handler entry: a streaming, terminal-driven
 //! REPL has no useful JSON projection. (See spec §3.6.)
 
+use std::path::PathBuf;
+
 use anyhow::Context;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use tau_domain::{Address, AgentInstanceId, Message, MessagePayload};
 use tau_plugin_protocol::handshake::TraceContext;
-use tau_runtime::plugin_host::PluginHostOptions;
 use tau_runtime::{RunOptions, RunOutcome, TokenUsage};
 
 use crate::cli::ChatArgs;
@@ -97,7 +98,17 @@ pub fn parse_input(line: &str) -> ReplInput {
 }
 
 /// Run `tau chat`.
-pub async fn run(args: &ChatArgs, output: &mut Output) -> anyhow::Result<()> {
+///
+/// `record_protocol` is the optional `--record-protocol <path>` global
+/// flag (Task 20 / spec §9 debug tier). When `Some`, every plugin
+/// frame in either direction is mirrored to the JSONL file at `path`;
+/// the recorders are flushed after the runtime drops to ensure
+/// pending writes reach disk.
+pub async fn run(
+    args: &ChatArgs,
+    record_protocol: Option<PathBuf>,
+    output: &mut Output,
+) -> anyhow::Result<()> {
     if output.is_json() {
         anyhow::bail!("tau chat does not support --json (REPL is interactive)");
     }
@@ -146,15 +157,39 @@ pub async fn run(args: &ChatArgs, output: &mut Output) -> anyhow::Result<()> {
             .unwrap_or(0)
     );
     let trace_context = TraceContext::new(run_id, args.agent_id.clone(), "root".to_string());
-    let host_options = PluginHostOptions::default();
+    let (host_options, _ledger) = plugin_loader::build_host_options(record_protocol.as_deref());
 
     let loaded = plugin_loader::load_plugins(entry, &scope, trace_context, host_options).await?;
+    let recorder_ledger = loaded.recorder_ledger.clone();
 
     let runtime = loaded
         .builder
         .build()
         .context("failed to build runtime from spawned plugins")?;
 
+    let result = run_repl(entry, &agent_def, &manifest, &options, &runtime, output).await;
+
+    // Drop the runtime before flushing recorders so every plugin
+    // process is reaped and the host-side write task is quiescent.
+    drop(runtime);
+    plugin_loader::flush_recorders(recorder_ledger).await;
+
+    result
+}
+
+/// REPL inner loop, factored out of [`run`] so the caller can wrap it
+/// with `--record-protocol` flush coordination after the runtime is
+/// dropped. Borrows the runtime so the chat session and the recording
+/// flush share a single ownership chain in `run`.
+#[allow(clippy::too_many_arguments)]
+async fn run_repl(
+    entry: &crate::config::AgentEntry,
+    agent_def: &tau_domain::AgentDefinition,
+    manifest: &tau_domain::PackageManifest,
+    options: &RunOptions,
+    runtime: &tau_runtime::Runtime,
+    output: &mut Output,
+) -> anyhow::Result<()> {
     // Welcome banner.
     output.status(format!(
         "Welcome to tau chat with agent '{}' ({}@{}). Type /help for commands, /exit or Ctrl-D to quit.",

@@ -70,6 +70,7 @@ mod tests {
             debug,
             color: ColorMode::Auto,
             json: false,
+            record_protocol: None,
         }
     }
 

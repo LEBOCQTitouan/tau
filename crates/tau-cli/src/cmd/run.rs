@@ -21,11 +21,11 @@
 //! [`crate::cmd::plugin_loader`] for the resolution logic.
 
 use std::io::Read;
+use std::path::PathBuf;
 
 use anyhow::Context;
 use tau_domain::{Address, AgentInstanceId, Message, MessagePayload};
 use tau_plugin_protocol::handshake::TraceContext;
-use tau_runtime::plugin_host::PluginHostOptions;
 use tau_runtime::{RunOptions, RunOutcome};
 
 use crate::cli::RunArgs;
@@ -46,7 +46,17 @@ use crate::output::Output;
 pub(crate) struct AgentFailed;
 
 /// Run `tau run`.
-pub async fn run(args: &RunArgs, output: &mut Output) -> anyhow::Result<()> {
+///
+/// `record_protocol` is the optional `--record-protocol <path>` global
+/// flag (Task 20 / spec §9 debug tier). When `Some`, every plugin
+/// frame in either direction is mirrored to the JSONL file at `path`;
+/// the recorders are flushed after the runtime drops to ensure
+/// pending writes reach disk.
+pub async fn run(
+    args: &RunArgs,
+    record_protocol: Option<PathBuf>,
+    output: &mut Output,
+) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let project_path = cwd.join("tau.toml");
     let project = ProjectConfig::from_path(&project_path)
@@ -105,9 +115,10 @@ pub async fn run(args: &RunArgs, output: &mut Output) -> anyhow::Result<()> {
             .unwrap_or(0)
     );
     let trace_context = TraceContext::new(run_id, args.agent_id.clone(), "root".to_string());
-    let host_options = PluginHostOptions::default();
+    let (host_options, _ledger) = plugin_loader::build_host_options(record_protocol.as_deref());
 
     let loaded = plugin_loader::load_plugins(entry, &scope, trace_context, host_options).await?;
+    let recorder_ledger = loaded.recorder_ledger.clone();
 
     let runtime = loaded
         .builder
@@ -138,10 +149,16 @@ pub async fn run(args: &RunArgs, output: &mut Output) -> anyhow::Result<()> {
         },
     );
 
-    let outcome = runtime
-        .run(agent_def, manifest, initial, options)
-        .await
-        .context("running agent")?;
+    let run_outcome = runtime.run(agent_def, manifest, initial, options).await;
+
+    // Drop the runtime explicitly before flushing recorders. This
+    // ensures every plugin process is reaped and every host-side write
+    // task has completed, so `flush_recorders` drains a quiescent set
+    // of file buffers rather than racing with in-flight `record(...)`.
+    drop(runtime);
+    plugin_loader::flush_recorders(recorder_ledger).await;
+
+    let outcome = run_outcome.context("running agent")?;
 
     match outcome {
         RunOutcome::Completed {
