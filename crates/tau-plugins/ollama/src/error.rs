@@ -1,19 +1,30 @@
-//! Translate Ollama HTTP responses to `tau_ports::LlmError`.
+//! Translate Ollama HTTP responses + transport failures to typed
+//! `tau_ports::LlmError` variants.
 //!
-//! Ollama's error envelope is `{"error": "<message>"}` (much simpler
-//! than Anthropic's typed shape). All non-2xx responses collapse to
-//! `LlmError::Internal { message }` with a category prefix that
-//! includes a remediation hint for 404 (the most common new-user
-//! failure).
+//! Per ADR-0009 (typed-error migration policy):
+//! - HTTP responses map to typed variants (`RateLimited`, `Auth`,
+//!   `InvalidRequest`, `Provider`).
+//! - Transport failures map to `Transport`.
+//! - `LlmError::Internal` is RESERVED for plugin-internal translation
+//!   errors (e.g., wrapping a `BuildError`); never used here for HTTP
+//!   responses.
 //!
-//! See `docs/superpowers/specs/2026-04-29-ollama-plugin-design.md`
-//! §4.4.
+//! Ollama's error envelope is `{"error": "<message>"}` — much simpler
+//! than Anthropic's typed shape. The 404 mapping preserves the
+//! "ollama pull" remediation hint inline in
+//! `LlmError::InvalidRequest.reason`. 503-on-model-load is the load-
+//! bearing retryable case; maps to `Provider` (retryable per
+//! `is_retryable()`).
+//!
+//! `map_response_error` signature `(status, headers, body)` is shared
+//! across all three plugins so 429 responses can populate
+//! `RateLimited.retry_after_seconds` from the `Retry-After` HTTP header.
 
 use serde::Deserialize;
 use tau_ports::LlmError;
 use thiserror::Error;
 
-/// Internal error type from the HTTP client (`client.rs`, Task 6).
+/// Internal error type from the HTTP client (`client.rs`).
 ///
 /// Defined here so this module can be the single point of `LlmError`
 /// translation. `client.rs` imports this and constructs the variants
@@ -28,7 +39,7 @@ pub(crate) enum ClientError {
     Transport(reqwest::Error),
 
     /// Retry budget exhausted. The `status` is the last status
-    /// observed (always 429, 503, or 408 today).
+    /// observed (typically 429, 503, or 408 synthesized from timeout).
     #[error("retries exhausted: {status} after {attempts} attempts")]
     Exhausted {
         /// Last observed status code that triggered the final retry decision.
@@ -38,53 +49,83 @@ pub(crate) enum ClientError {
     },
 }
 
-/// Map a non-2xx Ollama response to `LlmError::Internal`.
-///
-/// 404 messages embed `run \`ollama pull <model>\` first` because
-/// pulling the model is by far the most common remediation for new
-/// Ollama users.
-///
-/// All errors collapse to `LlmError::Internal { message }` for v0.1;
-/// the richer typed-variant vocabulary (`RateLimited`, `Auth`,
-/// `ModelNotFound`) lands when sub-project 2c (OpenAI) introduces
-/// the third consumer.
-pub(crate) fn map_response_error(status: reqwest::StatusCode, body: &str) -> LlmError {
-    let detail = serde_json::from_str::<OllamaErrorBody>(body)
-        .ok()
-        .map(|p| p.error)
-        .unwrap_or_else(|| body.to_string());
-
-    let category = match status.as_u16() {
-        400 => "bad request",
-        401 | 403 => "auth failure",
-        404 => "model not found (run `ollama pull <model>` first)",
-        429 => "rate limited (retries exhausted)",
-        500..=599 => "server error",
-        _ => "unexpected status",
-    };
-    LlmError::Internal {
-        message: format!("ollama {category} ({status}): {detail}"),
-    }
-}
-
 #[derive(Deserialize)]
 struct OllamaErrorBody {
     error: String,
 }
 
-/// Map a `ClientError` (transport or retry-exhausted) to `LlmError`.
+fn extract_detail(body: &str) -> String {
+    serde_json::from_str::<OllamaErrorBody>(body)
+        .ok()
+        .map(|p| p.error)
+        .unwrap_or_else(|| body.to_string())
+}
+
+fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u32> {
+    headers
+        .get("retry-after")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.parse::<u32>().ok())
+}
+
+/// Map a non-2xx Ollama response to a typed `LlmError`.
 ///
-/// Same target type as `map_response_error` so the plugin's batch and
-/// streaming entrypoints can call either translator uniformly.
+/// 404 messages embed the `ollama pull <model>` remediation hint
+/// inline in `InvalidRequest.reason` since pulling the model is by
+/// far the most common remediation for new Ollama users.
+pub(crate) fn map_response_error(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    body: &str,
+) -> LlmError {
+    let detail = extract_detail(body);
+
+    match status.as_u16() {
+        400 => LlmError::InvalidRequest {
+            reason: format!("ollama bad request: {detail}"),
+        },
+        401 | 403 => LlmError::Auth { message: detail },
+        404 => LlmError::InvalidRequest {
+            // Preserve the existing remediation hint inline.
+            reason: format!("ollama model not found (run `ollama pull <model>` first): {detail}"),
+        },
+        429 => LlmError::RateLimited {
+            retry_after_seconds: parse_retry_after(headers),
+        },
+        500..=599 => LlmError::Provider {
+            // 503-on-model-load is the load-bearing case; Provider is
+            // retryable per is_retryable().
+            message: format!("ollama server error ({status}): {detail}"),
+        },
+        _ => LlmError::Provider {
+            message: format!("ollama unexpected status ({status}): {detail}"),
+        },
+    }
+}
+
+/// Map a `ClientError` (transport or retry-exhausted) to a typed `LlmError`.
 pub(crate) fn map_client_error(err: ClientError) -> LlmError {
     match err {
-        ClientError::Transport(e) => LlmError::Internal {
+        ClientError::Transport(e) => LlmError::Transport {
             message: format!("ollama transport: {e}"),
         },
-        ClientError::Exhausted { status, attempts } => LlmError::Internal {
-            message: format!(
-                "ollama retries exhausted ({attempts} attempts, last status {status})",
-            ),
+        ClientError::Exhausted { status, attempts } => match status.as_u16() {
+            429 => LlmError::RateLimited {
+                retry_after_seconds: None,
+            },
+            408 => LlmError::Transport {
+                message: format!("ollama retries exhausted on timeout ({attempts} attempts)"),
+            },
+            500..=599 => LlmError::Provider {
+                message: format!(
+                    "ollama retries exhausted ({attempts} attempts, last status {status})",
+                ),
+            },
+            _ => LlmError::Provider {
+                message: format!(
+                    "ollama retries exhausted ({attempts} attempts, last status {status})",
+                ),
+            },
         },
     }
 }
@@ -94,74 +135,118 @@ mod tests {
     use super::*;
     use reqwest::StatusCode;
 
-    #[test]
-    fn map_404_includes_ollama_pull_remediation_hint() {
-        let body = r#"{"error":"model 'llama99' not found, try pulling it first"}"#;
-        let err = map_response_error(StatusCode::NOT_FOUND, body);
-        let LlmError::Internal { message, .. } = err else {
-            panic!("expected LlmError::Internal");
-        };
-        assert!(
-            message.contains("ollama pull"),
-            "expected `ollama pull` remediation hint in message; got: {message}"
+    fn empty_headers() -> reqwest::header::HeaderMap {
+        reqwest::header::HeaderMap::new()
+    }
+
+    fn headers_with_retry_after(seconds: &str) -> reqwest::header::HeaderMap {
+        let mut h = reqwest::header::HeaderMap::new();
+        h.insert(
+            reqwest::header::RETRY_AFTER,
+            reqwest::header::HeaderValue::from_str(seconds).unwrap(),
         );
-        assert!(message.contains("model 'llama99' not found"));
+        h
     }
 
     #[test]
-    fn map_400_with_structured_error_body_extracts_message() {
-        let body = r#"{"error":"bad request: invalid model name"}"#;
-        let err = map_response_error(StatusCode::BAD_REQUEST, body);
-        let LlmError::Internal { message, .. } = err else {
-            panic!("expected LlmError::Internal");
+    fn map_404_returns_invalid_request_with_remediation_hint() {
+        let body = r#"{"error":"model 'llama99' not found, try pulling it first"}"#;
+        let err = map_response_error(StatusCode::NOT_FOUND, &empty_headers(), body);
+        let LlmError::InvalidRequest { reason } = err else {
+            panic!("expected InvalidRequest, got {err:?}");
         };
-        assert!(message.contains("bad request"));
-        assert!(message.contains("invalid model name"));
+        assert!(
+            reason.contains("ollama pull"),
+            "expected ollama pull remediation hint; got: {reason}"
+        );
+        assert!(reason.contains("model 'llama99' not found"));
+    }
+
+    #[test]
+    fn map_400_returns_invalid_request() {
+        let body = r#"{"error":"bad request: invalid model name"}"#;
+        let err = map_response_error(StatusCode::BAD_REQUEST, &empty_headers(), body);
+        let LlmError::InvalidRequest { reason } = err else {
+            panic!("expected InvalidRequest, got {err:?}");
+        };
+        assert!(reason.contains("ollama bad request"));
+        assert!(reason.contains("invalid model name"));
+    }
+
+    #[test]
+    fn map_429_returns_rate_limited_with_retry_after() {
+        let body = r#"{"error":"throttled"}"#;
+        let err = map_response_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            &headers_with_retry_after("4"),
+            body,
+        );
+        let LlmError::RateLimited {
+            retry_after_seconds,
+        } = err
+        else {
+            panic!("expected RateLimited, got {err:?}");
+        };
+        assert_eq!(retry_after_seconds, Some(4));
+    }
+
+    #[test]
+    fn map_503_returns_provider_retryable() {
+        let body = r#"{"error":"model is loading"}"#;
+        let err = map_response_error(StatusCode::SERVICE_UNAVAILABLE, &empty_headers(), body);
+        let LlmError::Provider { ref message } = err else {
+            panic!("expected Provider, got {err:?}");
+        };
+        assert!(message.contains("server error"));
+        assert!(message.contains("model is loading"));
+        assert!(err.is_retryable(), "Provider should be retryable");
     }
 
     #[test]
     fn map_500_unstructured_body_falls_back_to_raw() {
         let body = "<html><body>Internal Server Error</body></html>";
-        let err = map_response_error(StatusCode::INTERNAL_SERVER_ERROR, body);
-        let LlmError::Internal { message, .. } = err else {
-            panic!("expected LlmError::Internal");
+        let err = map_response_error(StatusCode::INTERNAL_SERVER_ERROR, &empty_headers(), body);
+        let LlmError::Provider { message } = err else {
+            panic!("expected Provider, got {err:?}");
         };
-        assert!(message.contains("server error"));
         assert!(message.contains("<html>"));
     }
 
     #[test]
-    fn map_503_categorized_as_server_error() {
-        let body = r#"{"error":"model is loading"}"#;
-        let err = map_response_error(StatusCode::SERVICE_UNAVAILABLE, body);
-        let LlmError::Internal { message, .. } = err else {
-            panic!("expected LlmError::Internal");
+    fn map_401_returns_auth() {
+        let body = r#"{"error":"unauthorized"}"#;
+        let err = map_response_error(StatusCode::UNAUTHORIZED, &empty_headers(), body);
+        let LlmError::Auth { message } = err else {
+            panic!("expected Auth, got {err:?}");
         };
-        assert!(message.contains("server error"));
-        assert!(message.contains("model is loading"));
+        assert!(message.contains("unauthorized"));
     }
 
     #[test]
-    fn map_client_error_exhausted() {
-        let err = ClientError::Exhausted {
+    fn map_client_error_exhausted_503_returns_provider() {
+        let err = map_client_error(ClientError::Exhausted {
             status: StatusCode::SERVICE_UNAVAILABLE,
             attempts: 3,
-        };
-        let mapped = map_client_error(err);
-        let LlmError::Internal { message, .. } = mapped else {
-            panic!("expected LlmError::Internal");
+        });
+        let LlmError::Provider { message } = err else {
+            panic!("expected Provider, got {err:?}");
         };
         assert!(message.contains("retries exhausted"));
-        assert!(message.contains("3 attempts"));
         assert!(message.contains("503"));
     }
 
     #[test]
-    fn map_client_error_transport_smoke() {
-        // We can't construct a reqwest::Error directly (private constructors).
-        // This test exists to ensure the function compiles with both variant
-        // arms reachable. The Exhausted path above covers the substantive
-        // assertion; the Transport arm is verified by the client.rs tests.
-        let _ = map_client_error; // ensure the function is reachable
+    fn map_client_error_exhausted_429_returns_rate_limited() {
+        let err = map_client_error(ClientError::Exhausted {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            attempts: 3,
+        });
+        let LlmError::RateLimited {
+            retry_after_seconds,
+        } = err
+        else {
+            panic!("expected RateLimited, got {err:?}");
+        };
+        assert_eq!(retry_after_seconds, None);
     }
 }

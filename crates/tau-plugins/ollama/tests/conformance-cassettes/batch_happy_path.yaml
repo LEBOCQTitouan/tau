@@ -1,0 +1,11 @@
+- request:
+    method: POST
+    uri: /api/chat
+    body: |-
+      placeholder
+  response:
+    status: 200
+    headers:
+      content-type: application/json
+    body: |-
+      {"model":"conformance-model","created_at":"2026-04-29T00:00:00Z","message":{"role":"assistant","content":"Hi from ollama"},"done":true,"done_reason":"stop","prompt_eval_count":5,"eval_count":4}
