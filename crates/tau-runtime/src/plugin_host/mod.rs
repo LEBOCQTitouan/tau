@@ -29,6 +29,21 @@ use tau_plugin_protocol::handshake::TraceContext;
 use crate::builder::{DynLlmBackend, DynSandbox, DynStorage, DynTool};
 use crate::error::RuntimeError;
 
+mod handshake;
+mod process;
+
+/// Internal-but-test-visible re-exports. Hidden from rustdoc and not
+/// covered by stability guarantees: integration tests under
+/// `tau-runtime/tests/plugin_host_handshake.rs` reach in here to drive
+/// [`handshake::drive_handshake`] over a `FakeStdioPeer`. Task 15's
+/// `IpcLlmBackend` consumes [`process::PluginProcess`] via the
+/// `pub(crate)` path; this `__internals` namespace is only the
+/// integration-test escape hatch.
+#[doc(hidden)]
+pub mod __internals {
+    pub use super::handshake::drive_handshake;
+}
+
 /// Optional protocol-recording sink. Currently only
 /// [`RecordingSink::JsonlFile`] is defined; Task 17 wires the actual
 /// frame-by-frame tap.
