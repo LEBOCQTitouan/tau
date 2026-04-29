@@ -82,6 +82,7 @@ mod tests {
                 sha256: String::new(),
                 installed_at: UNIX_EPOCH + Duration::from_secs(1_700_000_000),
             }],
+            plugin: None,
         }
     }
 

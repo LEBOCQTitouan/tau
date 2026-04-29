@@ -14,6 +14,8 @@
 //! the leaf errors (this file). `InstallError` and `UninstallError`
 //! compose them via `#[from]` (added in Task 3).
 
+use std::process::ExitStatus;
+
 use thiserror::Error;
 
 /// Errors from scope detection and management.
@@ -200,6 +202,23 @@ pub enum InstallError {
         /// Lossy-UTF-8 path of the scope state directory.
         scope: String,
     },
+    /// `cargo build` exited non-zero while building a `kind = "rust-cargo"`
+    /// plugin. Carries the cargo exit status and the last ~4 KiB of cargo's
+    /// stderr so users can diagnose the compile failure without re-running.
+    /// The cloned source is left on disk; users retry via `tau install --force`
+    /// or inspect the staging area.
+    #[error("plugin build failed: cargo exited {exit_status}")]
+    BuildFailed {
+        /// Exit status returned by the `cargo build` subprocess.
+        exit_status: ExitStatus,
+        /// Last ~4 KiB of cargo's stderr (lossy UTF-8) for diagnostic display.
+        stderr_tail: String,
+    },
+    /// The `cargo` binary was not found at the configured location.
+    /// Either `BuildOptions::cargo_path` was set to a non-existent path,
+    /// or the default discovery (`cargo` on PATH) found nothing.
+    #[error("`cargo` not found on PATH; set BuildOptions::cargo_path or install Rust")]
+    CargoNotFound,
     /// Catch-all for install lifecycle failures not yet covered by typed variants.
     /// Use this only when the failure cannot be reported as `Git`, `Manifest`,
     /// `Registry`, `Scope`, `SourceManifestMismatch`, or `Locked`.
