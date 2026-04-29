@@ -1,0 +1,33 @@
+- request:
+    method: POST
+    uri: /v1/messages
+    body: |-
+      placeholder
+  response:
+    status: 429
+    headers:
+      retry-after: "0"
+    body: |-
+      {"type":"error","error":{"type":"rate_limit_error","message":"throttled"}}
+- request:
+    method: POST
+    uri: /v1/messages
+    body: |-
+      placeholder
+  response:
+    status: 429
+    headers:
+      retry-after: "0"
+    body: |-
+      {"type":"error","error":{"type":"rate_limit_error","message":"throttled"}}
+- request:
+    method: POST
+    uri: /v1/messages
+    body: |-
+      placeholder
+  response:
+    status: 200
+    headers:
+      content-type: application/json
+    body: |-
+      {"id":"msg_04","type":"message","role":"assistant","content":[{"type":"text","text":"Hi after retry"}],"model":"claude-3-5-haiku-latest","stop_reason":"end_turn","usage":{"input_tokens":12,"output_tokens":4}}
