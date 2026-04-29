@@ -29,6 +29,7 @@ tracing             = { workspace = true }
 reqwest             = { workspace = true }
 async-stream        = { workspace = true }
 secrecy             = { workspace = true }
+bytes               = { workspace = true }
 futures-core        = { workspace = true }
 futures-util        = "0.3"
 
