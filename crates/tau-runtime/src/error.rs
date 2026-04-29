@@ -1,9 +1,13 @@
 //! Per-operation typed errors for `tau-runtime`.
 //!
 //! All public errors are `#[non_exhaustive]` so additive variants are
-//! non-breaking. All errors derive `Debug + Clone + PartialEq + Eq +
-//! Error`. Tests with free-form `String` fields use `matches!()` to
-//! avoid brittle wording comparisons.
+//! non-breaking. [`BuildError`] derives
+//! `Debug + Clone + PartialEq + Eq + Error`; [`RuntimeError`] derives
+//! `Debug + Error` only — plugin-host variants carry
+//! [`std::io::Error`] and [`std::process::ExitStatus`], neither of
+//! which is `Clone`/`Eq`, so we can't keep the richer set of derives
+//! at the top level. Tests with free-form `String` fields use
+//! `matches!()` to avoid brittle wording comparisons.
 //!
 //! The error taxonomy splits into two layers:
 //!
@@ -128,8 +132,15 @@ impl std::fmt::Display for CapabilityDenial {
 /// Plugin errors (`LlmError`, `ToolError`, `StorageError`, `SandboxError`)
 /// compose via `#[from]` for ergonomic `?`-propagation throughout the
 /// agent loop.
+///
+/// `RuntimeError` does **not** derive `Clone + PartialEq + Eq` — the
+/// plugin-host variants ([`RuntimeError::PluginSpawnFailed`],
+/// [`RuntimeError::PluginCrashed`]) carry [`std::io::Error`] and
+/// [`std::process::ExitStatus`], neither of which is `Clone` or `Eq`.
+/// Existing tests destructure with `let RuntimeError::X { .. } = ...`
+/// rather than relying on equality.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Error)]
 pub enum RuntimeError {
     /// Agent's `llm_backend` references a backend that wasn't registered.
     #[error("LLM backend `{backend}` not registered (agent {agent_id} requested it)")]
@@ -150,17 +161,55 @@ pub enum RuntimeError {
     },
 
     /// Plugin returned successfully but its output violates the contract
-    /// (malformed JSON args from LLM, undeserializable content, etc.).
-    #[error("plugin contract violation: {plugin_kind} `{plugin_name}` returned malformed {what}: {detail}")]
+    /// (malformed JSON args from LLM, undeserializable response from a
+    /// loaded plugin, etc.). Surfaced both by the run loop's
+    /// argument-validation pass and by the `plugin_host` IPC adapters
+    /// (Tasks 14-17) when a plugin's response is structurally invalid.
+    #[error("plugin {plugin} contract violation: {detail}")]
     PluginContractViolation {
-        /// The plugin kind ("llm", "tool", "storage", "sandbox").
-        plugin_kind: String,
-        /// The plugin name (its `name()` value).
-        plugin_name: String,
-        /// What was malformed ("tool_use args", "completion response", etc.).
-        what: String,
-        /// Human-readable detail.
+        /// The plugin name (its `name()` value, or the manifest name
+        /// for plugin-host violations).
+        plugin: String,
+        /// Human-readable detail describing what was malformed.
         detail: String,
+    },
+
+    /// `tokio::process::Command::spawn` failed for the plugin binary
+    /// (binary missing, not executable, sandbox policy denied, etc.).
+    /// Surfaced by [`crate::plugin_host::load_llm_backend`] and friends
+    /// (Tasks 14+).
+    #[error("failed to spawn plugin {plugin}: {source}")]
+    PluginSpawnFailed {
+        /// The plugin name (from `LockedPlugin::manifest.name`).
+        plugin: String,
+        /// The underlying `std::io::Error` from `spawn`.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Plugin spawned successfully but the `meta.handshake` exchange
+    /// failed for one of the reasons enumerated in
+    /// [`HandshakeFailureReason`]. Surfaced by
+    /// [`crate::plugin_host`] (Tasks 14+).
+    #[error("plugin {plugin} handshake failed: {reason}")]
+    PluginHandshakeFailed {
+        /// The plugin name (from `LockedPlugin::manifest.name`).
+        plugin: String,
+        /// Specific reason the handshake failed.
+        reason: HandshakeFailureReason,
+    },
+
+    /// Plugin process exited unexpectedly during a request. The
+    /// captured `stderr_tail` (last N bytes of stderr) aids triage.
+    /// Surfaced by [`crate::plugin_host`] (Tasks 14+).
+    #[error("plugin {plugin} crashed: exit {exit_status}")]
+    PluginCrashed {
+        /// The plugin name (from `LockedPlugin::manifest.name`).
+        plugin: String,
+        /// Exit status reported by the OS.
+        exit_status: std::process::ExitStatus,
+        /// Tail of the plugin's stderr, captured for diagnostics.
+        stderr_tail: String,
     },
 
     /// LLM backend plugin returned an error.
@@ -190,6 +239,58 @@ pub enum RuntimeError {
     Internal {
         /// Human-readable message describing the internal failure.
         message: String,
+    },
+}
+
+/// Specific reason a plugin handshake (`meta.handshake` exchange)
+/// failed. Carried inside [`RuntimeError::PluginHandshakeFailed`].
+///
+/// `#[non_exhaustive]`: the Phase-1 protocol surface may grow
+/// additional handshake-failure modes as the schema-introspection
+/// surface evolves; additive variants must remain non-breaking.
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error, Clone, PartialEq)]
+pub enum HandshakeFailureReason {
+    /// Plugin did not respond to `meta.handshake` within
+    /// [`crate::plugin_host::PluginHostOptions::handshake_timeout`].
+    #[error("timeout")]
+    Timeout,
+
+    /// Plugin's advertised `protocol_version` differs from the host's.
+    #[error("protocol version mismatch: host {host}, plugin {plugin}")]
+    ProtocolVersionMismatch {
+        /// Host's protocol version.
+        host: String,
+        /// Plugin's advertised protocol version.
+        plugin: String,
+    },
+
+    /// Plugin's advertised `provides` port differs from the
+    /// `LockedPlugin.manifest.provides` claim. Catches manifest
+    /// drift and binary swaps.
+    #[error("provides mismatch: manifest says {manifest}, plugin advertises {plugin_advertised}")]
+    ProvidesMismatch {
+        /// What the install-time manifest declared.
+        manifest: tau_domain::PortKind,
+        /// What the plugin advertised in its handshake response.
+        plugin_advertised: tau_domain::PortKind,
+    },
+
+    /// Plugin doesn't advertise a method the host requires for the
+    /// declared port (e.g. an LLM backend without `llm.complete`).
+    #[error("missing required method: {method}")]
+    MissingRequiredMethod {
+        /// The wire-method name that was missing
+        /// (`"llm.complete"`, `"tool.call"`, etc.).
+        method: String,
+    },
+
+    /// Plugin's handshake response was structurally malformed (failed
+    /// to deserialize, missing required fields, etc.).
+    #[error("malformed response: {detail}")]
+    Malformed {
+        /// Human-readable detail describing the malformation.
+        detail: String,
     },
 }
 
@@ -270,15 +371,105 @@ mod tests {
     #[test]
     fn runtime_error_plugin_contract_violation_display() {
         let err = RuntimeError::PluginContractViolation {
-            plugin_kind: "llm".into(),
-            plugin_name: "anthropic".into(),
-            what: "tool_use args".into(),
+            plugin: "anthropic".into(),
             detail: "expected JSON object, got array".into(),
         };
         let s = format!("{err}");
-        assert!(s.contains("plugin contract violation"), "got: {s}");
+        assert!(s.contains("contract violation"), "got: {s}");
         assert!(s.contains("anthropic"), "got: {s}");
-        assert!(s.contains("tool_use args"), "got: {s}");
+        assert!(s.contains("expected JSON object, got array"), "got: {s}");
+    }
+
+    #[test]
+    fn runtime_error_plugin_spawn_failed_display() {
+        let err = RuntimeError::PluginSpawnFailed {
+            plugin: "echo-llm".into(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "binary missing"),
+        };
+        let s = format!("{err}");
+        assert!(s.contains("failed to spawn plugin"), "got: {s}");
+        assert!(s.contains("echo-llm"), "got: {s}");
+        assert!(s.contains("binary missing"), "got: {s}");
+    }
+
+    #[test]
+    fn runtime_error_plugin_handshake_failed_display() {
+        let err = RuntimeError::PluginHandshakeFailed {
+            plugin: "echo-llm".into(),
+            reason: HandshakeFailureReason::Timeout,
+        };
+        let s = format!("{err}");
+        assert!(s.contains("handshake failed"), "got: {s}");
+        assert!(s.contains("echo-llm"), "got: {s}");
+        assert!(s.contains("timeout"), "got: {s}");
+    }
+
+    #[test]
+    fn runtime_error_plugin_crashed_display() {
+        // Synthesize an `ExitStatus` via a quick child-process round-trip
+        // so the test doesn't depend on platform-specific raw constructors.
+        let exit_status = std::process::Command::new("true")
+            .status()
+            .or_else(|_| std::process::Command::new("/usr/bin/true").status())
+            .expect("`true` must be available on the test host");
+        let err = RuntimeError::PluginCrashed {
+            plugin: "echo-llm".into(),
+            exit_status,
+            stderr_tail: "panicked at 'oops'".into(),
+        };
+        let s = format!("{err}");
+        assert!(s.contains("crashed"), "got: {s}");
+        assert!(s.contains("echo-llm"), "got: {s}");
+    }
+
+    #[test]
+    fn handshake_failure_reason_timeout_display() {
+        let r = HandshakeFailureReason::Timeout;
+        assert_eq!(format!("{r}"), "timeout");
+    }
+
+    #[test]
+    fn handshake_failure_reason_protocol_version_mismatch_display() {
+        let r = HandshakeFailureReason::ProtocolVersionMismatch {
+            host: "1".into(),
+            plugin: "2".into(),
+        };
+        let s = format!("{r}");
+        assert!(s.contains("protocol version mismatch"), "got: {s}");
+        assert!(s.contains("1"), "got: {s}");
+        assert!(s.contains("2"), "got: {s}");
+    }
+
+    #[test]
+    fn handshake_failure_reason_provides_mismatch_display() {
+        let r = HandshakeFailureReason::ProvidesMismatch {
+            manifest: tau_domain::PortKind::LlmBackend,
+            plugin_advertised: tau_domain::PortKind::Tool,
+        };
+        let s = format!("{r}");
+        assert!(s.contains("provides mismatch"), "got: {s}");
+        assert!(s.contains("llm_backend"), "got: {s}");
+        assert!(s.contains("tool"), "got: {s}");
+    }
+
+    #[test]
+    fn handshake_failure_reason_missing_required_method_display() {
+        let r = HandshakeFailureReason::MissingRequiredMethod {
+            method: "llm.complete".into(),
+        };
+        let s = format!("{r}");
+        assert!(s.contains("missing required method"), "got: {s}");
+        assert!(s.contains("llm.complete"), "got: {s}");
+    }
+
+    #[test]
+    fn handshake_failure_reason_malformed_display() {
+        let r = HandshakeFailureReason::Malformed {
+            detail: "missing field `protocol_version`".into(),
+        };
+        let s = format!("{r}");
+        assert!(s.contains("malformed response"), "got: {s}");
+        assert!(s.contains("protocol_version"), "got: {s}");
     }
 
     #[test]

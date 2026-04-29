@@ -22,9 +22,10 @@ pub(crate) mod dispatch;
 pub mod error;
 pub mod options;
 pub mod outcome;
+pub mod plugin_host;
 mod run;
 
 pub use builder::{Runtime, RuntimeBuilder};
-pub use error::{BuildError, CapabilityDenial, PluginKind, RuntimeError};
+pub use error::{BuildError, CapabilityDenial, HandshakeFailureReason, PluginKind, RuntimeError};
 pub use options::{RunOptions, TokenUsage};
 pub use outcome::RunOutcome;

@@ -9,13 +9,20 @@ repository.workspace   = true
 authors.workspace      = true
 
 [dependencies]
-tau-domain = { workspace = true, features = ["serde"] }
-tau-ports  = { workspace = true }
-thiserror  = { workspace = true }
-tracing    = { workspace = true }
+tau-domain          = { workspace = true, features = ["serde"] }
+tau-ports           = { workspace = true }
+tau-pkg             = { workspace = true }
+tau-plugin-protocol = { workspace = true }
+thiserror           = { workspace = true }
+tracing             = { workspace = true }
 # `v4` for session-id minting in `Runtime::run` per spec §3.7; the
 # workspace alias only enables `v7` (used by id newtypes in tau-domain).
-uuid       = { workspace = true, features = ["v4"] }
+uuid                = { workspace = true, features = ["v4"] }
+# Plugin host carries plugin config as JSON values across the IPC
+# boundary; surfaces in `plugin_host::load_*` signatures.
+serde_json          = "1"
+# Plugin host spawns plugin binaries and reads their stdio streams.
+tokio               = { workspace = true }
 
 [features]
 default = []

@@ -32,7 +32,8 @@ use std::sync::Arc;
 
 use tau_ports::{
     CompletionRequest, CompletionResponse, CompletionStream, Key, LlmBackend, LlmError, Namespace,
-    SessionContext, Storage, StorageError, Tool, ToolError, ToolResult, ToolSpec,
+    Sandbox, SandboxError, SandboxPlan, SessionContext, Storage, StorageError, Tool, ToolError,
+    ToolResult, ToolSpec,
 };
 
 use crate::error::{BuildError, PluginKind};
@@ -221,6 +222,36 @@ impl<T: Storage + 'static> DynStorage for T {
         prefix: &'a str,
     ) -> BoxFuture<'a, Result<Vec<Key>, StorageError>> {
         Box::pin(Storage::list(self, namespace, prefix))
+    }
+}
+
+/// Object-safe wrapper for [`Sandbox<Handle = ()>`].
+///
+/// **PROVISIONAL** — mirrors [`tau_ports::Sandbox`]'s provisional
+/// status. v0.1 doesn't wire `Sandbox::create` from the run loop;
+/// `DynSandbox` exists so the plugin-host loader signatures
+/// ([`crate::plugin_host::load_sandbox`]) can return the same kind of
+/// `Arc<dyn Dyn*>` shim the kernel uses for the other ports.
+///
+/// Restricts to `Handle = ()` for the same reason [`DynTool`] restricts
+/// to `Session = ()`: dyn-compatible erasure of a generic-handle
+/// `Sandbox` requires a concrete handle type, and at v0.1 the only
+/// implementation is `MockSandbox` (which uses `()`).
+pub trait DynSandbox: Send + Sync {
+    /// Plugin-visible name (matches [`Sandbox::name`]).
+    fn name(&self) -> &str;
+
+    /// Boxed-future wrapper for [`Sandbox::create`] with `Handle = ()`.
+    fn create<'a>(&'a self, plan: SandboxPlan) -> BoxFuture<'a, Result<(), SandboxError>>;
+}
+
+impl<T: Sandbox<Handle = ()> + 'static> DynSandbox for T {
+    fn name(&self) -> &str {
+        Sandbox::name(self)
+    }
+
+    fn create<'a>(&'a self, plan: SandboxPlan) -> BoxFuture<'a, Result<(), SandboxError>> {
+        Box::pin(Sandbox::create(self, plan))
     }
 }
 

@@ -1753,7 +1753,10 @@ version = "0.0.0"
 dependencies = [
  "proptest",
  "serde",
+ "serde_json",
  "tau-domain",
+ "tau-pkg",
+ "tau-plugin-protocol",
  "tau-ports",
  "thiserror 2.0.18",
  "tokio",
