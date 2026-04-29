@@ -28,6 +28,12 @@ rmp-serde           = { workspace = true }
 
 [features]
 default = []
+# Exposes test-only constructors and re-exports under
+# `plugin_host::__internals` so integration tests in
+# `crates/tau-runtime/tests/plugin_host_ipc_*.rs` can build a
+# `PluginProcess` from a pre-paired reader+writer (no subprocess
+# spawn) and exercise the per-port IPC adapters end-to-end.
+test-support = ["tau-plugin-protocol/test-support"]
 
 [dev-dependencies]
 tokio              = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

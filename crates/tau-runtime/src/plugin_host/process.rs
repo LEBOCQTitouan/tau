@@ -24,10 +24,20 @@ use tau_plugin_protocol::{
     error::{RpcErrorEnvelope, INTERNAL_ERROR},
     Frame, FramedReader, FramedWriter, FramerOptions,
 };
-use tokio::io::AsyncBufReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite};
 use tokio::process::{Child, ChildStderr, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 use tokio::task::JoinHandle;
+
+/// Type-erased async writer used by [`PluginProcess`] for outbound
+/// frames. Boxing here lets the same struct wrap a real
+/// [`tokio::process::ChildStdin`] (production spawn path) or an
+/// in-memory [`tokio::io::DuplexStream`] (`#[cfg(test)]` /
+/// `feature = "test-support"` path used by the per-port IPC adapter
+/// integration tests). The runtime cost is one virtual call per
+/// `write_all` — negligible against the rmp-serde encode and the
+/// kernel's tokio scheduler hop.
+pub type DynAsyncWriter = Box<dyn AsyncWrite + Send + Unpin>;
 
 use crate::error::RuntimeError;
 
@@ -47,11 +57,16 @@ pub(crate) type InFlightStreams =
     Arc<Mutex<HashMap<u32, mpsc::Sender<tau_ports::CompletionChunk>>>>;
 
 /// Owns a spawned plugin subprocess and the per-process dispatch
-/// machinery. Not constructed directly outside this module: the
-/// per-port `load_*` entry points (Task 15) wrap this in `Arc<dyn
-/// Dyn*>` shims after [`PluginProcess::spawn`] + handshake.
-#[allow(dead_code)] // Task 15 consumes the shared fields via accessor methods.
-pub(crate) struct PluginProcess {
+/// machinery. Not constructed directly outside this module in the
+/// production path: the per-port `load_*` entry points wrap this in
+/// `Arc<dyn Dyn*>` shims after [`PluginProcess::spawn_and_handshake`]
+/// returns.
+///
+/// Public for the same `__internals` test-export reasons as
+/// [`super::ipc_llm::IpcLlmBackend`]; the `new_for_test` constructor
+/// gated by `feature = "test-support"` lets integration tests build
+/// instances without spawning a real subprocess.
+pub struct PluginProcess {
     /// Plugin name (typically `LockedPlugin::manifest.name`). Used
     /// for tracing fields and error messages.
     pub(crate) name: String,
@@ -59,8 +74,12 @@ pub(crate) struct PluginProcess {
     /// for the handshake exchange driven before this struct is built.
     pub(crate) next_msgid: AtomicU32,
     /// Writer for outbound frames. `Mutex`-wrapped so multiple
-    /// concurrent IPC method calls can serialize their writes.
-    pub(crate) writer: Mutex<FramedWriter<tokio::process::ChildStdin>>,
+    /// concurrent IPC method calls can serialize their writes. The
+    /// concrete writer is type-erased ([`DynAsyncWriter`]) so the same
+    /// struct is shared between the production spawn path
+    /// (wrapping a [`tokio::process::ChildStdin`]) and the test path
+    /// (wrapping a [`tokio::io::DuplexStream`]).
+    pub(crate) writer: Mutex<FramedWriter<DynAsyncWriter>>,
     /// Map of msgid → response delivery channel for outstanding
     /// requests. The read loop completes entries here; the per-port
     /// adapter inserts them before sending the request.
@@ -68,6 +87,7 @@ pub(crate) struct PluginProcess {
     /// Map of msgid → stream chunk delivery channel for outstanding
     /// streaming requests. The read loop forwards `stream.chunk`
     /// notifications here.
+    #[allow(dead_code)] // wired by Task 16's `stream_router`.
     pub(crate) in_flight_streams: InFlightStreams,
     /// The spawned child process. Wrapped in `Mutex<Option<_>>` so
     /// shutdown can `take()` it before awaiting `Child::wait`.
@@ -90,7 +110,6 @@ pub(crate) struct PluginProcess {
     _stderr_task: JoinHandle<()>,
 }
 
-#[allow(dead_code)] // Task 15 wires the per-port adapters that consume this API.
 impl PluginProcess {
     /// Spawn a plugin subprocess and install the framer, dispatch
     /// read loop, and stderr re-emit task. The handshake is **not**
@@ -117,7 +136,7 @@ impl PluginProcess {
     /// * [`RuntimeError::PluginSpawnFailed`] if `Command::spawn`
     ///   fails (binary missing, not executable, sandbox denied, …).
     /// * Whatever the `pre_handshake` closure returns.
-    pub(crate) async fn spawn_and_handshake<F, Fut, T>(
+    pub(crate) async fn spawn_and_handshake<F, T>(
         binary_path: &Path,
         plugin_name: String,
         run_id: &str,
@@ -127,11 +146,19 @@ impl PluginProcess {
         pre_handshake: F,
     ) -> Result<(Arc<PluginProcess>, T), RuntimeError>
     where
+        // The HRTB on the future return type lets the closure body
+        // capture the `&mut` borrows without us having to spell out a
+        // separate `for<'a>` lifetime in the call site. The returned
+        // future is type-erased to `Pin<Box<dyn Future + 'a>>` so
+        // calling code can use `async move {...}` without tripping
+        // the higher-ranked-closure lifetime inference bug
+        // (rust-lang/rust#90696).
         F: for<'a> FnOnce(
             &'a mut FramedReader<ChildStdout>,
-            &'a mut FramedWriter<tokio::process::ChildStdin>,
-        ) -> Fut,
-        Fut: std::future::Future<Output = Result<T, RuntimeError>>,
+            &'a mut FramedWriter<DynAsyncWriter>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<T, RuntimeError>> + Send + 'a>,
+        >,
     {
         tracing::debug!(
             target: "tau_runtime::plugin_host",
@@ -184,7 +211,13 @@ impl PluginProcess {
             "plugin.spawned"
         );
 
-        let mut writer = FramedWriter::new(stdin);
+        // Box the writer up-front so `PluginProcess::writer` can hold a
+        // type-erased writer (this lets the test-only constructor share
+        // the same field type with a `DuplexStream`-backed writer).
+        // The handshake driver is generic over `W: AsyncWrite + Unpin`,
+        // so passing a `FramedWriter<DynAsyncWriter>` is sound.
+        let mut writer: FramedWriter<DynAsyncWriter> =
+            FramedWriter::new(Box::new(stdin) as DynAsyncWriter);
         let mut reader = FramedReader::new(stdout, framer_options);
 
         // Drive the handshake (or whatever the caller needs to run
@@ -249,7 +282,7 @@ impl PluginProcess {
     /// after a 500 ms grace. Replacing `start_kill` with explicit
     /// SIGTERM via `nix` is a Phase-1 follow-up and additive to this
     /// API.
-    #[allow(dead_code)] // wired by Task 15 + Task 24 via `Drop`/explicit close.
+    #[allow(dead_code)] // wired by Task 24 via explicit close on Runtime drop.
     pub(crate) async fn shutdown(self: Arc<Self>) {
         // Step 1: send meta.shutdown notification (best-effort).
         let shutdown_frame = Frame::Notification {
@@ -313,19 +346,82 @@ impl PluginProcess {
             "plugin.exited"
         );
     }
+
+    /// Construct a [`PluginProcess`] from pre-built reader+writer halves
+    /// without spawning a subprocess.
+    ///
+    /// Used by the per-port IPC adapter integration tests in
+    /// `tau-runtime/tests/plugin_host_ipc_*.rs`: the test harness pairs
+    /// a [`tau_plugin_protocol::test_support::FakeStdioPeer`] with the
+    /// host-side adapter via two duplex streams, drives the handshake
+    /// out of band (or skips it for unit-style tests), and constructs
+    /// the [`PluginProcess`] via this constructor so the adapter has a
+    /// working `Arc<PluginProcess>` to dispatch through.
+    ///
+    /// # Caller responsibilities
+    ///
+    /// - The handshake must already have run on `reader`+`writer`
+    ///   (msgid 1 consumed).
+    /// - `next_msgid` is initialized to 2 to match
+    ///   [`PluginProcess::spawn_and_handshake`]'s post-handshake state.
+    /// - There is no underlying child process: the [`PluginProcess::shutdown`]
+    ///   path is a no-op for test instances.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn new_for_test<R>(
+        plugin_name: String,
+        reader: FramedReader<R>,
+        writer: FramedWriter<DynAsyncWriter>,
+        shutdown_timeout: Duration,
+    ) -> Arc<Self>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+    {
+        let in_flight_responses: InFlightResponses = Arc::new(Mutex::new(HashMap::new()));
+        let in_flight_streams: InFlightStreams = Arc::new(Mutex::new(HashMap::new()));
+
+        let read_task = tokio::spawn(read_loop(
+            reader,
+            plugin_name.clone(),
+            in_flight_responses.clone(),
+            in_flight_streams.clone(),
+        ));
+
+        // Test instances have no real stderr to re-emit; spawn a stub
+        // task that immediately returns so the field has a valid
+        // `JoinHandle<()>` to drop with.
+        let stderr_task = tokio::spawn(async {});
+
+        Arc::new(PluginProcess {
+            name: plugin_name,
+            next_msgid: AtomicU32::new(2),
+            writer: Mutex::new(writer),
+            in_flight_responses,
+            in_flight_streams,
+            child: Mutex::new(None),
+            shutdown_signal: Notify::new(),
+            shutdown_timeout,
+            _read_task: read_task,
+            _stderr_task: stderr_task,
+        })
+    }
 }
 
 /// Per-process dispatch read loop. Runs on a dedicated tokio task
 /// spawned by [`PluginProcess::spawn_and_handshake`]. Terminates on
 /// EOF or framer error and drains both in-flight maps so callers
 /// don't await forever.
-#[allow(dead_code)] // wired by `spawn_and_handshake`; both gated until Task 15.
-async fn read_loop(
-    mut reader: FramedReader<ChildStdout>,
+///
+/// Generic over the reader IO type so the production spawn path can
+/// pass a [`tokio::process::ChildStdout`] and the test path can pass
+/// a [`tokio::io::DuplexStream`].
+async fn read_loop<R>(
+    mut reader: FramedReader<R>,
     plugin_name: String,
     in_flight_responses: InFlightResponses,
     in_flight_streams: InFlightStreams,
-) {
+) where
+    R: AsyncRead + Unpin + Send + 'static,
+{
     loop {
         let body = match reader.next_frame().await {
             Ok(Some(b)) => b,
@@ -451,7 +547,6 @@ async fn read_loop(
 /// out into the right `tracing::*!` macro under the
 /// `target = "plugin"` namespace, with the `plugin = <name>` field
 /// preserved so subscribers can filter.
-#[allow(dead_code)] // wired by `spawn_and_handshake`; both gated until Task 15.
 async fn stderr_loop(stderr: ChildStderr, plugin_name: String) {
     let reader = tokio::io::BufReader::new(stderr);
     let mut lines = reader.lines();
@@ -473,10 +568,8 @@ async fn stderr_loop(stderr: ChildStderr, plugin_name: String) {
 }
 
 /// Notification method for streaming chunks (see spec §4.6 and §7.3).
-#[allow(dead_code)] // referenced from `read_loop`; gated until Task 15.
 const STREAM_CHUNK_METHOD: &str = "stream.chunk";
 
-#[allow(dead_code)] // referenced from `stderr_loop`; gated until Task 15.
 fn emit_plugin_line(plugin_name: &str, line: &str) {
     // Try parsing as a JSON object first (the SDK's tracing layer
     // shape). If that fails, emit the raw line under
