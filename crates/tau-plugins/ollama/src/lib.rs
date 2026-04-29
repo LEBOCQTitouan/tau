@@ -10,5 +10,4 @@
 //! See `docs/superpowers/specs/2026-04-29-ollama-plugin-design.md`
 //! for the design rationale.
 
-// Modules will be added in subsequent tasks (config, request, response,
-// error, client, stream, plugin).
+pub mod config;
