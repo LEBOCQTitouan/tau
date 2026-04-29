@@ -13,6 +13,7 @@ members = [
     "crates/tau-plugin-sdk",
     "crates/tau-plugins/echo-llm",
     "crates/tau-plugins/echo-tool",
+    "crates/tau-plugins/anthropic",
 ]
 
 [workspace.package]
@@ -48,3 +49,7 @@ rmp-serde       = "1"
 rmpv            = { version = "1", features = ["with-serde"] }
 bytes           = "1"
 tokio           = { version = "1", features = ["macros", "rt", "rt-multi-thread", "io-util", "io-std", "process", "sync", "time"] }
+reqwest             = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+eventsource-stream  = "0.2"
+async-stream        = "0.3"
+secrecy             = "0.10"

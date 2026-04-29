@@ -46,6 +46,20 @@ pub enum ConfigError {
         /// Human-readable explanation of why the value was rejected.
         detail: String,
     },
+
+    /// A required environment variable was missing or malformed.
+    /// Distinct from [`ConfigError::MissingField`]: the variant carries
+    /// the env-var name as a runtime `String` so plugins with
+    /// customizable env-var-name configuration (e.g. an Anthropic
+    /// plugin reading `api_key_env: String` from handshake config) can
+    /// surface the actual name in the error message.
+    #[error("env var {name} unusable: {detail}")]
+    InvalidEnvVar {
+        /// Name of the environment variable that was checked.
+        name: String,
+        /// Human-readable explanation of why it was unusable.
+        detail: String,
+    },
 }
 
 /// Trait implemented by plugins that consume the handshake's `config`
@@ -96,4 +110,32 @@ pub trait Configure: Sized {
     /// were absent or [`ConfigError::InvalidValue`] for fields that
     /// were present but unacceptable.
     fn from_config(config: Self::Config) -> Result<Self, ConfigError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_env_var_displays_name_and_detail() {
+        let err = ConfigError::InvalidEnvVar {
+            name: "MY_ORG_ANTHROPIC_KEY".into(),
+            detail: "not set in environment".into(),
+        };
+        let s = format!("{err}");
+        assert!(s.contains("MY_ORG_ANTHROPIC_KEY"));
+        assert!(s.contains("not set in environment"));
+    }
+
+    #[test]
+    fn invalid_env_var_pattern_matches() {
+        let err = ConfigError::InvalidEnvVar {
+            name: "FOO".into(),
+            detail: "bar".into(),
+        };
+        assert!(matches!(
+            err,
+            ConfigError::InvalidEnvVar { ref name, .. } if name == "FOO"
+        ));
+    }
 }

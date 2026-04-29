@@ -1,0 +1,11 @@
+- request:
+    method: POST
+    uri: /v1/messages
+    body: |-
+      placeholder
+  response:
+    status: 400
+    headers:
+      content-type: application/json
+    body: |-
+      {"type":"error","error":{"type":"invalid_request_error","message":"tools[0].name does not match regex"}}

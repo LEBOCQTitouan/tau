@@ -1,0 +1,11 @@
+- request:
+    method: POST
+    uri: /v1/messages
+    body: |-
+      placeholder
+  response:
+    status: 200
+    headers:
+      content-type: application/json
+    body: |-
+      {"id":"msg_02","type":"message","role":"assistant","content":[{"type":"text","text":"Concise."}],"model":"claude-3-5-haiku-latest","stop_reason":"end_turn","usage":{"input_tokens":15,"output_tokens":2}}

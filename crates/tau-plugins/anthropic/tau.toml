@@ -1,0 +1,8 @@
+name = "anthropic"
+version = "0.1.0"
+description = "Anthropic Claude (Messages API) backend for tau."
+
+[plugin]
+provides = "llm_backend"
+kind     = "rust-cargo"
+bin      = "anthropic-plugin"
