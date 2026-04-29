@@ -51,8 +51,20 @@ The plugins:
   test job). 21 → 23 required CI checks gating `main`.
 - ~12 unit tests per plugin + 4-5 integration tests per plugin (no
   conformance suite — see §2 decision Q3).
-- No new workspace deps. No new `tau-ports` / `tau-runtime` /
-  `tau-plugin-sdk` changes. No new ADR.
+- **Capability enforcement infrastructure** for IPC-backed Tool
+  plugins (see §5.2). Closes two known gaps: (1) plugin-declared
+  capabilities don't surface to the kernel for IPC tools today; (2)
+  agent-granted capabilities don't flow to the plugin process for
+  per-call scope checks. Both close in this sub-project. Touches
+  `tau-ports` (additive `SessionContext` field, `DynTool::invoke`
+  signature change), `tau-plugin-protocol` (new `tool.describe_capabilities`
+  method), `tau-plugin-sdk` (handler for the new method),
+  `tau-runtime::plugin_host::ipc_tool` (call describe_capabilities
+  during loading; thread kernel SessionContext through invoke).
+- One new workspace member dep needed: none. The `globset` crate is
+  added as a per-crate dep on `crates/tau-plugins/fs-read/` only.
+- No new ADR — non-breaking amendments to ADR-0008 §5 documented in
+  the sign-off commit.
 
 **Does NOT ship:**
 
@@ -308,43 +320,74 @@ fn capabilities(&self) -> &[Capability] {
 }
 ```
 
-### 5.2 Capability-list plumbing
+### 5.2 Capability enforcement infrastructure (Gap 1 + Gap 2)
 
-Both plugins need access to the agent's GRANTED capabilities (not just
-the structural declaration) at invoke time so they can:
+Inspecting `crates/tau-runtime/src/plugin_host/ipc_tool.rs` revealed
+**two infrastructure gaps** that must close before plugin-side
+capability checks are meaningful. Both close in this sub-project per
+the user-locked decision (option A1).
 
-- `fs-read`: check the path against `FsCapability::Read.paths`.
-- `shell`: check the command against `ProcessCapability::Spawn.commands`.
+#### Gap 1 — Plugin-declared capabilities don't surface for IPC tools
 
-The runtime's existing capability check at `run.rs:272` only verifies
-that the agent HAS a satisfying capability — it doesn't pass the typed
-`paths`/`commands` lists through to the plugin. We need that data on
-the plugin side.
+`IpcTool.capabilities` is currently `Vec::new()` with the comment:
 
-**Two implementation options:**
+> "Empty at v0.1 — the wire protocol doesn't yet surface
+> plugin-declared capabilities. The kernel's capability filter
+> therefore trivially admits every IPC-backed tool."
 
-**A) Pass via `SessionContext` extension (RECOMMENDED).** Extend
-`tau_ports::SessionContext` (which is `#[non_exhaustive]`) with an
-additive field: `granted_capabilities: Vec<Capability>`. tau-runtime
-populates it from the agent's package manifest before calling
-`Tool::init`. Plugins read from `&mut Self::Session` (which the
-plugin produced from the SessionContext).
+Consequence: the kernel's capability check at `run.rs:272` is a NO-OP
+for any out-of-process Tool plugin today. Without closing this gap,
+the kernel cannot enforce "agent has `fs.read` at all?" against an
+IPC-backed `fs-read`.
 
-This is purely additive on `tau_ports` — `#[non_exhaustive]` allows
-the field. The plugin-protocol IPC encodes Vec<Capability> via the
-existing `tau-domain` serde impls. No new ADR (the SessionContext
-extension is a non-breaking additive change documented in this spec).
+**Fix:** add a new wire method `tool.describe_capabilities` (no
+params; returns `Vec<Capability>` from `Tool::capabilities()`), called
+once during plugin loading by the host. `IpcTool::capabilities` is
+populated from the response.
 
-**B) Pass via plugin handshake config.** The runtime crafts a fresh
-plugin instance per agent and passes the capability list via the
-handshake `config` JSON. Drawbacks: instances aren't currently
-per-agent (one plugin process serves all agents); making them
-per-agent is a tau-runtime change.
+The SDK's `run_tool_with_config` runner gains a handler for the new
+method that returns `plugin.capabilities()` directly.
 
-**Decision: A.** Adds ONE field to `SessionContext`. Documented as a
-sub-project amendment to ADR-0008 §5 (the SessionContext shape is
-listed there as part of the IPC vocabulary). One commit message line
-suffices; no new ADR.
+#### Gap 2 — Agent-granted capabilities don't flow to the plugin
+
+For `fs-read` to check `path` against `FsCapability::Read.paths`, the
+plugin process needs the agent's GRANTED capabilities (not just the
+plugin's REQUIRED capabilities). Same for `shell` checking `command`
+against `ProcessCapability::Spawn.commands`.
+
+**Fix:** extend `tau_ports::SessionContext` (which is
+`#[non_exhaustive]`) with an additive field `granted_capabilities:
+Vec<Capability>`. The runtime populates it from the agent's package
+manifest at the in-process site (`run.rs:334`). The IPC layer
+(`ipc_tool.rs`) stops synthesizing a fresh `SessionContext` per
+`tool.call` and instead threads through the kernel's ctx — that
+requires extending `DynTool::invoke` to take `&SessionContext` (or
+similar) so the IPC adapter can encode it into the `tool.call` params.
+
+The wire shape for `tool.call` already encodes `(SessionContext,
+Value)` per the existing serde impls — adding a field to
+`SessionContext` rides along automatically. The change is on the
+runtime side (kernel passes ctx through to IPC; IPC stops
+synthesizing).
+
+#### Combined consequences
+
+- `tau_ports::SessionContext` gains `granted_capabilities` (additive,
+  non-breaking).
+- `tau_ports::DynTool::invoke` signature changes to take
+  `&SessionContext` (in-tree consumers update; this is the kernel +
+  ipc_tool.rs only).
+- `tau_plugin_protocol` adds the `tool.describe_capabilities` method
+  string constant.
+- `tau_plugin_sdk::run_tool_with_config` handles the new method.
+- `tau_runtime::plugin_host::ipc_tool` calls `describe_capabilities`
+  during loading + threads kernel `SessionContext` through `invoke`.
+- `tau_runtime::run.rs:334` populates `granted_capabilities` from the
+  agent's package manifest before calling `Tool::init`.
+
+**ADR coverage:** these are non-breaking amendments to ADR-0008 §5
+(the IPC vocabulary). Documented in the sub-project sign-off commit
+message; no new ADR required.
 
 ### 5.3 `invoke` semantics
 
@@ -640,25 +683,40 @@ These are mechanical follow-ons; they reuse `path_check.rs` verbatim.
 
 ---
 
-## 12. Implementation plan outline (~13 tasks)
+## 12. Implementation plan outline (~20 tasks)
+
+The plan splits into three phases: infrastructure (Tasks 1-7), plugins
+(Tasks 8-15), and ship (Tasks 16-20). Infrastructure lands first so
+the plugins ship with real end-to-end capability enforcement.
 
 | # | Task | Notes |
 |---|---|---|
-| 1 | Workspace scaffold: 2 new crates (`fs-read`, `shell`) registered; placeholder `lib.rs`/`main.rs` stubs; tau.toml manifests | Also adds `globset` to fs-read's per-crate `[dependencies]` (NOT workspace). |
-| 2 | `tau_ports::SessionContext.granted_capabilities` additive field | One-field amendment per §5.2 decision A. tau-runtime populates from package manifest. |
-| 3 | `fs-read` config + path_check (10 unit tests) | spec §4, §6.1 |
-| 4 | `fs-read` plugin.rs `Tool` impl (1 unit test for invoke) | spec §4 |
-| 5 | `fs-read` integration tests (3 tests) | spec §8.1 |
-| 6 | `shell` config (validate default ≤ max) + command_check (4 unit tests) | spec §5, §6.2 |
-| 7 | `shell` exec.rs (subprocess spawn + timeout + capping; 8 unit tests) | spec §5.3, §5.4 |
-| 8 | `shell` plugin.rs `Tool` impl | spec §5 |
-| 9 | `shell` integration tests (4 tests) + per-plugin README.md inserts (trust model) | spec §8.2, §10 |
-| 10 | tau-runtime: populate `SessionContext.granted_capabilities` at dispatch (`run.rs:272`-adjacent) | spec §5.2 |
-| 11 | CI: 2 new release-build jobs in ci.yml | spec §9 |
-| 12 | Final local verification + mark PR ready (user-driven gate) | (gate) |
-| 13 | ROADMAP + branch protection 21 → 23 + squash merge (user-driven gate) | (gate) |
+| **Infrastructure (Gap 1 + Gap 2)** | | |
+| 1 | Workspace scaffold: 2 new crates (`fs-read`, `shell`) registered; placeholder `lib.rs`/`main.rs` stubs; tau.toml manifests | Adds `globset` to fs-read's per-crate `[dependencies]` (NOT workspace). |
+| 2 | `tau_ports::SessionContext.granted_capabilities` additive field; `make_session_context` fixtures helper updated; existing tests adapt | Additive non-breaking; type is `#[non_exhaustive]`. spec §5.2 Gap 2 |
+| 3 | `tau_ports::DynTool::invoke` signature: takes `&SessionContext`. Update kernel call sites + in-process impl to thread ctx through. Existing tests adapt. | Cross-crate signature change; in-tree only. spec §5.2 Gap 2 |
+| 4 | `tau_plugin_protocol`: add `TOOL_DESCRIBE_CAPABILITIES_METHOD` constant + wire format docs | Additive method string. spec §5.2 Gap 1 |
+| 5 | `tau_plugin_sdk::run_tool_with_config` handles the new method (returns `plugin.capabilities()`) | One handler arm + 2 unit tests. spec §5.2 Gap 1 |
+| 6 | `tau_runtime::plugin_host::ipc_tool`: call `describe_capabilities` during plugin loading; populate `IpcTool.capabilities`; thread kernel `SessionContext` through `invoke` (stop synthesizing fresh ctx) | The load-bearing change. spec §5.2 Gap 1 + Gap 2 |
+| 7 | `tau_runtime::run.rs`: populate `SessionContext.granted_capabilities` from agent's package manifest at the dispatch site | 5-10 line change. spec §5.2 Gap 2 |
+| **Plugins** | | |
+| 8 | `fs-read` config + path_check module (10 unit tests covering path validation + glob matching) | spec §4, §6.1 |
+| 9 | `fs-read` plugin.rs `Tool` impl + main.rs entrypoint (uses path_check + reads granted_caps from ctx) | spec §4 |
+| 10 | `fs-read` integration tests (3 tests via SDK test harness) | spec §8.1 |
+| 11 | `shell` config (validate default ≤ max) + command_check (4 unit tests) | spec §5, §6.2 |
+| 12 | `shell` exec.rs (subprocess spawn + timeout + output capping; 8 unit tests) | spec §5.3, §5.4 |
+| 13 | `shell` plugin.rs `Tool` impl + main.rs entrypoint | spec §5 |
+| 14 | `shell` integration tests (4 tests) | spec §8.2 |
+| 15 | Per-plugin README.md trust-model inserts (spec §10) | Both plugins |
+| **Ship** | | |
+| 16 | End-to-end smoke test: spawn an agent that invokes `fs-read` against a real cassette + verify granted_caps enforced both at kernel boundary AND at plugin layer | Validates Gap 1 + Gap 2 closures end-to-end |
+| 17 | CI: 2 new release-build jobs in ci.yml | spec §9 |
+| 18 | Final local verification + mark PR ready (user-driven gate) | (gate) |
+| 19 | ROADMAP + branch protection 21 → 23 + squash merge (user-driven gate) | (gate) |
 
-13 tasks. Tasks 12-13 are user-driven gates per the established pattern. **No ADR sign-off.**
+19 tasks (was 13 before scope expansion). Tasks 18-19 are user-driven
+gates per the established pattern. **No new ADR** — sign-off commit
+documents non-breaking amendments to ADR-0008 §5.
 
 ---
 
