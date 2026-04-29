@@ -11,10 +11,13 @@ members = [
     "crates/tau-cli",
     "crates/tau-plugin-protocol",
     "crates/tau-plugin-sdk",
+    "crates/tau-plugin-test-support",
+    "crates/tau-plugin-conformance",
     "crates/tau-plugins/echo-llm",
     "crates/tau-plugins/echo-tool",
     "crates/tau-plugins/anthropic",
     "crates/tau-plugins/ollama",
+    "crates/tau-plugins/openai",
 ]
 
 [workspace.package]
@@ -32,6 +35,8 @@ tau-pkg             = { path = "crates/tau-pkg",    version = "0.0.0" }
 tau-runtime         = { path = "crates/tau-runtime", version = "0.0.0" }
 tau-plugin-protocol = { path = "crates/tau-plugin-protocol", version = "0.0.0" }
 tau-plugin-sdk      = { path = "crates/tau-plugin-sdk", version = "0.0.0" }
+tau-plugin-test-support = { path = "crates/tau-plugin-test-support", version = "0.0.0" }
+tau-plugin-conformance  = { path = "crates/tau-plugin-conformance",  version = "0.0.0" }
 thiserror       = "2"
 semver          = { version = "1" }
 uuid            = { version = "1", features = ["v7"] }

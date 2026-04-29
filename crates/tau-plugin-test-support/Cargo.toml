@@ -1,0 +1,18 @@
+[package]
+name = "tau-plugin-test-support"
+description = "Shared test support for tau LLM-backend plugins (cassette replayer + helpers)."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+
+[lib]
+name = "tau_plugin_test_support"
+path = "src/lib.rs"
+
+[dependencies]
+tokio       = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "io-util", "net"] }
+serde       = { workspace = true }
+serde_yaml  = "0.9"
