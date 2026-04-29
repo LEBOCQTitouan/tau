@@ -14,16 +14,19 @@ loading mechanism, first real LLM-backend + tool plugins, capability
 override, transitive dependency resolution. The first sub-project of
 Phase 1 unblocks everything else.
 
-**Status:** Phase 1 sub-project 2b (Ollama plugin) shipped
-2026-04-29; sub-project 2c (OpenAI plugin) is the natural next
-sub-project, at which point the rule-of-three trigger justifies
-extracting a `tau-plugin-test-support` crate.
+**Status:** Phase 1 sub-project 2c (OpenAI plugin + supporting
+infrastructure) shipped 2026-04-29; Tier 1 priority 2 (first real
+LLM-backend plugins) is fully complete with all three plugins —
+Anthropic + Ollama + OpenAI — running typed LlmError variants and
+integrated with the parameterized conformance suite. Tier 1
+priority 3 (first real Tool plugin) is the natural next sub-project.
 
 | # | Sub-project | Produces | Merged |
 |---|---|---|---|
 | 1 | Plugin loading mechanism ✅ | Out-of-process IPC over MessagePack-RPC; tau-plugin-protocol + tau-plugin-sdk crates; plugin_host module in tau-runtime; tau-pkg build-on-install; debug-tier subcommands; echo-llm + echo-tool toy plugins | 2026-04-28 |
 | 2a | Anthropic LLM-backend plugin ✅ | First real LLM-backend plugin: Anthropic Claude Messages API client at `crates/tau-plugins/anthropic/`; day-1 streaming + tool-use; cassette-replay test harness + env-gated live smoke; in-plugin retry honoring Retry-After; ConfigError::InvalidEnvVar SDK amendment | 2026-04-29 |
 | 2b | Ollama LLM-backend plugin ✅ | Second real LLM-backend plugin: Ollama (local LLM runner) at `crates/tau-plugins/ollama/`; native `/api/chat` over NDJSON streaming (~50 LOC hand-rolled, no eventsource-stream); optional bearer-token auth; cassette-replay test harness duplicated from Anthropic; in-plugin retry honoring 503-on-model-load case; 404 errors include `ollama pull` remediation hint | 2026-04-29 |
+| 2c | OpenAI plugin + supporting infrastructure ✅ | Third real LLM-backend plugin: OpenAI Chat Completions client at `crates/tau-plugins/openai/`; SSE streaming, real `tool_call_id` round-trip, full `tool_choice` round-trip. Plus `crates/tau-plugin-test-support/` (rule-of-three refactor of cassette replayer) and `crates/tau-plugin-conformance/` (parameterized behavioral test suite, deferred from ADR-0008 §17). All 3 plugins migrated to typed `LlmError` variants. ADR-0009 Accepted. | 2026-04-29 |
 
 ## Phase 0 (complete) — bootstrap + foundational sub-projects
 
@@ -69,13 +72,15 @@ Tier ordering reflects criticality, not strict implementation order
    IPC over MessagePack-RPC + tau-pkg/tau-runtime/tau-domain
    amendments. 15 required CI checks gating `main` (was 12 in Phase
    0).
-2. **First real LLM-backend plugin.** Anthropic shipped 2026-04-29 as
-   priority 2a; Ollama shipped 2026-04-29 as priority 2b (validates
-   the deferred conformance suite case with two distinct transports:
-   SSE vs NDJSON). OpenAI (priority 2c) is the natural next
-   sub-project; the third real implementation justifies extracting
-   shared HTTP/retry/cassette plumbing into a `tau-plugin-test-support`
-   crate (rule-of-three). 17 required CI checks gating `main` (was 16).
+2. **First real LLM-backend plugin.** ✅ Tier 1 priority 2 fully
+   complete: Anthropic shipped 2026-04-29 as priority 2a; Ollama
+   shipped 2026-04-29 as priority 2b; OpenAI shipped 2026-04-29 as
+   priority 2c — closing out Tier 1 priority 2 with the rule-of-three
+   refactor (`tau-plugin-test-support`) and the deferred conformance
+   suite (`tau-plugin-conformance`). All three plugins migrated to
+   typed `LlmError` variants. ADR-0009 (typed-error migration policy
+   + conformance suite charter) Accepted. 21 required CI checks
+   gating `main` (was 17).
 3. **First real Tool plugin.** `fs-read` + `shell` initial set;
    exercises capability checks at runtime.
 

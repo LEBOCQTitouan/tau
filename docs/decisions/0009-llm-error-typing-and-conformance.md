@@ -1,6 +1,6 @@
 # ADR-0009: Typed `LlmError` migration policy + conformance suite charter
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-04-29
 **Deciders:** Titouan Lebocq
 **Supersedes:** —
