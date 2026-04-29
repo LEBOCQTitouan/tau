@@ -1,0 +1,35 @@
+- request:
+    method: POST
+    uri: /api/chat
+    body: |-
+      placeholder
+  response:
+    status: 503
+    headers:
+      retry-after: "0"
+      content-type: application/json
+    body: |-
+      {"error":"model is loading"}
+- request:
+    method: POST
+    uri: /api/chat
+    body: |-
+      placeholder
+  response:
+    status: 503
+    headers:
+      retry-after: "0"
+      content-type: application/json
+    body: |-
+      {"error":"model is loading"}
+- request:
+    method: POST
+    uri: /api/chat
+    body: |-
+      placeholder
+  response:
+    status: 200
+    headers:
+      content-type: application/json
+    body: |-
+      {"model":"llama3.2","created_at":"2026-04-29T00:00:00Z","message":{"role":"assistant","content":"Hi after model load"},"done":true,"done_reason":"stop","prompt_eval_count":12,"eval_count":4}

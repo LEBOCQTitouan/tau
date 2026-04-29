@@ -1,0 +1,11 @@
+- request:
+    method: POST
+    uri: /api/chat
+    body: |-
+      placeholder
+  response:
+    status: 404
+    headers:
+      content-type: application/json
+    body: |-
+      {"error":"model 'llama99' not found, try pulling it first"}

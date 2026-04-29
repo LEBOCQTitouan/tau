@@ -14,14 +14,16 @@ loading mechanism, first real LLM-backend + tool plugins, capability
 override, transitive dependency resolution. The first sub-project of
 Phase 1 unblocks everything else.
 
-**Status:** Phase 1 sub-project 1 (plugin loading) shipped
-2026-04-28; first real LLM-backend plugin (priority 2) is the
-natural next sub-project.
+**Status:** Phase 1 sub-project 2b (Ollama plugin) shipped
+2026-04-29; sub-project 2c (OpenAI plugin) is the natural next
+sub-project, at which point the rule-of-three trigger justifies
+extracting a `tau-plugin-test-support` crate.
 
 | # | Sub-project | Produces | Merged |
 |---|---|---|---|
 | 1 | Plugin loading mechanism ✅ | Out-of-process IPC over MessagePack-RPC; tau-plugin-protocol + tau-plugin-sdk crates; plugin_host module in tau-runtime; tau-pkg build-on-install; debug-tier subcommands; echo-llm + echo-tool toy plugins | 2026-04-28 |
 | 2a | Anthropic LLM-backend plugin ✅ | First real LLM-backend plugin: Anthropic Claude Messages API client at `crates/tau-plugins/anthropic/`; day-1 streaming + tool-use; cassette-replay test harness + env-gated live smoke; in-plugin retry honoring Retry-After; ConfigError::InvalidEnvVar SDK amendment | 2026-04-29 |
+| 2b | Ollama LLM-backend plugin ✅ | Second real LLM-backend plugin: Ollama (local LLM runner) at `crates/tau-plugins/ollama/`; native `/api/chat` over NDJSON streaming (~50 LOC hand-rolled, no eventsource-stream); optional bearer-token auth; cassette-replay test harness duplicated from Anthropic; in-plugin retry honoring 503-on-model-load case; 404 errors include `ollama pull` remediation hint | 2026-04-29 |
 
 ## Phase 0 (complete) — bootstrap + foundational sub-projects
 
@@ -68,10 +70,12 @@ Tier ordering reflects criticality, not strict implementation order
    amendments. 15 required CI checks gating `main` (was 12 in Phase
    0).
 2. **First real LLM-backend plugin.** Anthropic shipped 2026-04-29 as
-   priority 2a (see [ADR-0008](docs/decisions/0008-plugin-loading.md)
-   first real consumer). Ollama (priority 2b) and OpenAI (priority 2c)
-   follow as their own sub-projects. 16 required CI checks gating
-   `main` (was 15).
+   priority 2a; Ollama shipped 2026-04-29 as priority 2b (validates
+   the deferred conformance suite case with two distinct transports:
+   SSE vs NDJSON). OpenAI (priority 2c) is the natural next
+   sub-project; the third real implementation justifies extracting
+   shared HTTP/retry/cassette plumbing into a `tau-plugin-test-support`
+   crate (rule-of-three). 17 required CI checks gating `main` (was 16).
 3. **First real Tool plugin.** `fs-read` + `shell` initial set;
    exercises capability checks at runtime.
 
