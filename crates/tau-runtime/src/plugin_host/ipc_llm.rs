@@ -7,9 +7,11 @@
 //! response.
 //!
 //! See spec §7.4 (per-port adapters) and §7.3 (PluginProcess + read
-//! loop). Streaming (`llm.stream`) is wired in Task 16 via the
-//! `stream_router`; this task returns
-//! [`tau_ports::LlmError::Internal`] for `stream()`.
+//! loop). Streaming (`llm.stream`) is wired alongside `llm.complete`:
+//! [`IpcLlmBackend::stream`] dispatches an `llm.stream` request,
+//! registers both the response oneshot and a chunk mpsc keyed on the
+//! same msgid, and hands the assembled stream off to
+//! [`crate::plugin_host::stream_router`].
 
 use std::pin::Pin;
 use std::sync::atomic::Ordering;
@@ -17,7 +19,7 @@ use std::sync::Arc;
 
 use tau_plugin_protocol::Frame;
 use tau_ports::{CompletionRequest, CompletionResponse, CompletionStream, LlmError};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::builder::DynLlmBackend;
 
@@ -25,6 +27,19 @@ use super::process::{PluginProcess, RpcResult};
 
 /// Wire method name for the non-streaming LLM completion.
 const LLM_COMPLETE_METHOD: &str = "llm.complete";
+
+/// Wire method name for the streaming LLM completion. Per the plan-
+/// erratum carryover from Task 9, the SDK runner dispatches
+/// `llm.stream` (NOT `llm.complete_streaming`); both ends of the wire
+/// must agree.
+const LLM_STREAM_METHOD: &str = "llm.stream";
+
+/// Bound on the per-stream chunk channel. Sized to absorb a short burst
+/// of provider-side chunks without forcing the read loop to await an
+/// idle consumer (which would block the loop from servicing other
+/// in-flight calls on the same plugin process). 64 is a starting
+/// guess — adjust if production traces show backpressure.
+const STREAM_CHUNK_CHANNEL_CAPACITY: usize = 64;
 
 /// IPC-backed [`DynLlmBackend`] adapter. Holds an `Arc<PluginProcess>`
 /// shared with the read loop and any other adapters bound to the same
@@ -113,15 +128,60 @@ impl DynLlmBackend for IpcLlmBackend {
 
     fn stream<'a>(
         &'a self,
-        _req: CompletionRequest,
+        req: CompletionRequest,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<CompletionStream, LlmError>> + 'a>> {
-        // Task 16 wires the stream router; until then, return Internal
-        // so callers that try to stream from an IPC-backed backend see
-        // a typed failure rather than panicking.
-        Box::pin(async {
-            Err(LlmError::Internal {
-                message: "IpcLlmBackend::stream is wired in Task 16".to_string(),
-            })
+        let process = self.process.clone();
+        Box::pin(async move {
+            // Allocate the msgid that ties together the request, the
+            // response oneshot, and the per-stream chunk channel. The
+            // read loop in `process::read_loop` keys both maps on this
+            // id when routing inbound `Frame::Response` and
+            // `stream.chunk` notifications.
+            let id = process.next_msgid.fetch_add(1, Ordering::Relaxed);
+
+            // Set up both delivery channels *before* sending the
+            // request: chunks could land before the host's `await`
+            // resumes, so the receivers must already be installed in
+            // the in-flight maps. Same registration ordering as the
+            // non-streaming path.
+            let (chunk_tx, chunk_rx) = mpsc::channel(STREAM_CHUNK_CHANNEL_CAPACITY);
+            let (final_tx, final_rx) = oneshot::channel::<RpcResult>();
+            {
+                let mut streams = process.in_flight_streams.lock().await;
+                streams.insert(id, chunk_tx);
+            }
+            {
+                let mut responses = process.in_flight_responses.lock().await;
+                responses.insert(id, final_tx);
+            }
+
+            // Wire shape: params is a 1-element array `[CompletionRequest]`,
+            // matching `tau_plugin_sdk::runners::llm_backend`'s
+            // `llm.stream` dispatch.
+            let params_bytes = rmp_serde::to_vec(&vec![&req]).map_err(|e| LlmError::Internal {
+                message: format!("rmp encode CompletionRequest (stream): {e}"),
+            })?;
+            let frame = Frame::Request {
+                id,
+                method: LLM_STREAM_METHOD.to_string(),
+                params: params_bytes,
+            };
+            let frame_bytes = frame.encode().map_err(|e| LlmError::Internal {
+                message: format!("frame encode (stream): {e}"),
+            })?;
+            {
+                let mut writer = process.writer.lock().await;
+                writer
+                    .write_frame(&frame_bytes)
+                    .await
+                    .map_err(|e| LlmError::Internal {
+                        message: format!("write frame (stream): {e}"),
+                    })?;
+            }
+
+            Ok(crate::plugin_host::stream_router::assemble(
+                chunk_rx, final_rx,
+            ))
         })
     }
 }

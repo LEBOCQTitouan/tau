@@ -31,7 +31,7 @@ use tau_plugin_protocol::test_support::FakeStdioPeer;
 use tau_plugin_protocol::{FramedReader, FramedWriter, FramerOptions};
 use tau_ports::fixtures::{make_completion_response, make_tool_result, make_tool_spec};
 use tau_ports::{
-    CompletionRequest, CompletionStream, Key, Namespace, SandboxPlan, StopReason, ToolContent,
+    CompletionChunk, CompletionRequest, Key, Namespace, SandboxPlan, StopReason, ToolContent,
 };
 use tau_runtime::builder::{DynLlmBackend, DynSandbox, DynStorage, DynTool};
 use tau_runtime::plugin_host::__internals::{
@@ -122,20 +122,121 @@ async fn ipc_llm_backend_complete_maps_error_envelope_to_internal() {
 }
 
 #[tokio::test]
-async fn ipc_llm_backend_stream_returns_internal_for_task_15_stub() {
-    let (process, _peer) = paired_process("echo-llm");
+async fn ipc_llm_backend_stream_assembles_chunks_and_terminates() {
+    use futures_util::StreamExt;
+
+    let (process, mut peer) = paired_process("echo-llm");
     let backend = IpcLlmBackend::new("echo-llm".to_string(), process);
 
     let req = CompletionRequest::new("echo-llm".to_string());
-    // `CompletionStream` doesn't implement `Debug`, so we can't use
-    // `expect_err` on the result. Match instead.
-    let outcome: Result<CompletionStream, _> = backend.stream(req).await;
-    let err = match outcome {
-        Ok(_) => panic!("Task 15 stub must return Err"),
-        Err(e) => e,
+    let req_for_assert = req.clone();
+
+    // Drive both sides concurrently. The streaming path's returned
+    // `CompletionStream` is `Send` (per `tau_ports`'s typedef) but the
+    // outer `stream()` future is `BoxFuture<'a, _>` not bound `Send`,
+    // so `tokio::spawn` would still fail; mirror the complete test's
+    // `tokio::join!` pattern.
+    let call_fut = async {
+        let mut stream = backend
+            .stream(req)
+            .await
+            .expect("stream() returns the assembled stream");
+        let mut chunks = Vec::new();
+        while let Some(item) = stream.next().await {
+            chunks.push(item);
+        }
+        chunks
     };
+    let peer_fut = async {
+        let (msgid, params_bytes) = peer.expect_request("llm.stream").await;
+        assert_eq!(msgid, 2, "first post-handshake msgid is 2");
+        let parsed: Vec<CompletionRequest> =
+            rmp_serde::from_slice(&params_bytes).expect("params decode");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].model, req_for_assert.model);
+
+        // Three streamed chunks, then a clean terminating response.
+        peer.send_stream_chunk(
+            msgid,
+            CompletionChunk::Text {
+                delta: "alpha".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        peer.send_stream_chunk(
+            msgid,
+            CompletionChunk::Text {
+                delta: "beta".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        peer.send_stream_chunk(
+            msgid,
+            CompletionChunk::Text {
+                delta: "gamma".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        // Empty `()` summary — the host doesn't decode it, only
+        // observes the response arrives. Wire shape per spec §4.6 is
+        // `{ stop_reason, usage }` but the assembler is summary-shape
+        // agnostic.
+        peer.send_response(msgid, &()).await.unwrap();
+    };
+
+    let (chunks, ()) = tokio::join!(call_fut, peer_fut);
+    assert_eq!(chunks.len(), 3, "expected 3 chunks");
+    for chunk in &chunks {
+        assert!(chunk.is_ok(), "expected Ok chunk, got {chunk:?}");
+    }
+}
+
+#[tokio::test]
+async fn ipc_llm_backend_stream_propagates_mid_stream_error() {
+    use futures_util::StreamExt;
+
+    let (process, mut peer) = paired_process("echo-llm");
+    let backend = IpcLlmBackend::new("echo-llm".to_string(), process);
+
+    let req = CompletionRequest::new("echo-llm".to_string());
+
+    let call_fut = async {
+        let mut stream = backend.stream(req).await.expect("stream() ok");
+        let mut items = Vec::new();
+        while let Some(item) = stream.next().await {
+            items.push(item);
+        }
+        items
+    };
+    let peer_fut = async {
+        let (msgid, _params_bytes) = peer.expect_request("llm.stream").await;
+        // One chunk, then an error envelope as the terminating
+        // response. The assembler should yield Ok(chunk) then Err(_)
+        // and terminate.
+        peer.send_stream_chunk(
+            msgid,
+            CompletionChunk::Text {
+                delta: "partial".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        peer.send_response_error(msgid, -32603, "rate limited")
+            .await
+            .unwrap();
+    };
+
+    let (items, ()) = tokio::join!(call_fut, peer_fut);
+    assert_eq!(items.len(), 2, "expected one chunk + one error");
+    assert!(items[0].is_ok());
+    let err = items[1]
+        .as_ref()
+        .expect_err("second item must be Err for the mid-stream failure");
     let msg = format!("{err}");
-    assert!(msg.contains("Task 16"), "got: {msg}");
+    assert!(msg.contains("rate limited"), "got: {msg}");
 }
 
 #[tokio::test]

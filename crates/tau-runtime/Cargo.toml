@@ -25,6 +25,10 @@ serde_json          = "1"
 tokio               = { workspace = true }
 # Plugin host encodes/decodes MessagePack payloads for the wire protocol.
 rmp-serde           = { workspace = true }
+# Plugin host streaming adapter (`stream_router`) implements the
+# `Stream` trait from `futures-core` so it can build a
+# `tau_ports::CompletionStream` (which is `Pin<Box<dyn Stream<...>>>`).
+futures-core        = { workspace = true }
 
 [features]
 default = []
@@ -44,3 +48,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 proptest           = { workspace = true }
 serde              = { workspace = true }
 toml               = { workspace = true }
+# `StreamExt` for the stream_router unit tests + the streaming
+# integration test. Pinned at the same minor version other workspace
+# crates already pull in (e.g. tau-plugin-sdk dev-deps).
+futures-util       = "0.3"

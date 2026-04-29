@@ -86,8 +86,11 @@ pub struct PluginProcess {
     pub(crate) in_flight_responses: InFlightResponses,
     /// Map of msgid → stream chunk delivery channel for outstanding
     /// streaming requests. The read loop forwards `stream.chunk`
-    /// notifications here.
-    #[allow(dead_code)] // wired by Task 16's `stream_router`.
+    /// notifications here; [`super::ipc_llm::IpcLlmBackend::stream`]
+    /// inserts an entry per `llm.stream` call and pairs it with an
+    /// `in_flight_responses` entry under the same msgid. The
+    /// [`super::stream_router`] consumes both halves to assemble a
+    /// [`tau_ports::CompletionStream`].
     pub(crate) in_flight_streams: InFlightStreams,
     /// The spawned child process. Wrapped in `Mutex<Option<_>>` so
     /// shutdown can `take()` it before awaiting `Child::wait`.

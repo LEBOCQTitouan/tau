@@ -39,6 +39,7 @@ mod ipc_sandbox;
 mod ipc_storage;
 mod ipc_tool;
 mod process;
+mod stream_router;
 
 /// Internal-but-test-visible re-exports. Hidden from rustdoc and not
 /// covered by stability guarantees: integration tests under
