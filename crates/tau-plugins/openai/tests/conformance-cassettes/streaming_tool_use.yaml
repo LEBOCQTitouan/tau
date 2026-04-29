@@ -1,0 +1,18 @@
+- request:
+    method: POST
+    uri: /v1/chat/completions
+    body: |-
+      placeholder
+  response:
+    status: 200
+    headers:
+      content-type: text/event-stream
+    body: |+
+      data: {"id":"chatcmpl-conf-4","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_conf2","type":"function","function":{"name":"echo","arguments":""}}]},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-conf-4","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"text\":\"x\"}"}}]},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-conf-4","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":12,"completion_tokens":4}}
+
+      data: [DONE]
+

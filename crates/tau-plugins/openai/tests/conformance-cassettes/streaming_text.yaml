@@ -1,0 +1,20 @@
+- request:
+    method: POST
+    uri: /v1/chat/completions
+    body: |-
+      placeholder
+  response:
+    status: 200
+    headers:
+      content-type: text/event-stream
+    body: |+
+      data: {"id":"chatcmpl-conf-3","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-conf-3","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-conf-3","choices":[{"index":0,"delta":{"content":" stream"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-conf-3","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}
+
+      data: [DONE]
+
