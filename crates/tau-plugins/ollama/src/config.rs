@@ -143,7 +143,6 @@ fn default_respect_retry_after() -> bool {
 /// which errors on missing env var because Anthropic auth is required.**
 ///
 /// Wired into `Configure::from_config` in Task 8.
-#[allow(dead_code)]
 pub(crate) fn resolve_bearer_token(cfg: &OllamaConfig) -> Result<Option<String>, ConfigError> {
     if let Some(direct) = cfg.bearer_token.as_ref() {
         tracing::warn!(
@@ -162,7 +161,6 @@ pub(crate) fn resolve_bearer_token(cfg: &OllamaConfig) -> Result<Option<String>,
 /// Validate retry-config invariants beyond what serde catches.
 ///
 /// Wired into `Configure::from_config` in Task 8.
-#[allow(dead_code)]
 pub(crate) fn validate_retry(retry: &RetryConfig) -> Result<(), ConfigError> {
     if retry.max_attempts == 0 {
         return Err(ConfigError::InvalidValue {

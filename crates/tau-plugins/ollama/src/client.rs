@@ -34,7 +34,6 @@ pub(crate) struct OllamaClient {
 impl OllamaClient {
     /// Construct a client. The caller (Task 8 `Configure::from_config`)
     /// validates inputs.
-    #[allow(dead_code)]
     pub(crate) fn new(
         inner: reqwest::Client,
         base_url: String,
@@ -53,7 +52,6 @@ impl OllamaClient {
     /// produced by `request::build_chat_body`. The `stream` flag is
     /// already encoded inside `body.stream`; no additional `Accept`
     /// header is needed (Ollama emits NDJSON when `body.stream: true`).
-    #[allow(dead_code)]
     pub(crate) async fn post_chat(
         &self,
         body: &serde_json::Value,

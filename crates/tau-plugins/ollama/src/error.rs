@@ -20,7 +20,6 @@ use thiserror::Error;
 /// from its retry loop.
 #[non_exhaustive]
 #[derive(Debug, Error)]
-#[allow(dead_code)]
 pub(crate) enum ClientError {
     /// Underlying transport failure (network, TLS, DNS, etc.).
     /// Distinct from a non-success status code, which is handled
@@ -49,7 +48,6 @@ pub(crate) enum ClientError {
 /// the richer typed-variant vocabulary (`RateLimited`, `Auth`,
 /// `ModelNotFound`) lands when sub-project 2c (OpenAI) introduces
 /// the third consumer.
-#[allow(dead_code)]
 pub(crate) fn map_response_error(status: reqwest::StatusCode, body: &str) -> LlmError {
     let detail = serde_json::from_str::<OllamaErrorBody>(body)
         .ok()
@@ -78,7 +76,6 @@ struct OllamaErrorBody {
 ///
 /// Same target type as `map_response_error` so the plugin's batch and
 /// streaming entrypoints can call either translator uniformly.
-#[allow(dead_code)]
 pub(crate) fn map_client_error(err: ClientError) -> LlmError {
     match err {
         ClientError::Transport(e) => LlmError::Internal {

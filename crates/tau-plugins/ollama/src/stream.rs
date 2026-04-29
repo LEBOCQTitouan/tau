@@ -20,7 +20,6 @@ use crate::response::map_done_reason;
 ///
 /// On a stream that ends without a `done: true` line, yields a final
 /// `LlmError::Stream` so the caller knows the response was truncated.
-#[allow(dead_code)]
 pub(crate) async fn parse_ndjson(body: reqwest::Response) -> Result<CompletionStream, LlmError> {
     let bytes_stream = body.bytes_stream();
     Ok(Box::pin(stream_from_bytes(bytes_stream)))

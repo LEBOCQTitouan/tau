@@ -12,7 +12,6 @@ use thiserror::Error;
 
 /// Errors raised while parsing the Ollama `/api/chat` batch response.
 #[derive(Debug, Error)]
-#[allow(dead_code)]
 pub(crate) enum ParseError {
     /// The response body could not be deserialized as the Ollama
     /// response shape.
@@ -71,7 +70,6 @@ struct OllamaToolFn {
 /// `tool_call.id` is synthesized as `"ollama-tool-{i}"` when Ollama
 /// doesn't provide one — required for the kernel's multi-turn loop
 /// pairing.
-#[allow(dead_code)]
 pub(crate) fn parse_chat_response(body: &str) -> Result<CompletionResponse, ParseError> {
     let parsed: OllamaChatResponse = serde_json::from_str(body)?;
 
@@ -119,7 +117,6 @@ pub(crate) fn parse_chat_response(body: &str) -> Result<CompletionResponse, Pars
 /// Ollama doesn't have a tool-use-specific stop reason — when a model
 /// returns `tool_calls`, `done_reason` is still `"stop"`. Caller
 /// infers tool-use from non-empty `tool_uses`.
-#[allow(dead_code)]
 pub(crate) fn map_done_reason(s: &str) -> StopReason {
     match s {
         "stop" => StopReason::EndTurn,

@@ -13,6 +13,7 @@
 pub(crate) mod client;
 pub mod config;
 pub(crate) mod error;
+pub mod plugin;
 pub(crate) mod request;
 pub(crate) mod response;
 pub(crate) mod stream;
