@@ -146,4 +146,77 @@ capabilities = []
         assert_eq!(manifest.version().to_string(), "1.0.0");
         assert_eq!(manifest.description(), "A tool for testing");
     }
+
+    /// Manifest with a `[plugin]` table parses, validates, and surfaces
+    /// the typed plugin manifest via `PackageManifest::plugin()`.
+    #[test]
+    fn read_manifest_extracts_plugin_table() {
+        let tmp = TempDir::new().unwrap();
+        let toml_text = r#"
+name = "echo-llm"
+version = "0.1.0"
+description = "Toy LlmBackend plugin"
+authors = ["Acme <support@acme.dev>"]
+source = "https://example.com/echo-llm.git"
+kind = "llm-backend"
+dependencies = []
+capabilities = []
+
+[plugin]
+provides = "llm_backend"
+kind     = "rust-cargo"
+bin      = "echo-llm"
+"#;
+        let path = write_manifest(&tmp, toml_text);
+        let manifest = read_manifest(&path).unwrap();
+        let plugin = manifest
+            .plugin()
+            .expect("manifest should expose [plugin] table");
+        assert_eq!(plugin.provides, tau_domain::PortKind::LlmBackend);
+        assert_eq!(plugin.kind, tau_domain::PluginKind::RustCargo);
+        assert_eq!(plugin.bin, "echo-llm");
+    }
+
+    /// Data-only packages (no `[plugin]` table) round-trip with
+    /// `plugin == None`. This is the existing behaviour, preserved
+    /// for backward compatibility.
+    #[test]
+    fn read_manifest_without_plugin_table_returns_none() {
+        let tmp = TempDir::new().unwrap();
+        let path = write_manifest(&tmp, minimal_valid_manifest());
+        let manifest = read_manifest(&path).unwrap();
+        assert!(
+            manifest.plugin().is_none(),
+            "data-only manifest should have plugin == None"
+        );
+    }
+
+    /// Unknown plugin `kind` strings (e.g., `python-pip` before that
+    /// variant lands) surface as a `Parse` error from the typed
+    /// `PluginKind` deserializer.
+    #[test]
+    fn read_manifest_invalid_plugin_kind_errors() {
+        let tmp = TempDir::new().unwrap();
+        let bad = r#"
+name = "bad-plugin"
+version = "0.1.0"
+description = "Plugin with unknown kind"
+authors = []
+source = "https://example.com/bad.git"
+kind = "llm-backend"
+dependencies = []
+capabilities = []
+
+[plugin]
+provides = "llm_backend"
+kind     = "python-pip"
+bin      = "bad-plugin"
+"#;
+        let path = write_manifest(&tmp, bad);
+        let result = read_manifest(&path);
+        assert!(
+            matches!(result, Err(ManifestReadError::Parse { .. })),
+            "expected Parse error for unknown plugin kind, got {result:?}",
+        );
+    }
 }

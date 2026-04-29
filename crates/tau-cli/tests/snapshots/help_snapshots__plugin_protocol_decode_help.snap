@@ -1,0 +1,51 @@
+---
+source: crates/tau-cli/tests/help_snapshots.rs
+expression: s
+---
+Decode a JSONL recording into a human-readable transcript
+
+Usage: tau plugin protocol decode [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Path to the recording file
+
+Options:
+      --filter <K=V>
+          Filter by `key=value` predicate (e.g. `plugin=echo-llm`, `method=llm.complete`, `dir=h2p`). May be supplied multiple times; frames must satisfy every predicate to be emitted
+
+      --from <FROM>
+          Time-range start (Unix timestamp seconds, fractional ok)
+
+      --to <TO>
+          Time-range end (Unix timestamp seconds, fractional ok)
+
+      --json
+          Emit one decoded JSON object per line (machine-readable)
+
+  -v, --verbose...
+          Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
+
+  -q, --quiet
+          Suppress non-error output (sets tracing to WARN)
+
+      --debug
+          Show full error chain + DEBUG-level tracing on failures
+
+      --color <COLOR>
+          Color mode for terminal output
+
+          Possible values:
+          - always: Always emit ANSI color codes
+          - auto:   Auto-detect based on terminal capabilities
+          - never:  Never emit color codes
+          
+          [default: auto]
+
+      --record-protocol <PATH>
+          Mirror every plugin protocol frame to a JSONL file at this path.
+          
+          Useful for debugging plugin behavior and replaying via `tau plugin protocol decode <path>`. The recording is best-effort per spec §7.8: write/open failures are logged but never abort the invocation.
+
+  -h, --help
+          Print help (see a summary with '-h')

@@ -9,6 +9,10 @@ members = [
     "crates/tau-observe",
     "crates/tau-runtime",
     "crates/tau-cli",
+    "crates/tau-plugin-protocol",
+    "crates/tau-plugin-sdk",
+    "crates/tau-plugins/echo-llm",
+    "crates/tau-plugins/echo-tool",
 ]
 
 [workspace.package]
@@ -20,10 +24,12 @@ repository = "https://github.com/LEBOCQTitouan/tau"
 authors = ["Titouan Lebocq <75916953+LEBOCQTitouan@users.noreply.github.com>"]
 
 [workspace.dependencies]
-tau-domain      = { path = "crates/tau-domain", version = "0.0.0" }
-tau-ports       = { path = "crates/tau-ports",  version = "0.0.0" }
-tau-pkg         = { path = "crates/tau-pkg",    version = "0.0.0" }
-tau-runtime     = { path = "crates/tau-runtime", version = "0.0.0" }
+tau-domain          = { path = "crates/tau-domain", version = "0.0.0" }
+tau-ports           = { path = "crates/tau-ports",  version = "0.0.0" }
+tau-pkg             = { path = "crates/tau-pkg",    version = "0.0.0" }
+tau-runtime         = { path = "crates/tau-runtime", version = "0.0.0" }
+tau-plugin-protocol = { path = "crates/tau-plugin-protocol", version = "0.0.0" }
+tau-plugin-sdk      = { path = "crates/tau-plugin-sdk", version = "0.0.0" }
 thiserror       = "2"
 semver          = { version = "1" }
 uuid            = { version = "1", features = ["v7"] }
@@ -38,3 +44,7 @@ fs4             = "0.8"
 humantime-serde = "1"
 tempfile        = "3"
 tracing         = "0.1"
+rmp-serde       = "1"
+rmpv            = { version = "1", features = ["with-serde"] }
+bytes           = "1"
+tokio           = { version = "1", features = ["macros", "rt", "rt-multi-thread", "io-util", "io-std", "process", "sync", "time"] }

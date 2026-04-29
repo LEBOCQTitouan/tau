@@ -9,22 +9,57 @@ repository.workspace   = true
 authors.workspace      = true
 
 [dependencies]
-tau-domain = { workspace = true, features = ["serde"] }
-tau-ports  = { workspace = true }
-thiserror  = { workspace = true }
-tracing    = { workspace = true }
+tau-domain          = { workspace = true, features = ["serde"] }
+tau-ports           = { workspace = true, features = ["serde"] }
+tau-pkg             = { workspace = true }
+tau-plugin-protocol = { workspace = true }
+thiserror           = { workspace = true }
+tracing             = { workspace = true }
 # `v4` for session-id minting in `Runtime::run` per spec §3.7; the
 # workspace alias only enables `v7` (used by id newtypes in tau-domain).
-uuid       = { workspace = true, features = ["v4"] }
+uuid                = { workspace = true, features = ["v4"] }
+# Plugin host carries plugin config as JSON values across the IPC
+# boundary; surfaces in `plugin_host::load_*` signatures.
+serde_json          = "1"
+# Plugin host spawns plugin binaries and reads their stdio streams.
+# `fs` is needed by `plugin_host::recording`, which uses
+# `tokio::fs::OpenOptions` + async append writes for the JSONL sink so
+# the read- and write-side tap points don't block the runtime on disk
+# IO. The other features come from the workspace alias.
+tokio               = { workspace = true, features = ["fs"] }
+# Plugin host encodes/decodes MessagePack payloads for the wire protocol.
+rmp-serde           = { workspace = true }
+# Plugin host streaming adapter (`stream_router`) implements the
+# `Stream` trait from `futures-core` so it can build a
+# `tau_ports::CompletionStream` (which is `Pin<Box<dyn Stream<...>>>`).
+futures-core        = { workspace = true }
+# Plugin host protocol-recording sink (`plugin_host::recording`)
+# base64-encodes raw MessagePack frame bytes into the JSONL log so the
+# binary frame survives the JSON envelope losslessly.
+base64              = { workspace = true }
 
 [features]
 default = []
+# Exposes test-only constructors and re-exports under
+# `plugin_host::__internals` so integration tests in
+# `crates/tau-runtime/tests/plugin_host_ipc_*.rs` can build a
+# `PluginProcess` from a pre-paired reader+writer (no subprocess
+# spawn) and exercise the per-port IPC adapters end-to-end.
+test-support = ["tau-plugin-protocol/test-support"]
 
 [dev-dependencies]
 tokio              = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 tau-domain         = { workspace = true, features = ["test-fixtures"] }
-tau-ports          = { workspace = true, features = ["test-fixtures"] }
+tau-ports          = { workspace = true, features = ["test-fixtures", "serde"] }
+tau-plugin-protocol = { workspace = true, features = ["test-support"] }
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 proptest           = { workspace = true }
 serde              = { workspace = true }
 toml               = { workspace = true }
+# `StreamExt` for the stream_router unit tests + the streaming
+# integration test. Pinned at the same minor version other workspace
+# crates already pull in (e.g. tau-plugin-sdk dev-deps).
+futures-util       = "0.3"
+# Used by `plugin_host_recording.rs` (and the recording-module unit
+# tests) to allocate a temp directory for the JSONL sink.
+tempfile           = { workspace = true }

@@ -13,10 +13,14 @@ name = "tau"
 path = "src/main.rs"
 
 [dependencies]
-tau-domain         = { workspace = true, features = ["serde"] }
-tau-pkg            = { workspace = true }
-tau-runtime        = { workspace = true }
-tau-ports          = { workspace = true }
+tau-domain          = { workspace = true, features = ["serde"] }
+tau-pkg             = { workspace = true }
+tau-runtime         = { workspace = true }
+tau-ports           = { workspace = true }
+tau-plugin-protocol = { workspace = true }
+base64             = { workspace = true }
+rmp-serde          = { workspace = true }
+rmpv               = { workspace = true }
 semver             = { workspace = true }
 clap               = { version = "4", features = ["derive", "env"] }
 tokio              = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
@@ -39,15 +43,6 @@ predicates = "3"
 proptest   = { workspace = true }
 tempfile   = "3"
 url        = { workspace = true }
-tau-ports  = { workspace = true, features = ["test-fixtures"] }
 
 [features]
 default = []
-# Compile in a mock LLM backend + echo tool so `tau run` is functional
-# without real plugin loading (which lands in Phase 1+). Production
-# builds leave this off; the v0.1 binary surfaces
-# `BuildError::NoLlmBackend` until plugin loading exists. Pulls in the
-# `test-fixtures` constructors from tau-ports so the mock can build
-# `#[non_exhaustive]` `CompletionResponse` / `ToolUse` / `ToolResult`
-# values without struct-literal syntax (E0639).
-test-mock = ["tau-ports/test-fixtures"]

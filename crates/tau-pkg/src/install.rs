@@ -27,17 +27,63 @@
 //! the disk-write phase.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::SystemTime;
 
 use fs4::FileExt;
-use tau_domain::{kinds, Capability, PackageName, PackageSource, Version};
+use tau_domain::{kinds, Capability, PackageName, PackageSource, PluginKind, Version};
 
 use crate::error::{InstallError, UninstallError};
 use crate::git::Git;
-use crate::lockfile::{LockFile, LockedPackage, LockedVersion};
+use crate::lockfile::{LockFile, LockedPackage, LockedPlugin, LockedVersion};
 use crate::manifest::read_manifest;
 use crate::scope::Scope;
+
+/// Options governing plugin builds during install.
+///
+/// Used by [`InstallOptions::build`] to control the `cargo build` step
+/// for plugin packages (those with a `[plugin]` table in `tau.toml`).
+/// For data-only packages, these options are ignored.
+///
+/// `#[non_exhaustive]`: future fields are non-breaking. External
+/// callers construct via [`BuildOptions::new`] / [`BuildOptions::default`]
+/// and mutate fields by name.
+///
+/// # Example
+///
+/// ```ignore
+/// use tau_pkg::BuildOptions;
+///
+/// let mut opts = BuildOptions::default();
+/// opts.skip_build = true;
+/// assert!(opts.skip_build);
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, Default)]
+pub struct BuildOptions {
+    /// Skip the build step entirely. Used by tests that synthesize
+    /// lockfiles against pre-built binaries, and by
+    /// `tau install --no-build`.
+    pub skip_build: bool,
+    /// Override the cargo binary path. Defaults to the `cargo` on PATH.
+    pub cargo_path: Option<PathBuf>,
+    /// Extra arguments passed through to `cargo build`
+    /// (e.g., `--features foo`).
+    pub extra_args: Vec<String>,
+}
+
+impl BuildOptions {
+    /// Construct a fresh `BuildOptions` with defaults: build enabled,
+    /// `cargo` discovered on PATH, no extra args.
+    ///
+    /// `BuildOptions` is `#[non_exhaustive]`; external callers use this
+    /// constructor (or [`BuildOptions::default`]) and mutate fields by
+    /// name.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
 
 /// Options for [`install_with_options`].
 #[non_exhaustive]
@@ -51,6 +97,12 @@ pub struct InstallOptions {
     /// already exists. Default: `false` (idempotent — skip clone if
     /// the dir exists and the lockfile already records this version).
     pub force: bool,
+    /// Plugin-build options, applied during the build step for
+    /// packages whose `tau.toml` contains a `[plugin]` table.
+    ///
+    /// Defaults: build enabled, `cargo` from PATH, no extra args.
+    /// Ignored for data-only packages (no `[plugin]` table).
+    pub build: BuildOptions,
 }
 
 impl Default for InstallOptions {
@@ -58,6 +110,7 @@ impl Default for InstallOptions {
         Self {
             block_on_lock: true,
             force: false,
+            build: BuildOptions::default(),
         }
     }
 }
@@ -254,6 +307,15 @@ pub fn install_with_options(
             });
         }
 
+        // Step 8.5: build (only for kind = "rust-cargo" plugin packages).
+        //
+        // Per spec §6.3, the build is invoked between materialization
+        // (rename) and lockfile write. On failure the lockfile is NOT
+        // updated, but the cloned source is left in place so users can
+        // diagnose without re-cloning. Users retry with `tau install
+        // --force` or inspect the failure under the package dir.
+        let locked_plugin = build_plugin_if_needed(&manifest, &target, &options.build)?;
+
         // Step 9: update lockfile.
         let now = SystemTime::now();
         let new_locked_version = LockedVersion {
@@ -280,6 +342,7 @@ pub fn install_with_options(
                 }
                 existing.active_version = manifest.version().clone();
                 existing.source = source.clone();
+                existing.plugin = locked_plugin.clone();
                 // Sort installed_versions for deterministic lockfile diffs.
                 existing
                     .installed_versions
@@ -291,6 +354,7 @@ pub fn install_with_options(
                 active_version: manifest.version().clone(),
                 source: source.clone(),
                 installed_versions: vec![new_locked_version.clone()],
+                plugin: locked_plugin.clone(),
             },
         };
 
@@ -322,6 +386,138 @@ fn rev_from_source(source: &PackageSource) -> Option<String> {
         PackageSource::Git { rev, .. } => rev.clone(),
         _ => None,
     }
+}
+
+/// Maximum bytes of cargo's stderr we keep in
+/// [`InstallError::BuildFailed::stderr_tail`] for diagnostic display.
+/// Keeps error payloads bounded; the full output is still streamed to
+/// the user's stderr in real time during the build.
+const STDERR_TAIL_BYTES: usize = 4096;
+
+/// Build the plugin binary for `manifest` (if any), recording the
+/// resulting [`LockedPlugin`] for the lockfile.
+///
+/// Returns `Ok(None)` when:
+///
+/// - The manifest carries no `[plugin]` table (data-only package), or
+/// - `options.skip_build` is `true` (the test/`--no-build` path).
+///
+/// Returns `Ok(Some(LockedPlugin))` when the build succeeded, with
+/// `binary_path` canonicalized.
+///
+/// Returns `Err(InstallError::CargoNotFound)` if the configured cargo
+/// binary cannot be invoked, and `Err(InstallError::BuildFailed { .. })`
+/// for non-zero cargo exits.
+fn build_plugin_if_needed(
+    manifest: &tau_domain::PackageManifest,
+    package_dir: &Path,
+    options: &BuildOptions,
+) -> Result<Option<LockedPlugin>, InstallError> {
+    let Some(plugin_manifest) = manifest.plugin() else {
+        return Ok(None);
+    };
+    if options.skip_build {
+        return Ok(None);
+    }
+
+    match plugin_manifest.kind {
+        PluginKind::RustCargo => build_rust_cargo_plugin(plugin_manifest, package_dir, options),
+        // `PluginKind` is `#[non_exhaustive]`. Future variants (e.g.
+        // `PythonPip`, `NodeNpm`, `Prebuilt`) get their own build paths;
+        // until then, surface unknown kinds via `Internal` so the user
+        // gets a typed error rather than a silent no-op.
+        other => Err(InstallError::Internal {
+            message: format!("plugin kind {other} not yet supported by this tau-pkg version"),
+        }),
+    }
+}
+
+/// Run `cargo build --release --bin <plugin.bin>` in `package_dir` and
+/// return the [`LockedPlugin`] for the lockfile.
+fn build_rust_cargo_plugin(
+    plugin_manifest: &tau_domain::PluginManifest,
+    package_dir: &Path,
+    options: &BuildOptions,
+) -> Result<Option<LockedPlugin>, InstallError> {
+    let cargo = options
+        .cargo_path
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("cargo"));
+
+    let mut cmd = Command::new(&cargo);
+    cmd.arg("build")
+        .arg("--release")
+        .arg("--bin")
+        .arg(&plugin_manifest.bin)
+        .current_dir(package_dir);
+    for arg in &options.extra_args {
+        cmd.arg(arg);
+    }
+
+    eprintln!(
+        "  building {bin} ({kind}) in {dir}...",
+        bin = plugin_manifest.bin,
+        kind = plugin_manifest.kind,
+        dir = package_dir.display(),
+    );
+
+    let output = match cmd.output() {
+        Ok(o) => o,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(InstallError::CargoNotFound);
+        }
+        Err(e) => {
+            return Err(InstallError::Internal {
+                message: format!("spawning cargo at {}: {e}", cargo.display()),
+            });
+        }
+    };
+
+    // Stream cargo's captured output to the host's stderr so users see
+    // build progress. (We capture rather than inherit so we can record
+    // the stderr tail on failure.)
+    if !output.stdout.is_empty() {
+        let s = String::from_utf8_lossy(&output.stdout);
+        eprint!("{s}");
+    }
+    if !output.stderr.is_empty() {
+        let s = String::from_utf8_lossy(&output.stderr);
+        eprint!("{s}");
+    }
+
+    if !output.status.success() {
+        return Err(InstallError::BuildFailed {
+            exit_status: output.status,
+            stderr_tail: tail_lossy_utf8(&output.stderr, STDERR_TAIL_BYTES),
+        });
+    }
+
+    let binary_path = package_dir
+        .join("target")
+        .join("release")
+        .join(&plugin_manifest.bin);
+    let canonical = binary_path
+        .canonicalize()
+        .map_err(|e| InstallError::BuildFailed {
+            exit_status: output.status,
+            stderr_tail: format!(
+                "cargo succeeded but binary not found at {}: {e}",
+                binary_path.display(),
+            ),
+        })?;
+
+    Ok(Some(LockedPlugin::new(
+        plugin_manifest.clone(),
+        canonical,
+        SystemTime::now(),
+    )))
+}
+
+/// Take the last `max_bytes` bytes of `buf` and decode lossily as UTF-8.
+/// Used to bound the size of [`InstallError::BuildFailed::stderr_tail`].
+fn tail_lossy_utf8(buf: &[u8], max_bytes: usize) -> String {
+    let start = buf.len().saturating_sub(max_bytes);
+    String::from_utf8_lossy(&buf[start..]).into_owned()
 }
 
 /// Warn (eprintln) if the manifest's kind isn't a known canonical from
@@ -524,6 +720,31 @@ mod tests {
     }
 
     #[test]
+    fn build_options_default_does_not_skip() {
+        let opts = BuildOptions::default();
+        assert!(!opts.skip_build);
+        assert!(opts.cargo_path.is_none());
+        assert!(opts.extra_args.is_empty());
+    }
+
+    #[test]
+    fn build_options_new_matches_default() {
+        let new_opts = BuildOptions::new();
+        let default_opts = BuildOptions::default();
+        assert_eq!(new_opts.skip_build, default_opts.skip_build);
+        assert_eq!(new_opts.cargo_path, default_opts.cargo_path);
+        assert_eq!(new_opts.extra_args, default_opts.extra_args);
+    }
+
+    #[test]
+    fn install_options_default_includes_default_build_options() {
+        let opts = InstallOptions::default();
+        assert!(!opts.build.skip_build);
+        assert!(opts.build.cargo_path.is_none());
+        assert!(opts.build.extra_args.is_empty());
+    }
+
+    #[test]
     fn rev_from_source_extracts_some_rev() {
         let s = "https://x.com/y.git#main".parse::<PackageSource>().unwrap();
         assert_eq!(rev_from_source(&s), Some("main".to_string()));
@@ -588,6 +809,7 @@ mod tests {
             active_version: installed_version.clone(),
             source: "https://x.com/y.git".parse().unwrap(),
             installed_versions: vec![fixture_locked_version("1.0.0")],
+            plugin: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &installed_version)).unwrap();
@@ -616,6 +838,7 @@ mod tests {
                 fixture_locked_version("1.0.0"),
                 fixture_locked_version("2.0.0"),
             ],
+            plugin: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
@@ -647,6 +870,7 @@ mod tests {
                 fixture_locked_version("2.0.0"),
                 fixture_locked_version("3.0.0"),
             ],
+            plugin: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
@@ -685,6 +909,7 @@ mod tests {
                 fixture_locked_version("1.0.0"),
                 fixture_locked_version("2.0.0"),
             ],
+            plugin: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();

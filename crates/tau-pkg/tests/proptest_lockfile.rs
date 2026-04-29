@@ -89,7 +89,7 @@ fn arb_lockfile_toml() -> impl Strategy<Value = String> {
     )
         .prop_map(|(ts, packages)| {
             let mut s = format!(
-                "schema_version = 1\n\
+                "schema_version = 2\n\
                  generated_by_tau_version = \"0.0.0\"\n\
                  generated_at = \"{ts}\"\n\n"
             );
@@ -150,7 +150,7 @@ fn lockfile_load_rejects_too_new_schema_version() {
         err,
         RegistryError::SchemaTooNew {
             found: 999,
-            supported: 1,
+            supported: 2,
         }
     ));
 }

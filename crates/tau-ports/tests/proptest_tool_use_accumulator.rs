@@ -15,7 +15,7 @@
 //! always public, but unifying both proptest files behind one feature
 //! keeps the test-matrix simple.)
 
-#![cfg(feature = "test-fixtures")]
+#![cfg(all(feature = "test-fixtures", feature = "serde"))]
 
 use proptest::prelude::*;
 

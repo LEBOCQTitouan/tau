@@ -6,6 +6,7 @@
 
 use crate::id::PackageName;
 use crate::package::capability::Capability;
+use crate::package::plugin::PluginManifest;
 use crate::package::source::PackageSource;
 use crate::version::{Version, VersionReq};
 
@@ -218,6 +219,13 @@ pub struct UncheckedManifest {
     pub dependencies: Vec<PackageDep>,
     /// Capability declarations (G14).
     pub capabilities: Vec<Capability>,
+    /// Plugin manifest declared via the `[plugin]` table.
+    ///
+    /// `None` for data-only packages (no plugin table). `Some` for
+    /// plugin packages — `tau-pkg` uses this to gate the build step
+    /// during install (see plugin-loading spec §6.1, §6.3).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub plugin: Option<PluginManifest>,
 }
 
 /// Validated package manifest. By construction, satisfies all cross-field
@@ -274,6 +282,14 @@ impl PackageManifest {
     /// Capability declarations.
     pub fn capabilities(&self) -> &[Capability] {
         &self.0.capabilities
+    }
+    /// Plugin manifest from the `[plugin]` table, if any.
+    ///
+    /// `None` for data-only packages; `Some` for plugin packages.
+    /// Surfaced verbatim from the `[plugin]` TOML table; structurally
+    /// validated by `PluginManifest`'s typed fields.
+    pub fn plugin(&self) -> Option<&PluginManifest> {
+        self.0.plugin.as_ref()
     }
 
     /// Wrap a checked `UncheckedManifest` without re-running validation.
@@ -334,6 +350,7 @@ mod manifest_tests {
             },
             dependencies: vec![],
             capabilities: vec![],
+            plugin: None,
         }
     }
 
@@ -422,6 +439,7 @@ mod validation_tests {
             },
             dependencies: vec![],
             capabilities: vec![],
+            plugin: None,
         }
     }
 
@@ -450,5 +468,28 @@ mod validation_tests {
         }];
         let err = u.validate().unwrap_err();
         assert_eq!(err, PackageManifestError::CapabilityEmptyName { index: 0 });
+    }
+
+    #[test]
+    fn plugin_field_propagates_through_validation() {
+        use crate::package::plugin::{PluginKind, PluginManifest, PortKind};
+
+        let mut u = good();
+        u.plugin = Some(PluginManifest::new(
+            PortKind::LlmBackend,
+            PluginKind::RustCargo,
+            "echo-llm".into(),
+        ));
+        let m = u.validate().unwrap();
+        let plugin = m.plugin().expect("plugin should round-trip");
+        assert_eq!(plugin.bin, "echo-llm");
+        assert_eq!(plugin.provides, PortKind::LlmBackend);
+        assert_eq!(plugin.kind, PluginKind::RustCargo);
+    }
+
+    #[test]
+    fn plugin_absent_validates_as_none() {
+        let m = good().validate().unwrap();
+        assert!(m.plugin().is_none());
     }
 }

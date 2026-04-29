@@ -57,3 +57,33 @@ fn snapshot_chat_help() {
     let s = capture_help(&["chat", "--help"]);
     insta::assert_snapshot!("chat_help", s);
 }
+
+#[test]
+fn snapshot_plugin_help() {
+    let s = capture_help(&["plugin", "--help"]);
+    insta::assert_snapshot!("plugin_help", s);
+}
+
+#[test]
+fn snapshot_plugin_describe_help() {
+    let s = capture_help(&["plugin", "describe", "--help"]);
+    insta::assert_snapshot!("plugin_describe_help", s);
+}
+
+#[test]
+fn snapshot_plugin_run_help() {
+    let s = capture_help(&["plugin", "run", "--help"]);
+    insta::assert_snapshot!("plugin_run_help", s);
+}
+
+#[test]
+fn snapshot_plugin_protocol_help() {
+    let s = capture_help(&["plugin", "protocol", "--help"]);
+    insta::assert_snapshot!("plugin_protocol_help", s);
+}
+
+#[test]
+fn snapshot_plugin_protocol_decode_help() {
+    let s = capture_help(&["plugin", "protocol", "decode", "--help"]);
+    insta::assert_snapshot!("plugin_protocol_decode_help", s);
+}

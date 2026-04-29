@@ -77,22 +77,15 @@ fn list_dry_run_rejected_is_two() {
 
 // ---- run --------------------------------------------------------------------
 
-#[cfg(feature = "test-mock")]
 #[test]
 fn run_completed_is_zero() {
-    let dir = common::setup_project_with_installed_agent(
-        "reviewer",
-        "code-reviewer",
-        "0.1.0",
-        "mock-llm",
-    );
+    let dir = common::setup_echo_project("echo", "canned_text = \"pong\"\n", &[]);
 
     let output = AssertCmd::cargo_bin("tau")
         .unwrap()
-        .args(["run", "reviewer", "ping"])
+        .args(["run", "echo", "ping"])
         .current_dir(dir.path())
         .env("TAU_HOME", dir.path().join("global"))
-        .env("TAU_MOCK_LLM_TEXT", "pong")
         .output()
         .unwrap();
 
@@ -104,33 +97,25 @@ fn run_completed_is_zero() {
     );
 }
 
-#[cfg(feature = "test-mock")]
 #[test]
-fn run_failed_max_turns_is_one() {
-    // The mock backend emits a tool_use on turn 0 only; with
-    // --max-turns 1 the agent dispatches the tool then runs out
-    // of turns -> Failed(OutOfResources) -> exit 1.
-    let dir = common::setup_project_with_installed_agent(
-        "reviewer",
-        "code-reviewer",
-        "0.1.0",
-        "mock-llm",
-    );
+fn run_plugin_crash_is_two() {
+    // echo-llm with `crash_after_handshake = true` panics on the first
+    // `llm.complete` RPC, which the host surfaces as a kernel error
+    // mapped to exit code 2 (distinct from agent-level Failed = 1).
+    let dir = common::setup_echo_project("echo", "crash_after_handshake = true\n", &[]);
 
     let output = AssertCmd::cargo_bin("tau")
         .unwrap()
-        .args(["run", "reviewer", "loop", "--max-turns", "1"])
+        .args(["run", "echo", "anything"])
         .current_dir(dir.path())
         .env("TAU_HOME", dir.path().join("global"))
-        .env("TAU_MOCK_LLM_TEXT", "calling tool")
-        .env("TAU_MOCK_LLM_TOOL_USES", "echo")
         .output()
         .unwrap();
 
     assert_eq!(
         output.status.code(),
-        Some(1),
-        "expected 1 (AgentFailed); stderr={}",
+        Some(2),
+        "expected 2 (kernel error); stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -214,15 +199,14 @@ fn init_existing_without_force_is_two() {
 
 // ---- chat -------------------------------------------------------------------
 
-#[cfg(feature = "test-mock")]
 #[test]
 fn chat_dry_run_is_zero() {
-    let dir = common::setup_project();
+    let dir = common::setup_echo_project("echo", "canned_text = \"unused\"\n", &[]);
     let global_dir = dir.path().join("global");
 
     AssertCmd::cargo_bin("tau")
         .unwrap()
-        .args(["chat", "reviewer", "--dry-run"])
+        .args(["chat", "echo", "--dry-run"])
         .current_dir(dir.path())
         .env("TAU_HOME", &global_dir)
         .assert()
@@ -232,12 +216,12 @@ fn chat_dry_run_is_zero() {
 
 #[test]
 fn chat_json_flag_is_two() {
-    let dir = common::setup_project();
+    let dir = common::setup_echo_project("echo", "canned_text = \"unused\"\n", &[]);
     let global_dir = dir.path().join("global");
 
     AssertCmd::cargo_bin("tau")
         .unwrap()
-        .args(["--json", "chat", "reviewer"])
+        .args(["--json", "chat", "echo"])
         .current_dir(dir.path())
         .env("TAU_HOME", &global_dir)
         .write_stdin("")

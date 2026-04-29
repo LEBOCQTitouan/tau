@@ -175,3 +175,52 @@ pub enum PackageManifestError {
         index: usize,
     },
 }
+
+/// Validation errors for [`crate::package::PortKind::from_str`].
+///
+/// # Example
+///
+/// ```
+/// use tau_domain::PortKindError;
+/// use tau_domain::PortKind;
+/// use std::str::FromStr;
+///
+/// let err = PortKind::from_str("nonsense").unwrap_err();
+/// assert!(matches!(err, PortKindError::Unknown { .. }));
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PortKindError {
+    /// The input did not match any known port kind.
+    #[error("unknown port kind {input:?}; expected one of: llm_backend, tool, storage, sandbox")]
+    Unknown {
+        /// The input that did not parse.
+        input: String,
+    },
+}
+
+/// Validation errors for [`crate::package::PluginKind::from_str`].
+///
+/// # Example
+///
+/// ```
+/// use tau_domain::PluginKindError;
+/// use tau_domain::PluginKind;
+/// use std::str::FromStr;
+///
+/// let err = PluginKind::from_str("nonsense").unwrap_err();
+/// assert!(matches!(err, PluginKindError::Unknown { .. }));
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PluginKindError {
+    /// The input did not match any known plugin kind.
+    ///
+    /// v0.1 only supports `rust-cargo`. Future kinds (`python-pip`,
+    /// `node-npm`, `prebuilt`) are tracked in spec §2.1.
+    #[error("unknown plugin kind {input:?}; expected: rust-cargo")]
+    Unknown {
+        /// The input that did not parse.
+        input: String,
+    },
+}

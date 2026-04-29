@@ -3,33 +3,35 @@
 //! Per spec §3.13 (run row) and §3.9.
 //!
 //! Reads the project `tau.toml`, resolves the named agent to an
-//! `(AgentDefinition, PackageManifest)` pair, builds a [`Runtime`] with
-//! either real plugins (Phase 1+) or — under `--features test-mock` —
-//! a compiled-in mock LLM backend and `echo` tool, builds an initial
-//! [`Message`] from `--prompt` / stdin, runs the agent, and maps the
-//! resulting [`RunOutcome`] to stdout/stderr + an `ExitCode`.
+//! `(AgentDefinition, PackageManifest)` pair, resolves the agent's
+//! LLM-backend + tool plugins from the per-scope lockfile, spawns
+//! each plugin process via `tau_runtime::plugin_host::load_*`, builds
+//! a [`Runtime`] populated with the resulting `Arc<dyn Dyn*>` shims,
+//! then builds an initial [`Message`] from `--prompt` / stdin, runs the
+//! agent, and maps the resulting [`RunOutcome`] to stdout/stderr + an
+//! `ExitCode`.
 //!
-//! # Plugin loading caveat
+//! # Plugin loading
 //!
-//! v0.1 has no plugin-loading layer (deferred to Phase 1+ per
-//! `docs/retrospectives/phase-0-mid.md`). Without `--features test-mock`,
-//! [`Runtime::builder`].build() returns
-//! [`tau_runtime::BuildError::NoLlmBackend`] and `tau run` fails with
-//! exit code 2. The `test-mock` feature exists so the integration tests
-//! and downstream development work can exercise the run loop end-to-end.
+//! Per spec §11 (migration): the old `--features test-mock` knob has
+//! been retired. The agent's `llm_backend` package and each
+//! `requires.tools` entry must be installed via `tau install` and
+//! carry a `[plugin]` table in their `tau.toml`; the host then spawns
+//! the recorded binary at run time. See
+//! [`crate::cmd::plugin_loader`] for the resolution logic.
 
 use std::io::Read;
+use std::path::PathBuf;
 
 use anyhow::Context;
 use tau_domain::{Address, AgentInstanceId, Message, MessagePayload};
-use tau_runtime::{RunOptions, RunOutcome, Runtime};
+use tau_plugin_protocol::handshake::TraceContext;
+use tau_runtime::{RunOptions, RunOutcome};
 
 use crate::cli::RunArgs;
+use crate::cmd::plugin_loader;
 use crate::config::ProjectConfig;
 use crate::output::Output;
-
-#[cfg(feature = "test-mock")]
-pub(crate) mod mock_backend;
 
 /// Marker error: the agent ran but reported [`RunOutcome::Failed`].
 ///
@@ -44,7 +46,17 @@ pub(crate) mod mock_backend;
 pub(crate) struct AgentFailed;
 
 /// Run `tau run`.
-pub async fn run(args: &RunArgs, output: &mut Output) -> anyhow::Result<()> {
+///
+/// `record_protocol` is the optional `--record-protocol <path>` global
+/// flag (Task 20 / spec §9 debug tier). When `Some`, every plugin
+/// frame in either direction is mirrored to the JSONL file at `path`;
+/// the recorders are flushed after the runtime drops to ensure
+/// pending writes reach disk.
+pub async fn run(
+    args: &RunArgs,
+    record_protocol: Option<PathBuf>,
+    output: &mut Output,
+) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let project_path = cwd.join("tau.toml");
     let project = ProjectConfig::from_path(&project_path)
@@ -63,24 +75,6 @@ pub async fn run(args: &RunArgs, output: &mut Output) -> anyhow::Result<()> {
     let (agent_def, manifest) = crate::config::build_agent_definition(entry, &cwd, &scope)
         .with_context(|| format!("resolving agent {:?}", args.agent_id))?;
 
-    // Build the runtime. v0.1 plugin loading is deferred to Phase 1+
-    // (per docs/retrospectives/phase-0-mid.md "What's NOT in scope"),
-    // so without `--features test-mock` the registry is empty and
-    // `RuntimeBuilder::build` returns `BuildError::NoLlmBackend`.
-    #[allow(unused_mut)]
-    let mut builder = Runtime::builder();
-    #[cfg(feature = "test-mock")]
-    {
-        builder = builder
-            .with_llm_backend(mock_backend::MockLlmBackend::new(entry.llm_backend.clone()))
-            .with_tool(mock_backend::EchoTool);
-    }
-
-    let runtime = builder.build().context(
-        "failed to build runtime (no LLM backend registered; plugin loading lands \
-             in Phase 1+ — build with `--features test-mock` for testing)",
-    )?;
-
     let mut options = RunOptions::default();
     if let Some(n) = args.max_turns {
         options.max_turns = n;
@@ -97,6 +91,39 @@ pub async fn run(args: &RunArgs, output: &mut Output) -> anyhow::Result<()> {
         )?;
         return Ok(());
     }
+
+    // ---- Plugin loading -----------------------------------------------------
+    //
+    // Now that test-mock is gone, every `tau run` invocation spawns the
+    // real LLM-backend + tool plugin processes recorded in the lockfile.
+    // Failures (plugin not installed / handshake timeout / wrong port)
+    // surface as `RuntimeError`s mapped to ExitCode::Error.
+
+    // run_id: per-invocation identifier so plugin-side traces can group
+    // events back to this run. Plain UUID — no need to coordinate with
+    // the kernel's own internal id (the kernel mints its own
+    // AgentInstanceId for the loop; the plugin's run_id is host-side).
+    //
+    // We intentionally avoid a uuid dep here and use a timestamp-based
+    // string: the only contract is uniqueness within a host process,
+    // and humantime-style strings are easier to read in logs.
+    let run_id = format!(
+        "tau-run-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let trace_context = TraceContext::new(run_id, args.agent_id.clone(), "root".to_string());
+    let (host_options, _ledger) = plugin_loader::build_host_options(record_protocol.as_deref());
+
+    let loaded = plugin_loader::load_plugins(entry, &scope, trace_context, host_options).await?;
+    let recorder_ledger = loaded.recorder_ledger.clone();
+
+    let runtime = loaded
+        .builder
+        .build()
+        .context("failed to build runtime from spawned plugins")?;
 
     // Build the initial user message from --prompt or stdin.
     let prompt_text = match &args.prompt {
@@ -122,10 +149,16 @@ pub async fn run(args: &RunArgs, output: &mut Output) -> anyhow::Result<()> {
         },
     );
 
-    let outcome = runtime
-        .run(agent_def, manifest, initial, options)
-        .await
-        .context("running agent")?;
+    let run_outcome = runtime.run(agent_def, manifest, initial, options).await;
+
+    // Drop the runtime explicitly before flushing recorders. This
+    // ensures every plugin process is reaped and every host-side write
+    // task has completed, so `flush_recorders` drains a quiescent set
+    // of file buffers rather than racing with in-flight `record(...)`.
+    drop(runtime);
+    plugin_loader::flush_recorders(recorder_ledger).await;
+
+    let outcome = run_outcome.context("running agent")?;
 
     match outcome {
         RunOutcome::Completed {

@@ -14,9 +14,13 @@ loading mechanism, first real LLM-backend + tool plugins, capability
 override, transitive dependency resolution. The first sub-project of
 Phase 1 unblocks everything else.
 
-**Status:** planning. The retrospective at
-`docs/retrospectives/phase-0.md` ratifies Phase 1 priorities; the
-first sub-project (plugin loading) starts with a brainstorm.
+**Status:** Phase 1 sub-project 1 (plugin loading) shipped
+2026-04-28; first real LLM-backend plugin (priority 2) is the
+natural next sub-project.
+
+| # | Sub-project | Produces | Merged |
+|---|---|---|---|
+| 1 | Plugin loading mechanism ✅ | Out-of-process IPC over MessagePack-RPC; tau-plugin-protocol + tau-plugin-sdk crates; plugin_host module in tau-runtime; tau-pkg build-on-install; debug-tier subcommands; echo-llm + echo-tool toy plugins | 2026-04-28 |
 
 ## Phase 0 (complete) — bootstrap + foundational sub-projects
 
@@ -57,8 +61,11 @@ Tier ordering reflects criticality, not strict implementation order
 
 ### Tier 1 — unblocks Phase 1 itself
 
-1. **Plugin loading mechanism.** First sub-project; ADR-driven choice
-   between dlopen / abi_stable / out-of-process IPC / WASM.
+1. **Plugin loading mechanism.** ✅ Shipped 2026-04-28 — see
+   [ADR-0008](docs/decisions/0008-plugin-loading.md). Out-of-process
+   IPC over MessagePack-RPC + tau-pkg/tau-runtime/tau-domain
+   amendments. 15 required CI checks gating `main` (was 12 in Phase
+   0).
 2. **First real LLM-backend plugin.** Validates the loading mechanism
    end-to-end. Likely Anthropic / OpenAI HTTP via reqwest.
 3. **First real Tool plugin.** `fs-read` + `shell` initial set;

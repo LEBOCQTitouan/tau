@@ -1,0 +1,44 @@
+---
+source: crates/tau-cli/tests/help_snapshots.rs
+expression: s
+---
+Plugin debugging utilities (spec §9 debug tier)
+
+Usage: tau plugin [OPTIONS] <COMMAND>
+
+Commands:
+  describe  Print a plugin's handshake metadata + per-method schemas
+  run       Run a plugin standalone (without an agent context)
+  protocol  Inspect or transform plugin-protocol recordings
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -v, --verbose...
+          Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
+
+  -q, --quiet
+          Suppress non-error output (sets tracing to WARN)
+
+      --debug
+          Show full error chain + DEBUG-level tracing on failures
+
+      --color <COLOR>
+          Color mode for terminal output
+
+          Possible values:
+          - always: Always emit ANSI color codes
+          - auto:   Auto-detect based on terminal capabilities
+          - never:  Never emit color codes
+          
+          [default: auto]
+
+      --json
+          Emit structured JSON output instead of human-readable. Only supported on `install`, `list`, `run`, `init`
+
+      --record-protocol <PATH>
+          Mirror every plugin protocol frame to a JSONL file at this path.
+          
+          Useful for debugging plugin behavior and replaying via `tau plugin protocol decode <path>`. The recording is best-effort per spec §7.8: write/open failures are logged but never abort the invocation.
+
+  -h, --help
+          Print help (see a summary with '-h')

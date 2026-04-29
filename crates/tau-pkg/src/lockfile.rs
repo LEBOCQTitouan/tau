@@ -19,18 +19,24 @@
 //! Task 7. This file (Task 6) defines only the data shapes + `Default`.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
-use tau_domain::{PackageName, PackageSource, Version};
+use tau_domain::{PackageName, PackageSource, PluginManifest, Version};
 
 use crate::error::RegistryError;
 
 /// Maximum `LockFile::schema_version` this tau version recognizes.
 /// A `tau-lock.toml` with a higher value is rejected by
 /// `LockFile::load` (Task 7) via `RegistryError::SchemaTooNew`.
-pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 1;
+///
+/// History:
+/// - `1` — v0.1: `LockedPackage` had no `plugin` field.
+/// - `2` — Plugin loading: `LockedPackage::plugin: Option<LockedPlugin>`
+///   added. v1 lockfiles auto-upgrade to v2 on load (the `plugin` field
+///   defaults to `None` for legacy entries via `#[serde(default)]`).
+pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 2;
 
 /// Schema for `tau-lock.toml`.
 ///
@@ -44,13 +50,15 @@ pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 1;
 /// use tau_pkg::lockfile::LockFile;
 ///
 /// let lf = LockFile::default();
-/// assert_eq!(lf.schema_version, 1);
+/// assert_eq!(lf.schema_version, 2);
 /// assert!(lf.packages.is_empty());
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LockFile {
-    /// Schema version. v0.1 ships `1`. Bumped on breaking changes only.
+    /// Schema version. Currently `2`. Bumped on breaking changes only.
+    /// v1 lockfiles are accepted on load and auto-upgraded to v2 on the
+    /// next save (legacy entries get `plugin = None`).
     pub schema_version: u32,
     /// `CARGO_PKG_VERSION` of the tau-pkg crate that last wrote this file.
     pub generated_by_tau_version: String,
@@ -92,6 +100,63 @@ pub struct LockedPackage {
     /// `[[package.versions]]` in TOML output.
     #[serde(default, rename = "versions")]
     pub installed_versions: Vec<LockedVersion>,
+    /// Plugin metadata recorded at install time. `None` for data-only
+    /// packages and for legacy v1 lockfile entries (which had no
+    /// `plugin` field; `#[serde(default)]` populates it as `None` on
+    /// auto-upgrade).
+    ///
+    /// Added in lockfile schema v2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<LockedPlugin>,
+}
+
+/// Recorded build artifact for a plugin package.
+///
+/// Written by [`crate::install_with_options`] when the installed
+/// package's manifest carries a `[plugin]` table and the cargo build
+/// step succeeded. Consumed by `tau-runtime` to spawn the plugin
+/// subprocess at run time.
+///
+/// `#[non_exhaustive]`: future fields (e.g. `sha256` of the binary,
+/// build features, toolchain version) are non-breaking.
+///
+/// # Example
+///
+/// ```ignore
+/// // `LockedPlugin` is `#[non_exhaustive]`; constructed by the install
+/// // lifecycle (Task 12). External callers (notably tau-runtime
+/// // integration tests that synthesize a lockfile against pre-built
+/// // binaries) build it via [`LockedPlugin::new`].
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LockedPlugin {
+    /// Copy of the `[plugin]` table from the package's `tau.toml` at
+    /// install time. Frozen here so `tau-runtime` doesn't need to
+    /// re-read the manifest from the package source tree.
+    pub manifest: PluginManifest,
+    /// Canonical absolute path to the built binary
+    /// (e.g. `<pkg_dir>/target/release/<bin>`). Set via
+    /// `Path::canonicalize` so symlinks and relative components are
+    /// resolved at install time.
+    pub binary_path: PathBuf,
+    /// When the binary was built (the timestamp of the `cargo build`
+    /// step that produced it).
+    #[serde(with = "humantime_serde")]
+    pub built_at: SystemTime,
+}
+
+impl LockedPlugin {
+    /// Construct a `LockedPlugin`. `#[non_exhaustive]`; external callers
+    /// (notably tau-runtime integration tests that synthesize a
+    /// lockfile against pre-built binaries) use this constructor.
+    pub fn new(manifest: PluginManifest, binary_path: PathBuf, built_at: SystemTime) -> Self {
+        Self {
+            manifest,
+            binary_path,
+            built_at,
+        }
+    }
 }
 
 /// One installed version's lockfile entry.
@@ -178,7 +243,7 @@ impl LockFile {
             message: format!("reading lockfile {}: {e}", path.display()),
         })?;
 
-        let parsed: LockFile = toml::from_str(&text).map_err(|e| RegistryError::Parse {
+        let mut parsed: LockFile = toml::from_str(&text).map_err(|e| RegistryError::Parse {
             reason: e.to_string(),
         })?;
 
@@ -187,6 +252,16 @@ impl LockFile {
                 found: parsed.schema_version,
                 supported: MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION,
             });
+        }
+
+        // Auto-upgrade v1 lockfiles in memory. v1 had no `plugin` field
+        // on `LockedPackage`; `#[serde(default)]` already populates it
+        // as `None`. We only need to bump the recorded schema version
+        // so the next `save()` writes `schema_version = 2`. Future
+        // schema bumps would add additional in-memory transformations
+        // here.
+        if parsed.schema_version < MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION {
+            parsed.schema_version = MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION;
         }
 
         Ok(parsed)
@@ -350,14 +425,15 @@ mod tests {
             active_version: "1.2.3".parse().unwrap(),
             source: "https://example.com/acme/tool.git#main".parse().unwrap(),
             installed_versions: vec![fixture_locked_version()],
+            plugin: None,
         }
     }
 
     #[test]
-    fn default_lockfile_has_schema_version_one() {
+    fn default_lockfile_has_current_schema_version() {
         let lf = LockFile::default();
         assert_eq!(lf.schema_version, MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION);
-        assert_eq!(lf.schema_version, 1);
+        assert_eq!(lf.schema_version, 2);
     }
 
     #[test]
@@ -461,13 +537,13 @@ mod tests {
     fn lockfile_parses_when_packages_field_omitted() {
         // #[serde(default)] should let a TOML doc with no [[package]] parse cleanly.
         let toml_str = r#"
-            schema_version = 1
+            schema_version = 2
             generated_by_tau_version = "0.0.0"
             generated_at = "2026-04-27T10:00:00Z"
         "#;
         let parsed: LockFile = toml::from_str(toml_str).unwrap();
         assert!(parsed.packages.is_empty());
-        assert_eq!(parsed.schema_version, 1);
+        assert_eq!(parsed.schema_version, 2);
     }
 
     #[test]
@@ -545,7 +621,7 @@ mod tests {
             err,
             RegistryError::SchemaTooNew {
                 found: 999,
-                supported: 1,
+                supported: 2,
             }
         ));
     }

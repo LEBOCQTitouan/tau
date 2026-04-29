@@ -18,6 +18,7 @@ use thiserror::Error;
 /// [`LlmError::is_retryable`] for the default retry-policy hint.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LlmError {
     /// The request was malformed or violated provider constraints.
     #[error("invalid request: {reason}")]
@@ -95,6 +96,7 @@ impl LlmError {
 /// hint.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum StorageError {
     /// Backend rejected the namespace (length cap, reserved prefix, charset).
     #[error("invalid namespace: {reason}")]
@@ -151,6 +153,7 @@ impl StorageError {
 /// land. No `is_retryable()` predicate is provided at v0.1.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SandboxError {
     /// The requested feature is not supported by this sandbox.
     #[error("unsupported: {what}")]
@@ -185,6 +188,7 @@ pub enum SandboxError {
 /// otherwise.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ToolError {
     /// Caller passed arguments the tool rejected.
     #[error("bad args: {reason}")]
@@ -249,6 +253,7 @@ impl ToolError {
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NamespaceError {
     /// The input was empty.
     #[error("namespace is empty")]
@@ -281,6 +286,7 @@ pub enum NamespaceError {
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum KeyError {
     /// The input was empty.
     #[error("key is empty")]

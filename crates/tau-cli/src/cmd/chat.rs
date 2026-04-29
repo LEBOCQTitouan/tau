@@ -3,12 +3,20 @@
 //! Per spec §3.13 (chat row) and brainstorm Section 8.
 //!
 //! Mirrors `cmd::run`'s setup (project tau.toml → resolved
-//! `(AgentDefinition, PackageManifest)` → [`Runtime`] with the
-//! compiled-in mock backend under `--features test-mock`), then enters
-//! a rustyline-driven REPL. Each user prompt is sent through
-//! [`Runtime::run_with_history`] so the conversation accumulates across
-//! turns; tool dispatch and capability filtering are inherited from the
-//! kernel, not re-implemented here.
+//! `(AgentDefinition, PackageManifest)` → spawned plugin processes →
+//! [`Runtime`]), then enters a rustyline-driven REPL. Each user prompt
+//! is sent through [`Runtime::run_with_history`] so the conversation
+//! accumulates across turns; tool dispatch and capability filtering
+//! are inherited from the kernel, not re-implemented here.
+//!
+//! # Plugin lifecycle
+//!
+//! Per spec §11: plugin processes spawn once at REPL entry and stay
+//! alive for the duration of the session (multiplexed long-lived
+//! lifecycle). On `/exit` (or EOF / Ctrl-D), the [`Runtime`] is
+//! dropped, which drops the `Arc<dyn DynLlmBackend>` and per-tool
+//! `Arc<dyn DynTool>`, which drops the underlying `PluginProcess` —
+//! and `kill_on_drop` ensures the plugin subprocess exits cleanly.
 //!
 //! # Slash commands
 //!
@@ -34,13 +42,17 @@
 //! `--json` is rejected at handler entry: a streaming, terminal-driven
 //! REPL has no useful JSON projection. (See spec §3.6.)
 
+use std::path::PathBuf;
+
 use anyhow::Context;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use tau_domain::{Address, AgentInstanceId, Message, MessagePayload};
-use tau_runtime::{RunOptions, RunOutcome, Runtime, TokenUsage};
+use tau_plugin_protocol::handshake::TraceContext;
+use tau_runtime::{RunOptions, RunOutcome, TokenUsage};
 
 use crate::cli::ChatArgs;
+use crate::cmd::plugin_loader;
 use crate::config::ProjectConfig;
 use crate::output::Output;
 
@@ -86,7 +98,17 @@ pub fn parse_input(line: &str) -> ReplInput {
 }
 
 /// Run `tau chat`.
-pub async fn run(args: &ChatArgs, output: &mut Output) -> anyhow::Result<()> {
+///
+/// `record_protocol` is the optional `--record-protocol <path>` global
+/// flag (Task 20 / spec §9 debug tier). When `Some`, every plugin
+/// frame in either direction is mirrored to the JSONL file at `path`;
+/// the recorders are flushed after the runtime drops to ensure
+/// pending writes reach disk.
+pub async fn run(
+    args: &ChatArgs,
+    record_protocol: Option<PathBuf>,
+    output: &mut Output,
+) -> anyhow::Result<()> {
     if output.is_json() {
         anyhow::bail!("tau chat does not support --json (REPL is interactive)");
     }
@@ -108,34 +130,66 @@ pub async fn run(args: &ChatArgs, output: &mut Output) -> anyhow::Result<()> {
     let (agent_def, manifest) = crate::config::build_agent_definition(entry, &cwd, &scope)
         .with_context(|| format!("resolving agent {:?}", args.agent_id))?;
 
-    // Build the runtime. Same caveat as cmd::run: without
-    // `--features test-mock`, the registry is empty and
-    // `RuntimeBuilder::build` returns `BuildError::NoLlmBackend`.
-    #[allow(unused_mut)]
-    let mut builder = Runtime::builder();
-    #[cfg(feature = "test-mock")]
-    {
-        builder = builder
-            .with_llm_backend(crate::cmd::run::mock_backend::MockLlmBackend::new(
-                entry.llm_backend.clone(),
-            ))
-            .with_tool(crate::cmd::run::mock_backend::EchoTool);
-    }
-    let runtime = builder.build().context(
-        "failed to build runtime (no LLM backend registered; plugin loading lands \
-             in Phase 1+ — build with `--features test-mock` for testing)",
-    )?;
-
     let mut options = RunOptions::default();
     if let Some(n) = args.max_turns {
         options.max_turns = n;
     }
 
     if args.dry_run {
+        // Dry-run skips plugin spawn entirely (per spec §3.9: no
+        // process side-effects for a preview).
         emit_dry_run_preview(entry, &agent_def, &manifest, &options, output)?;
         return Ok(());
     }
 
+    // ---- Plugin loading -----------------------------------------------------
+    //
+    // Spawn the LLM backend + tool plugins once for the entire REPL.
+    // The runtime owns the Arc<dyn Dyn*> shims; on /exit (or EOF), the
+    // runtime is dropped, which drops the shims, which drops the
+    // PluginProcess (kill_on_drop ensures the child exits).
+
+    let run_id = format!(
+        "tau-chat-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let trace_context = TraceContext::new(run_id, args.agent_id.clone(), "root".to_string());
+    let (host_options, _ledger) = plugin_loader::build_host_options(record_protocol.as_deref());
+
+    let loaded = plugin_loader::load_plugins(entry, &scope, trace_context, host_options).await?;
+    let recorder_ledger = loaded.recorder_ledger.clone();
+
+    let runtime = loaded
+        .builder
+        .build()
+        .context("failed to build runtime from spawned plugins")?;
+
+    let result = run_repl(entry, &agent_def, &manifest, &options, &runtime, output).await;
+
+    // Drop the runtime before flushing recorders so every plugin
+    // process is reaped and the host-side write task is quiescent.
+    drop(runtime);
+    plugin_loader::flush_recorders(recorder_ledger).await;
+
+    result
+}
+
+/// REPL inner loop, factored out of [`run`] so the caller can wrap it
+/// with `--record-protocol` flush coordination after the runtime is
+/// dropped. Borrows the runtime so the chat session and the recording
+/// flush share a single ownership chain in `run`.
+#[allow(clippy::too_many_arguments)]
+async fn run_repl(
+    entry: &crate::config::AgentEntry,
+    agent_def: &tau_domain::AgentDefinition,
+    manifest: &tau_domain::PackageManifest,
+    options: &RunOptions,
+    runtime: &tau_runtime::Runtime,
+    output: &mut Output,
+) -> anyhow::Result<()> {
     // Welcome banner.
     output.status(format!(
         "Welcome to tau chat with agent '{}' ({}@{}). Type /help for commands, /exit or Ctrl-D to quit.",

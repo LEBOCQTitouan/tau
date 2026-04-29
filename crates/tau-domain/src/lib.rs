@@ -19,12 +19,14 @@ pub mod fixtures;
 pub use agent::{AgentDefinition, AgentStatus, FailureKind};
 pub use error::{
     AgentIdError, PackageKindError, PackageManifestError, PackageNameError, PackageSourceError,
+    PluginKindError, PortKindError,
 };
 pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
 pub use message::{Address, Message, MessagePayload};
 pub use package::{
     kinds, AgentCapability, Capability, FsCapability, GitLocation, NetCapability, PackageDep,
-    PackageId, PackageKind, PackageManifest, PackageSource, ProcessCapability, UncheckedManifest,
+    PackageId, PackageKind, PackageManifest, PackageSource, PluginKind, PluginManifest, PortKind,
+    ProcessCapability, UncheckedManifest,
 };
 pub use value::Value;
 pub use version::{Version, VersionReq};

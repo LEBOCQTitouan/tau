@@ -18,6 +18,7 @@ use crate::error::SandboxError;
 /// **PROVISIONAL** — see module-level caveat.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SandboxPlan {
     /// Capabilities the sandboxed code is allowed to exercise.
     /// The runtime composes this from the package's manifest before
@@ -35,6 +36,7 @@ pub struct SandboxPlan {
 /// **PROVISIONAL** — see module-level caveat.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WorkingContext {
     /// Working directory hint. OS-native sandboxes use; WASM ignores.
     pub working_dir: Option<PathBuf>,
@@ -47,6 +49,7 @@ pub struct WorkingContext {
 /// **PROVISIONAL** — see module-level caveat.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ResourceLimits {
     /// Maximum memory, in bytes.
     pub memory_bytes: Option<u64>,
