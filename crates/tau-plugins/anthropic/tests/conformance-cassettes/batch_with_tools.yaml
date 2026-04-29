@@ -1,0 +1,11 @@
+- request:
+    method: POST
+    uri: /v1/messages
+    body: |-
+      placeholder
+  response:
+    status: 200
+    headers:
+      content-type: application/json
+    body: |-
+      {"id":"msg_conf2","type":"message","role":"assistant","content":[{"type":"text","text":"Looking up..."},{"type":"tool_use","id":"toolu_conf","name":"echo","input":{"text":"hi"}}],"model":"claude-3-5-haiku-latest","stop_reason":"tool_use","usage":{"input_tokens":12,"output_tokens":3}}

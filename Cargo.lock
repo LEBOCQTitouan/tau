@@ -75,6 +75,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tau-domain",
+ "tau-plugin-conformance",
  "tau-plugin-protocol",
  "tau-plugin-sdk",
  "tau-plugin-test-support",

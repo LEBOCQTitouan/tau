@@ -71,19 +71,15 @@ async fn complete_429_then_success() {
 }
 
 #[tokio::test]
-async fn complete_429_exhausted_returns_internal_error() {
+async fn complete_429_exhausted_returns_rate_limited() {
     let server = cassette::replay("tests/cassettes/complete_429_exhausted.yaml").await;
     let plugin =
         AnthropicPlugin::from_config(common::test_config_with_retry(server.uri().into(), 3, 0))
             .unwrap();
     let err = plugin.complete(common::sample_request()).await.unwrap_err();
-    let LlmError::Internal { ref message } = err else {
-        panic!("expected Internal, got {err:?}");
+    let LlmError::RateLimited { .. } = err else {
+        panic!("expected RateLimited, got {err:?}");
     };
-    assert!(
-        message.contains("rate limited") || message.contains("retries exhausted"),
-        "unexpected error message: {message}",
-    );
     assert_eq!(server.received_requests().len(), 3);
 }
 
@@ -94,11 +90,11 @@ async fn complete_401_auth_failure_does_not_retry() {
         AnthropicPlugin::from_config(common::test_config_with_retry(server.uri().into(), 3, 0))
             .unwrap();
     let err = plugin.complete(common::sample_request()).await.unwrap_err();
-    let LlmError::Internal { ref message } = err else {
-        panic!("expected Internal, got {err:?}");
+    let LlmError::Auth { ref message } = err else {
+        panic!("expected Auth, got {err:?}");
     };
     assert!(
-        message.contains("auth failure"),
+        message.contains("invalid x-api-key"),
         "unexpected error message: {message}",
     );
     assert_eq!(server.received_requests().len(), 1, "401 must not retry");
@@ -111,12 +107,12 @@ async fn complete_400_bad_request_does_not_retry() {
         AnthropicPlugin::from_config(common::test_config_with_retry(server.uri().into(), 3, 0))
             .unwrap();
     let err = plugin.complete(common::sample_request()).await.unwrap_err();
-    let LlmError::Internal { ref message } = err else {
-        panic!("expected Internal, got {err:?}");
+    let LlmError::InvalidRequest { ref reason } = err else {
+        panic!("expected InvalidRequest, got {err:?}");
     };
     assert!(
-        message.contains("bad request"),
-        "unexpected error message: {message}",
+        reason.contains("anthropic bad request"),
+        "unexpected error reason: {reason}",
     );
     assert_eq!(server.received_requests().len(), 1, "400 must not retry");
 }

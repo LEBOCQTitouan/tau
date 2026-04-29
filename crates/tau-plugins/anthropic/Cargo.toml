@@ -38,3 +38,4 @@ tokio        = { workspace = true, features = ["macros", "rt-multi-thread", "io-
 tempfile     = { workspace = true }
 serde_yaml   = "0.9"
 tau-plugin-test-support = { workspace = true }
+tau-plugin-conformance  = { workspace = true }

@@ -1,0 +1,33 @@
+- request:
+    method: POST
+    uri: /v1/messages
+    body: |-
+      placeholder
+  response:
+    status: 429
+    headers:
+      retry-after: "0"
+    body: |-
+      {"type":"error","error":{"type":"rate_limit_error","message":"throttled"}}
+- request:
+    method: POST
+    uri: /v1/messages
+    body: |-
+      placeholder
+  response:
+    status: 429
+    headers:
+      retry-after: "0"
+    body: |-
+      {"type":"error","error":{"type":"rate_limit_error","message":"throttled"}}
+- request:
+    method: POST
+    uri: /v1/messages
+    body: |-
+      placeholder
+  response:
+    status: 429
+    headers:
+      retry-after: "0"
+    body: |-
+      {"type":"error","error":{"type":"rate_limit_error","message":"throttled"}}

@@ -1,0 +1,9 @@
+- request:
+    method: POST
+    uri: /v1/messages
+    body: |-
+      placeholder
+  response:
+    status: 401
+    body: |-
+      {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}
