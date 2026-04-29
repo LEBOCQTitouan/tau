@@ -1,0 +1,12 @@
+- request:
+    method: POST
+    uri: /v1/chat/completions
+    body: |-
+      placeholder
+  response:
+    status: 200
+    headers:
+      content-type: text/event-stream
+    body: |+
+      data: {"id":"chatcmpl-trunc","choices":[{"index":0,"delta":{"role":"assistant","content":"partial"},"finish_reason":null}]}
+

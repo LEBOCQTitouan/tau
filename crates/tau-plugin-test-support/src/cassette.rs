@@ -1,30 +1,13 @@
-//! Cassette replayer: a small HTTP/1.1 server that serves
-//! pre-recorded responses in order from a YAML cassette file.
+//! In-process HTTP cassette replayer for plugin integration tests.
 //!
-//! Cassette format (YAML array; one entry per request/response pair):
+//! Loads YAML cassettes describing recorded request/response pairs
+//! and serves them in-order from a `tokio::net::TcpListener`.
+//! Captures the request body (and arbitrary other headers) into a
+//! `Vec<RecordedRequest>` so tests can assert on what the plugin sent.
 //!
-//! ```yaml
-//! - request:
-//!     method: POST
-//!     uri: /v1/messages
-//!     headers:
-//!       x-api-key: <REDACTED>
-//!     body: |-
-//!       {"model": "..."}
-//!   response:
-//!     status: 200
-//!     headers:
-//!       content-type: application/json
-//!     body: |-
-//!       {"id": "msg_01", ...}
-//! ```
-//!
-//! The replayer is request-shape-agnostic: it serves the next
-//! recorded response on each connection regardless of what the
-//! incoming request looks like, but captures the incoming request
-//! for assertion via `CassetteServer::received_requests()`.
-
-#![allow(dead_code)]
+//! Originated in `crates/tau-plugins/anthropic/tests/common/cassette.rs`;
+//! lifted here as the rule-of-three refactor when ollama and openai
+//! became consumers.
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -33,32 +16,44 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+/// One recorded request/response pair from a cassette YAML file.
 #[derive(Debug, Deserialize)]
-pub(crate) struct CassetteEntry {
-    #[allow(dead_code)]
+pub struct CassetteEntry {
+    /// The recorded request metadata (method, URI, headers, body).
     pub request: RecordedRequest,
+    /// The response to replay when this entry is consumed.
     pub response: RecordedResponse,
 }
 
+/// A request captured (or loaded from a cassette) during replay.
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct RecordedRequest {
+    /// HTTP method (e.g. `"POST"`).
     pub method: String,
+    /// Request URI path (e.g. `"/v1/messages"`).
     pub uri: String,
+    /// HTTP headers, keyed by lowercase header name.
     #[serde(default)]
     pub headers: HashMap<String, String>,
+    /// Raw request body bytes decoded as UTF-8.
     #[serde(default)]
     pub body: String,
 }
 
+/// A response to replay for a cassette entry.
 #[derive(Debug, Deserialize, Clone)]
-pub(crate) struct RecordedResponse {
+pub struct RecordedResponse {
+    /// HTTP status code (e.g. `200`).
     pub status: u16,
+    /// Response headers to include.
     #[serde(default)]
     pub headers: HashMap<String, String>,
+    /// Response body to send.
     #[serde(default)]
     pub body: String,
 }
 
+/// An in-process HTTP server that replays a cassette.
 pub struct CassetteServer {
     base_url: String,
     received: Arc<Mutex<Vec<RecordedRequest>>>,
@@ -66,10 +61,12 @@ pub struct CassetteServer {
 }
 
 impl CassetteServer {
+    /// Returns the base URL of the cassette server (e.g. `"http://127.0.0.1:PORT"`).
     pub fn uri(&self) -> &str {
         &self.base_url
     }
 
+    /// Returns the list of requests received by the server so far.
     pub fn received_requests(&self) -> Vec<RecordedRequest> {
         self.received.lock().unwrap().clone()
     }

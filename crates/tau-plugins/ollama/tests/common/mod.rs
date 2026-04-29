@@ -3,7 +3,13 @@
 
 #![allow(dead_code)]
 
-pub mod cassette;
+// `cassette` is provided by the shared `tau-plugin-test-support` crate
+// (lifted in Task 2 of sub-project 2c). Re-exported under the local
+// name so existing test imports (`use common::cassette;`) keep working.
+pub mod cassette {
+    #[allow(unused_imports)]
+    pub use tau_plugin_test_support::cassette::*;
+}
 
 use ollama_plugin_lib::config::OllamaConfig;
 use tau_ports::{CompletionRequest, CompletionResponse, ContentBlock, LlmProviderMessage};

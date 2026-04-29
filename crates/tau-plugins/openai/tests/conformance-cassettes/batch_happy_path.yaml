@@ -1,0 +1,11 @@
+- request:
+    method: POST
+    uri: /v1/chat/completions
+    body: |-
+      placeholder
+  response:
+    status: 200
+    headers:
+      content-type: application/json
+    body: |-
+      {"id":"chatcmpl-conf-1","object":"chat.completion","created":1700000100,"model":"conformance-model","choices":[{"index":0,"message":{"role":"assistant","content":"Hi from conformance."},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":4,"total_tokens":9}}

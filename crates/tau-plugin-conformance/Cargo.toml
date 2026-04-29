@@ -1,0 +1,22 @@
+[package]
+name = "tau-plugin-conformance"
+description = "Parameterized conformance test suite for tau LLM-backend plugins."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+
+[lib]
+name = "tau_plugin_conformance"
+path = "src/lib.rs"
+
+[dependencies]
+tau-domain               = { workspace = true, features = ["serde"] }
+tau-ports                = { workspace = true, features = ["serde", "test-fixtures"] }
+tau-plugin-test-support  = { workspace = true }
+tokio                    = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+futures-util             = "0.3"
+serde                    = { workspace = true }
+serde_json               = "1"

@@ -1,0 +1,11 @@
+- request:
+    method: POST
+    uri: /v1/chat/completions
+    body: |-
+      placeholder
+  response:
+    status: 400
+    headers:
+      content-type: application/json
+    body: |-
+      {"error":{"message":"Invalid model","type":"invalid_request_error","code":"model_not_found"}}

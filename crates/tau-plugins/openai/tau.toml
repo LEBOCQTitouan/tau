@@ -1,0 +1,8 @@
+name = "openai"
+version = "0.1.0"
+description = "OpenAI Chat Completions backend for tau."
+
+[plugin]
+provides = "llm_backend"
+kind     = "rust-cargo"
+bin      = "openai-plugin"

@@ -79,8 +79,9 @@ impl LlmBackend for OllamaPlugin {
 
         let status = resp.status();
         if !status.is_success() {
+            let headers = resp.headers().clone();
             let body = resp.text().await.unwrap_or_default();
-            return Err(map_response_error(status, &body));
+            return Err(map_response_error(status, &headers, &body));
         }
 
         let body = resp.text().await.map_err(|e| LlmError::Internal {
@@ -103,8 +104,9 @@ impl LlmBackend for OllamaPlugin {
 
         let status = resp.status();
         if !status.is_success() {
+            let headers = resp.headers().clone();
             let body = resp.text().await.unwrap_or_default();
-            return Err(map_response_error(status, &body));
+            return Err(map_response_error(status, &headers, &body));
         }
 
         parse_ndjson(resp).await

@@ -75,8 +75,10 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tau-domain",
+ "tau-plugin-conformance",
  "tau-plugin-protocol",
  "tau-plugin-sdk",
+ "tau-plugin-test-support",
  "tau-ports",
  "tempfile",
  "thiserror 2.0.18",
@@ -1302,8 +1304,10 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tau-domain",
+ "tau-plugin-conformance",
  "tau-plugin-protocol",
  "tau-plugin-sdk",
+ "tau-plugin-test-support",
  "tau-ports",
  "tempfile",
  "thiserror 2.0.18",
@@ -1322,6 +1326,32 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "openai"
+version = "0.0.0"
+dependencies = [
+ "async-stream",
+ "bytes",
+ "eventsource-stream",
+ "futures-core",
+ "futures-util",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tau-domain",
+ "tau-plugin-conformance",
+ "tau-plugin-protocol",
+ "tau-plugin-sdk",
+ "tau-plugin-test-support",
+ "tau-ports",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "parking_lot"
@@ -2201,6 +2231,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tau-plugin-conformance"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tau-domain",
+ "tau-plugin-test-support",
+ "tau-ports",
+ "tokio",
+]
+
+[[package]]
 name = "tau-plugin-protocol"
 version = "0.0.0"
 dependencies = [
@@ -2234,6 +2277,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "tau-plugin-test-support"
+version = "0.0.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_yaml",
+ "tokio",
 ]
 
 [[package]]

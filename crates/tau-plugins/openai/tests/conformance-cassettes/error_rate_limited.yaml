@@ -1,0 +1,36 @@
+- request:
+    method: POST
+    uri: /v1/chat/completions
+    body: |-
+      placeholder
+  response:
+    status: 429
+    headers:
+      retry-after: "0"
+      content-type: application/json
+    body: |-
+      {"error":{"message":"Rate limit","type":"rate_limit_exceeded"}}
+- request:
+    method: POST
+    uri: /v1/chat/completions
+    body: |-
+      placeholder
+  response:
+    status: 429
+    headers:
+      retry-after: "0"
+      content-type: application/json
+    body: |-
+      {"error":{"message":"Rate limit","type":"rate_limit_exceeded"}}
+- request:
+    method: POST
+    uri: /v1/chat/completions
+    body: |-
+      placeholder
+  response:
+    status: 429
+    headers:
+      retry-after: "0"
+      content-type: application/json
+    body: |-
+      {"error":{"message":"Rate limit","type":"rate_limit_exceeded"}}
