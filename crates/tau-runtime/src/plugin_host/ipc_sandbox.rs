@@ -75,15 +75,12 @@ impl DynSandbox for IpcSandbox {
             let frame_bytes = frame.encode().map_err(|e| SandboxError::Internal {
                 message: format!("frame encode: {e}"),
             })?;
-            {
-                let mut writer = process.writer.lock().await;
-                writer
-                    .write_frame(&frame_bytes)
-                    .await
-                    .map_err(|e| SandboxError::Internal {
-                        message: format!("write frame: {e}"),
-                    })?;
-            }
+            process
+                .send_frame(&frame_bytes)
+                .await
+                .map_err(|e| SandboxError::Internal {
+                    message: format!("write frame: {e}"),
+                })?;
             let result = rx.await.map_err(|_| SandboxError::Internal {
                 message: "in-flight response sender dropped (plugin crashed?)".to_string(),
             })?;

@@ -22,12 +22,14 @@ use std::time::Duration;
 
 use tau_plugin_protocol::{
     error::{RpcErrorEnvelope, INTERNAL_ERROR},
-    Frame, FramedReader, FramedWriter, FramerOptions,
+    Frame, FramedReader, FramedWriter, FramerOptions, ProtocolError,
 };
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite};
 use tokio::process::{Child, ChildStderr, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 use tokio::task::JoinHandle;
+
+use super::recording::{Direction, RecorderHandle};
 
 /// Type-erased async writer used by [`PluginProcess`] for outbound
 /// frames. Boxing here lets the same struct wrap a real
@@ -100,6 +102,11 @@ pub struct PluginProcess {
     /// Reserved for Task 17's recording-flush coordination.
     #[allow(dead_code)]
     shutdown_signal: Notify,
+    /// Optional protocol recorder. When set, every outbound frame
+    /// (via [`PluginProcess::send_frame`]) and every inbound frame
+    /// (in the read loop) is mirrored to the recorder before
+    /// dispatch. See `crate::plugin_host::recording`.
+    pub(crate) recorder: Option<RecorderHandle>,
     /// How long [`PluginProcess::shutdown`] waits between escalation
     /// steps (post-`meta.shutdown` graceful → SIGTERM, and after
     /// SIGTERM → SIGKILL). Default 2s from `PluginHostOptions`.
@@ -139,6 +146,10 @@ impl PluginProcess {
     /// * [`RuntimeError::PluginSpawnFailed`] if `Command::spawn`
     ///   fails (binary missing, not executable, sandbox denied, …).
     /// * Whatever the `pre_handshake` closure returns.
+    // Eight params (one beyond clippy's default ceiling) is the natural
+    // shape of "spawn + drive handshake" — splitting into a builder
+    // wouldn't simplify the call sites in `crate::plugin_host::load_*`.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_and_handshake<F, T>(
         binary_path: &Path,
         plugin_name: String,
@@ -146,6 +157,7 @@ impl PluginProcess {
         agent_id: &str,
         framer_options: FramerOptions,
         shutdown_timeout: Duration,
+        recorder: Option<RecorderHandle>,
         pre_handshake: F,
     ) -> Result<(Arc<PluginProcess>, T), RuntimeError>
     where
@@ -245,6 +257,7 @@ impl PluginProcess {
             plugin_name.clone(),
             in_flight_responses.clone(),
             in_flight_streams.clone(),
+            recorder.clone(),
         ));
 
         let stderr_task = tokio::spawn(stderr_loop(stderr, plugin_name.clone()));
@@ -259,12 +272,30 @@ impl PluginProcess {
             in_flight_streams,
             child: Mutex::new(Some(child)),
             shutdown_signal: Notify::new(),
+            recorder,
             shutdown_timeout,
             _read_task: read_task,
             _stderr_task: stderr_task,
         });
 
         Ok((process, handshake_outcome))
+    }
+
+    /// Send a single outbound frame, tapping the protocol recorder
+    /// (if any) before acquiring the writer mutex. Centralizes the
+    /// host-side write path so per-port adapters
+    /// (`IpcLlmBackend` / `IpcTool` / `IpcStorage` / `IpcSandbox`) get
+    /// recording for free without each having to reach into the
+    /// recorder themselves.
+    ///
+    /// Returns the framer's [`ProtocolError`] verbatim on write failure
+    /// so call sites can wrap it in their port-specific error variants.
+    pub(crate) async fn send_frame(&self, frame_bytes: &[u8]) -> Result<(), ProtocolError> {
+        if let Some(recorder) = &self.recorder {
+            recorder.record(Direction::HostToPlugin, frame_bytes).await;
+        }
+        let mut writer = self.writer.lock().await;
+        writer.write_frame(frame_bytes).await
     }
 
     /// Drive the spec §7.3 shutdown sequence:
@@ -379,6 +410,27 @@ impl PluginProcess {
     where
         R: AsyncRead + Unpin + Send + 'static,
     {
+        Self::new_for_test_with_recorder(plugin_name, reader, writer, shutdown_timeout, None)
+    }
+
+    /// Variant of [`PluginProcess::new_for_test`] that accepts an
+    /// optional recorder. Used by `tau-runtime`'s recording integration
+    /// tests to verify that the read- and write-side tap points fire
+    /// without spawning a real subprocess. Production code must not
+    /// reach for this constructor; the public `load_*` entry points
+    /// build the recorder from [`crate::plugin_host::PluginHostOptions`]
+    /// and feed it into [`PluginProcess::spawn_and_handshake`].
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn new_for_test_with_recorder<R>(
+        plugin_name: String,
+        reader: FramedReader<R>,
+        writer: FramedWriter<DynAsyncWriter>,
+        shutdown_timeout: Duration,
+        recorder: Option<RecorderHandle>,
+    ) -> Arc<Self>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+    {
         let in_flight_responses: InFlightResponses = Arc::new(Mutex::new(HashMap::new()));
         let in_flight_streams: InFlightStreams = Arc::new(Mutex::new(HashMap::new()));
 
@@ -387,6 +439,7 @@ impl PluginProcess {
             plugin_name.clone(),
             in_flight_responses.clone(),
             in_flight_streams.clone(),
+            recorder.clone(),
         ));
 
         // Test instances have no real stderr to re-emit; spawn a stub
@@ -402,6 +455,7 @@ impl PluginProcess {
             in_flight_streams,
             child: Mutex::new(None),
             shutdown_signal: Notify::new(),
+            recorder,
             shutdown_timeout,
             _read_task: read_task,
             _stderr_task: stderr_task,
@@ -422,6 +476,7 @@ async fn read_loop<R>(
     plugin_name: String,
     in_flight_responses: InFlightResponses,
     in_flight_streams: InFlightStreams,
+    recorder: Option<RecorderHandle>,
 ) where
     R: AsyncRead + Unpin + Send + 'static,
 {
@@ -446,6 +501,14 @@ async fn read_loop<R>(
                 break;
             }
         };
+        // Tap the inbound frame *before* decode-and-dispatch so the
+        // recorded byte sequence matches exactly what came off the wire
+        // — including frames whose payload `Frame::decode` later
+        // rejects (those still get logged with `null` msgid/method via
+        // `decode_frame_metadata` and the raw base64 frame).
+        if let Some(recorder) = &recorder {
+            recorder.record(Direction::PluginToHost, &body).await;
+        }
         let frame = match Frame::decode(&body) {
             Ok(f) => f,
             Err(err) => {

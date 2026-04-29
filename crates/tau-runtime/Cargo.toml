@@ -22,13 +22,21 @@ uuid                = { workspace = true, features = ["v4"] }
 # boundary; surfaces in `plugin_host::load_*` signatures.
 serde_json          = "1"
 # Plugin host spawns plugin binaries and reads their stdio streams.
-tokio               = { workspace = true }
+# `fs` is needed by `plugin_host::recording`, which uses
+# `tokio::fs::OpenOptions` + async append writes for the JSONL sink so
+# the read- and write-side tap points don't block the runtime on disk
+# IO. The other features come from the workspace alias.
+tokio               = { workspace = true, features = ["fs"] }
 # Plugin host encodes/decodes MessagePack payloads for the wire protocol.
 rmp-serde           = { workspace = true }
 # Plugin host streaming adapter (`stream_router`) implements the
 # `Stream` trait from `futures-core` so it can build a
 # `tau_ports::CompletionStream` (which is `Pin<Box<dyn Stream<...>>>`).
 futures-core        = { workspace = true }
+# Plugin host protocol-recording sink (`plugin_host::recording`)
+# base64-encodes raw MessagePack frame bytes into the JSONL log so the
+# binary frame survives the JSON envelope losslessly.
+base64              = { workspace = true }
 
 [features]
 default = []
@@ -52,3 +60,6 @@ toml               = { workspace = true }
 # integration test. Pinned at the same minor version other workspace
 # crates already pull in (e.g. tau-plugin-sdk dev-deps).
 futures-util       = "0.3"
+# Used by `plugin_host_recording.rs` (and the recording-module unit
+# tests) to allocate a temp directory for the JSONL sink.
+tempfile           = { workspace = true }

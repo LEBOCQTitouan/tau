@@ -1751,6 +1751,7 @@ dependencies = [
 name = "tau-runtime"
 version = "0.0.0"
 dependencies = [
+ "base64",
  "futures-core",
  "futures-util",
  "proptest",
@@ -1761,6 +1762,7 @@ dependencies = [
  "tau-pkg",
  "tau-plugin-protocol",
  "tau-ports",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml",

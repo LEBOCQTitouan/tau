@@ -39,6 +39,7 @@ mod ipc_sandbox;
 mod ipc_storage;
 mod ipc_tool;
 mod process;
+mod recording;
 mod stream_router;
 
 /// Internal-but-test-visible re-exports. Hidden from rustdoc and not
@@ -67,6 +68,36 @@ pub mod __internals {
     pub use super::ipc_tool::IpcTool;
     #[cfg(any(test, feature = "test-support"))]
     pub use super::process::{DynAsyncWriter, PluginProcess};
+    #[cfg(any(test, feature = "test-support"))]
+    pub use super::recording::{Recorder, RecorderHandle};
+}
+
+/// Build a [`recording::RecorderHandle`] from
+/// [`PluginHostOptions::recording`]. Failures to open the recording
+/// file are logged at WARN and yield `Ok(None)` so plugin loading
+/// continues without recording (per spec §7.8: "best-effort").
+async fn build_recorder(
+    plugin_name: &str,
+    options: &PluginHostOptions,
+) -> Option<recording::RecorderHandle> {
+    match &options.recording {
+        Some(RecordingSink::JsonlFile { path }) => {
+            match recording::Recorder::open_jsonl(plugin_name, path).await {
+                Ok(r) => Some(Arc::new(r)),
+                Err(e) => {
+                    tracing::warn!(
+                        target: "tau_runtime::plugin_host::recording",
+                        plugin = plugin_name,
+                        path = ?path,
+                        err = %e,
+                        "failed to open recording file; recording disabled for this plugin"
+                    );
+                    None
+                }
+            }
+        }
+        None => None,
+    }
 }
 
 /// Optional protocol-recording sink. Currently only
@@ -182,6 +213,7 @@ pub async fn load_llm_backend(
     // mutate the field rather than struct-literal construction.
     let mut framer_options = FramerOptions::default();
     framer_options.max_message_size = options.max_message_size;
+    let recorder = build_recorder(&plugin_name, &options).await;
 
     let (process, _handshake_response) = process::PluginProcess::spawn_and_handshake(
         &plugin.binary_path,
@@ -190,6 +222,7 @@ pub async fn load_llm_backend(
         &agent_id,
         framer_options,
         options.shutdown_timeout,
+        recorder,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
@@ -247,6 +280,7 @@ pub async fn load_tool(
     let handshake_timeout = options.handshake_timeout;
     let mut framer_options = FramerOptions::default();
     framer_options.max_message_size = options.max_message_size;
+    let recorder = build_recorder(&plugin_name, &options).await;
 
     let (process, _handshake_response) = process::PluginProcess::spawn_and_handshake(
         &plugin.binary_path,
@@ -255,6 +289,7 @@ pub async fn load_tool(
         &agent_id,
         framer_options,
         options.shutdown_timeout,
+        recorder,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
@@ -314,6 +349,7 @@ pub async fn load_storage(
     let handshake_timeout = options.handshake_timeout;
     let mut framer_options = FramerOptions::default();
     framer_options.max_message_size = options.max_message_size;
+    let recorder = build_recorder(&plugin_name, &options).await;
 
     let (process, _handshake_response) = process::PluginProcess::spawn_and_handshake(
         &plugin.binary_path,
@@ -322,6 +358,7 @@ pub async fn load_storage(
         &agent_id,
         framer_options,
         options.shutdown_timeout,
+        recorder,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
@@ -374,6 +411,7 @@ pub async fn load_sandbox(
     let handshake_timeout = options.handshake_timeout;
     let mut framer_options = FramerOptions::default();
     framer_options.max_message_size = options.max_message_size;
+    let recorder = build_recorder(&plugin_name, &options).await;
 
     let (process, _handshake_response) = process::PluginProcess::spawn_and_handshake(
         &plugin.binary_path,
@@ -382,6 +420,7 @@ pub async fn load_sandbox(
         &agent_id,
         framer_options,
         options.shutdown_timeout,
+        recorder,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(

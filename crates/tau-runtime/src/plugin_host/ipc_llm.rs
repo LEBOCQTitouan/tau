@@ -98,15 +98,12 @@ impl DynLlmBackend for IpcLlmBackend {
             let frame_bytes = frame.encode().map_err(|e| LlmError::Internal {
                 message: format!("frame encode: {e}"),
             })?;
-            {
-                let mut writer = process.writer.lock().await;
-                writer
-                    .write_frame(&frame_bytes)
-                    .await
-                    .map_err(|e| LlmError::Internal {
-                        message: format!("write frame: {e}"),
-                    })?;
-            }
+            process
+                .send_frame(&frame_bytes)
+                .await
+                .map_err(|e| LlmError::Internal {
+                    message: format!("write frame: {e}"),
+                })?;
             let result = rx.await.map_err(|_| LlmError::Internal {
                 message: "in-flight response sender dropped (plugin crashed?)".to_string(),
             })?;
@@ -169,15 +166,12 @@ impl DynLlmBackend for IpcLlmBackend {
             let frame_bytes = frame.encode().map_err(|e| LlmError::Internal {
                 message: format!("frame encode (stream): {e}"),
             })?;
-            {
-                let mut writer = process.writer.lock().await;
-                writer
-                    .write_frame(&frame_bytes)
-                    .await
-                    .map_err(|e| LlmError::Internal {
-                        message: format!("write frame (stream): {e}"),
-                    })?;
-            }
+            process
+                .send_frame(&frame_bytes)
+                .await
+                .map_err(|e| LlmError::Internal {
+                    message: format!("write frame (stream): {e}"),
+                })?;
 
             Ok(crate::plugin_host::stream_router::assemble(
                 chunk_rx, final_rx,
