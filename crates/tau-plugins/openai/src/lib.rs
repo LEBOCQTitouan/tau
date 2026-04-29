@@ -10,6 +10,7 @@
 //! See `docs/superpowers/specs/2026-04-29-openai-plugin-design.md`
 //! for the design rationale.
 
+pub(crate) mod client;
 pub mod config;
 pub(crate) mod error;
 pub(crate) mod request;
