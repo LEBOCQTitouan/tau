@@ -1,0 +1,11 @@
+- request:
+    method: POST
+    uri: /api/chat
+    body: |-
+      placeholder
+  response:
+    status: 400
+    headers:
+      content-type: application/json
+    body: |-
+      {"error":"invalid request: empty messages array"}
