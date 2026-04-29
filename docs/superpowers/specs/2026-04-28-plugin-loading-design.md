@@ -267,7 +267,7 @@ msgid in their `params` when they refer to one (streaming).
 | Prefix | Methods |
 |---|---|
 | `meta.*` | `meta.handshake`, `meta.shutdown`, `meta.describe` |
-| `llm.*` | `llm.complete`, `llm.complete_streaming` |
+| `llm.*` | `llm.complete`, `llm.stream` |
 | `tool.*` | `tool.call`, `tool.describe` |
 | `storage.*` | `storage.get`, `storage.put`, `storage.list`, `storage.delete` (defined; not exercised end-to-end in v0.1) |
 | `sandbox.*` | `sandbox.run` (defined; not exercised in v0.1) |
@@ -294,10 +294,10 @@ Plugin replies:
     provides: "llm_backend",
     plugin_name: "echo-llm",
     plugin_version: "0.1.0",
-    methods: ["llm.complete", "llm.complete_streaming", "meta.describe"],
+    methods: ["llm.complete", "llm.stream", "meta.describe"],
     schemas: {
-        "llm.complete":           { params: {...}, result: {...} },
-        "llm.complete_streaming": { params: {...}, result: {...} }
+        "llm.complete": { params: {...}, result: {...} },
+        "llm.stream":   { params: {...}, result: {...} }
     }
 }]
 ```
@@ -321,7 +321,7 @@ Existing serde derives are reused unchanged.
 | Method | Params | Result |
 |---|---|---|
 | `llm.complete` | `[CompletionRequest]` | `CompletionResponse` |
-| `llm.complete_streaming` | `[CompletionRequest]` | `{ stop_reason, usage }` (chunks via notifications) |
+| `llm.stream` | `[CompletionRequest]` | `CompletionChunk::Finish { stop_reason, usage }` (chunks via notifications) |
 | `tool.call` | `[SessionContext, Value]` | `ToolResult` |
 | `tool.describe` | `[]` | `ToolSpec` |
 | `meta.describe` | `[method_name: str]` | `{ params: JSONSchema, result: JSONSchema }` |
@@ -331,9 +331,18 @@ Existing serde derives are reused unchanged.
 | `storage.delete` | `[Namespace, Key]` | `nil` |
 | `sandbox.run` | `[SandboxPlan, WorkingContext, ResourceLimits]` | `SandboxResult` |
 
+The wire RPC method names (`tool.call`, `tool.describe`) are stable; on
+the plugin side they map to the `tau_ports::Tool` trait's `invoke` and
+`schema` methods respectively. `Tool` is a stateful trait
+(`init` → `invoke` → `teardown` per session, with an associated
+`Session` type); the SDK's `run_tool` runner runs the full lifecycle
+once per `tool.call` RPC, so each RPC is a self-contained
+session from the host's point of view. Stateless tools either pick
+`type Session = ()` or wrap with the `StatelessAdapter` helper.
+
 ### 4.6 Streaming primitive
 
-Host sends `llm.complete_streaming` request with msgid=N. Plugin
+Host sends `llm.stream` request with msgid=N. Plugin
 emits a series of:
 
 ```
@@ -342,7 +351,8 @@ emits a series of:
 ...
 ```
 
-Plugin terminates by sending the regular response on msgid=N:
+Plugin terminates by sending the regular response on msgid=N, whose
+result body is a `CompletionChunk::Finish` variant:
 
 ```
 [1, N, nil, { stop_reason: "end_turn", usage: { input_tokens: …, output_tokens: … }}]
@@ -484,7 +494,7 @@ impl LlmBackend for EchoLlm {
             .unwrap_or_else(|| self.config.canned_text.clone());
         Ok(CompletionResponse::text(&text))
     }
-    async fn complete_streaming(&self, req: CompletionRequest)
+    async fn stream(&self, req: CompletionRequest)
         -> Result<CompletionStream, LlmError>
     {
         Ok(batch_to_stream(self.complete(req).await?))
@@ -829,7 +839,7 @@ impl DynLlmBackend for IpcLlmBackend {
         })
     }
 
-    fn complete_streaming(
+    fn stream(
         &self,
         req: CompletionRequest,
     ) -> Pin<Box<dyn Future<Output = Result<CompletionStream, LlmError>> + Send + '_>> {
@@ -840,7 +850,7 @@ impl DynLlmBackend for IpcLlmBackend {
             self.process.in_flight_streams.lock().insert(id, chunk_tx);
             self.process.in_flight_responses.lock().insert(id, resp_tx);
             self.process.writer.lock()
-                .send_request(id, "llm.complete_streaming", &[req]).await?;
+                .send_request(id, "llm.stream", &[req]).await?;
             Ok(stream_router::assemble(chunk_rx, resp_rx))
         })
     }
@@ -1006,7 +1016,11 @@ use tau_ports::{
 struct EchoTool;
 
 impl Tool for EchoTool {
-    fn spec(&self) -> ToolSpec {
+    type Session = ();
+
+    fn name(&self) -> &str { "echo" }
+
+    fn schema(&self) -> ToolSpec {
         ToolSpec::builder()
             .name("echo")
             .description("Echoes its arguments back as a text content block.")
@@ -1018,9 +1032,11 @@ impl Tool for EchoTool {
             .build()
     }
 
+    async fn init(&self, _ctx: SessionContext) -> Result<(), ToolError> { Ok(()) }
+
     async fn invoke(
         &self,
-        _ctx: SessionContext,
+        _session: &mut Self::Session,
         args: Value,
     ) -> Result<ToolResult, ToolError> {
         let text = args.get("text")
@@ -1031,6 +1047,8 @@ impl Tool for EchoTool {
             is_error: false,
         })
     }
+
+    async fn teardown(&self, _session: Self::Session) -> Result<(), ToolError> { Ok(()) }
 }
 
 #[tokio::main]
@@ -1161,7 +1179,7 @@ replays a script.
 ```bash
 $ tau plugin run ~/.tau/packages/echo-llm/0.1.0/target/release/echo-llm --interactive
 ✓ spawned (pid 41329)
-✓ handshake: provides=llm_backend, methods=[llm.complete, llm.complete_streaming]
+✓ handshake: provides=llm_backend, methods=[llm.complete, llm.stream]
 plugin> llm.complete {"messages":[{"role":"user","content":"hi"}],"model":"echo"}
 [+0.012s] result: {"content":[{"text":"hello back"}],"stop_reason":"end_turn",...}
 plugin> meta.describe llm.complete
@@ -1203,7 +1221,7 @@ echo-llm 0.1.0  [llm_backend]
             { messages: [LlmProviderMessage], model: string, tools?: [ToolSpec], ... }
      result: CompletionResponse
             { content: [ContentBlock], stop_reason: StopReason, usage: TokenUsage }
-   llm.complete_streaming
+   llm.stream
      ...
 ─ source: github.com/example/echo-llm @ 7a3f9c2
 ```
@@ -1421,7 +1439,7 @@ task, PR auto-triggers CI.
 | 13 | `tau-runtime`: plugin_host module skeleton; PluginProcess + PluginHostOptions + RuntimeError variants | tau-runtime |
 | 14 | `tau-runtime`: spawn + handshake + stderr re-emit + shutdown sequence | tau-runtime |
 | 15 | `tau-runtime`: IpcLlmBackend (non-streaming) + IpcTool with mock-peer unit tests | tau-runtime |
-| 16 | `tau-runtime`: stream router + IpcLlmBackend::complete_streaming | tau-runtime |
+| 16 | `tau-runtime`: stream router + IpcLlmBackend::stream | tau-runtime |
 | 17 | `tau-runtime`: protocol recording (RecordingSink::JsonlFile + tap wiring) | tau-runtime |
 | 18 | echo-llm + echo-tool toy plugin crates | crates/tau-plugins/* |
 | 19 | `tau-cli`: drop `test-mock` feature; rewire cmd::run + cmd::chat to load via plugin_host | tau-cli |
