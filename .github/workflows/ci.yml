@@ -164,3 +164,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build anthropic-plugin (release)
         run: cargo build --release -p anthropic
+
+  build-ollama-plugin:
+    name: build (ollama-plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build ollama-plugin (release)
+        run: cargo build --release -p ollama
