@@ -111,21 +111,17 @@ fn install_dry_run_no_disk_change() {
 // ---- run --------------------------------------------------------------------
 
 #[test]
-#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_dry_run_no_disk_change() {
-    let dir = common::setup_project_with_installed_agent(
-        "reviewer",
-        "code-reviewer",
-        "0.1.0",
-        "mock-llm",
-    );
+    // --dry-run short-circuits before plugin loading, but we still
+    // synthesize a real echo-plugin fixture so the project / lockfile
+    // shapes are realistic for the no-disk-change snapshot.
+    let dir = common::setup_echo_project("echo", "canned_text = \"unused\"\n", &[]);
     let before = snapshot_dir(dir.path());
-    // Lockfile contents shouldn't change either.
     let lockfile_before = std::fs::read_to_string(dir.path().join("tau-lock.toml")).unwrap();
 
     AssertCmd::cargo_bin("tau")
         .unwrap()
-        .args(["run", "reviewer", "hi", "--dry-run"])
+        .args(["run", "echo", "hi", "--dry-run"])
         .current_dir(dir.path())
         .env("TAU_HOME", dir.path().join("global"))
         .assert()
@@ -148,15 +144,14 @@ fn run_dry_run_no_disk_change() {
 // ---- chat -------------------------------------------------------------------
 
 #[test]
-#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn chat_dry_run_no_disk_change() {
-    let dir = common::setup_project();
+    let dir = common::setup_echo_project("echo", "canned_text = \"unused\"\n", &[]);
     let before = snapshot_dir(dir.path());
     let global_dir = dir.path().join("global");
 
     AssertCmd::cargo_bin("tau")
         .unwrap()
-        .args(["chat", "reviewer", "--dry-run"])
+        .args(["chat", "echo", "--dry-run"])
         .current_dir(dir.path())
         .env("TAU_HOME", &global_dir)
         .assert()

@@ -1,20 +1,22 @@
 //! Shared test helpers for tau-cli integration tests.
 //!
-//! Two families of fixtures live here:
+//! Three families of fixtures live here:
 //!
 //! - [`temp_project`] / [`temp_project_with_tau_toml`] / [`read_tau_toml`]:
 //!   minimal cwd helpers that landed with sub-project 9 Task 10.
 //! - [`install_fixture`] / [`setup_project_with_installed_agent`] /
 //!   [`setup_project`]: hand-author a project `tau.toml` plus a matching
 //!   `.tau/` lockfile + on-disk package tree, mirroring the unit-test
-//!   `install_fixture` from `crates/tau-cli/src/config/agent.rs`. These
-//!   keep the `tau run` / `tau chat` integration suites hermetic — no
-//!   `git`, no network. NOTE: as of Task 19 (test-mock retirement),
-//!   the lockfile entries written here have no `[plugin]` table, so
-//!   any test that actually drives `tau run` / `tau chat` past
-//!   plugin-loading will fail. Task 21 rewrites those tests against
-//!   real `echo-llm` / `echo-tool` binary spawns; the suites that need
-//!   it stay marked `#[ignore]` until then.
+//!   `install_fixture` from `crates/tau-cli/src/config/agent.rs`. The
+//!   lockfile entries here carry NO `[plugin]` table, so they're only
+//!   safe for tests that don't drive `tau run` / `tau chat` past plugin
+//!   loading.
+//! - [`setup_echo_project`] (+ the [`echo_plugins`] sub-module): build
+//!   `echo-llm` and `echo-tool` once per session via
+//!   [`echo_plugins::ensure_echo_plugins_built`] and synthesize a
+//!   project tau.toml + lockfile whose `[package.plugin]` entries point
+//!   at the resulting binaries. Used by every integration test that
+//!   needs a real plugin spawn (Task 21).
 //! - [`run_git`] / [`file_url`] / [`setup_local_package_fixture`]: the
 //!   bare-repo + working-repo `file://` git fixture used by `tau install`
 //!   and `tau list` integration tests. Honours the `init.defaultBranch`
@@ -27,6 +29,8 @@
 //! files use different subsets.
 
 #![allow(dead_code)]
+
+pub mod echo_plugins;
 
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
@@ -133,8 +137,8 @@ generated_at = "{now_rfc3339}"
 ///
 /// NOTE: the lockfile entries written here carry no `[plugin]` table,
 /// so any test that drives `tau run` / `tau chat` past plugin loading
-/// will surface an error from `cmd::plugin_loader`. Task 21 rewrites
-/// those tests against real `echo-llm` / `echo-tool` binary spawns.
+/// will surface an error from `cmd::plugin_loader`. For real-spawn
+/// fixtures, use [`setup_echo_project`] instead.
 pub fn setup_project_with_installed_agent(
     agent_id: &str,
     pkg_name: &str,
@@ -269,4 +273,180 @@ capabilities = []
     run_git(&work, &["push", "-q", "origin", "main"]);
 
     (dir, url, bare)
+}
+
+// ---- echo-plugin project fixtures (Task 21 real-spawn integration tests) ----
+
+/// Project the path to a forward-slashed string suitable for embedding
+/// in a TOML field (`binary_path = "..."`). Backslashes inside Windows
+/// paths would otherwise get interpreted as TOML escape sequences.
+fn toml_path_string(p: &Path) -> String {
+    p.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/")
+}
+
+/// Synthesize a project tau.toml + lockfile + on-disk package tree
+/// keyed against pre-built echo-llm / echo-tool binaries.
+///
+/// This is the Task-21 counterpart to [`install_fixture`] /
+/// [`setup_project_with_installed_agent`]: the lockfile entries it
+/// writes carry a `[package.plugin]` table that matches the schema
+/// `tau-pkg::install` writes during a real install, so
+/// `tau_runtime::plugin_host::load_*` can spawn the binaries
+/// straight from the recorded paths.
+///
+/// The project tau.toml is written to `<root>/tau.toml` with the
+/// supplied `agent_id`, `agent_config_toml`, and `tools_in_requires`
+/// stitched into `[agents.<id>]`. The first install — `echo-llm` — is
+/// always recorded as the LLM backend; `echo-tool` is recorded
+/// alongside if `tools_in_requires` is non-empty.
+///
+/// Returns the [`TempDir`] owning the entire layout. Drop it to clean
+/// up.
+pub fn setup_echo_project(
+    agent_id: &str,
+    agent_config_toml: &str,
+    tools_in_requires: &[&str],
+) -> TempDir {
+    let (echo_llm, echo_tool) = echo_plugins::ensure_echo_plugins_built();
+    let dir = tempfile::tempdir().expect("tempdir for echo project");
+    let root = dir.path();
+
+    // Materialize the .tau/ state dir so `Scope::resolve` walks up to
+    // a Project scope, and a packages/ tree so `build_agent_definition`
+    // can read each manifest.
+    std::fs::create_dir_all(root.join(".tau")).unwrap();
+
+    // ---- Per-package tau.toml manifests ----
+    write_package_manifest(
+        root,
+        "echo-llm",
+        "0.1.0",
+        "llm-backend",
+        "https://example.com/echo-llm.git",
+    );
+    let include_tool = !tools_in_requires.is_empty();
+    if include_tool {
+        write_package_manifest(
+            root,
+            "echo-tool",
+            "0.1.0",
+            "tool",
+            "https://example.com/echo-tool.git",
+        );
+    }
+
+    // ---- Lockfile (with [package.plugin] entries) ----
+    let now = "2026-04-28T00:00:00Z";
+    let zero_sha = "0".repeat(40);
+
+    let llm_path = toml_path_string(echo_llm);
+    let mut lockfile = format!(
+        r#"schema_version = 2
+generated_by_tau_version = "0.0.0"
+generated_at = "{now}"
+
+[[package]]
+name = "echo-llm"
+active_version = "0.1.0"
+source = "https://example.com/echo-llm.git"
+
+[[package.versions]]
+version = "0.1.0"
+resolved_commit = "{zero_sha}"
+sha256 = ""
+installed_at = "{now}"
+
+[package.plugin]
+binary_path = "{llm_path}"
+built_at = "{now}"
+
+[package.plugin.manifest]
+provides = "llm_backend"
+kind = "rust-cargo"
+bin = "echo-llm"
+"#
+    );
+
+    if include_tool {
+        let tool_path = toml_path_string(echo_tool);
+        lockfile.push_str(&format!(
+            r#"
+[[package]]
+name = "echo-tool"
+active_version = "0.1.0"
+source = "https://example.com/echo-tool.git"
+
+[[package.versions]]
+version = "0.1.0"
+resolved_commit = "{zero_sha}"
+sha256 = ""
+installed_at = "{now}"
+
+[package.plugin]
+binary_path = "{tool_path}"
+built_at = "{now}"
+
+[package.plugin.manifest]
+provides = "tool"
+kind = "rust-cargo"
+bin = "echo-tool"
+"#
+        ));
+    }
+
+    std::fs::write(root.join("tau-lock.toml"), lockfile).unwrap();
+
+    // ---- Project tau.toml ----
+    let tools_field = if tools_in_requires.is_empty() {
+        String::new()
+    } else {
+        let list = tools_in_requires
+            .iter()
+            .map(|s| format!("\"{s}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("\n[agents.{agent_id}.requires]\ntools = [{list}]\n")
+    };
+    let config_field = if agent_config_toml.is_empty() {
+        String::new()
+    } else {
+        format!("\n[agents.{agent_id}.config]\n{agent_config_toml}\n")
+    };
+
+    // Pin `package = "echo-llm@^0.1"` — `build_agent_definition` looks
+    // up the `package` field as the agent's primary tau-pkg package
+    // (the manifest read of which seeds capabilities). Echo-llm is
+    // always installed, so it doubles as the agent's backing package.
+    let project_toml = format!(
+        r#"[project]
+name = "demo"
+
+[agents.{agent_id}]
+display_name = "Echo Agent"
+package      = "echo-llm@^0.1"
+llm_backend  = "echo-llm"
+{tools_field}{config_field}"#
+    );
+    std::fs::write(root.join("tau.toml"), project_toml).unwrap();
+
+    dir
+}
+
+/// Author a package's `tau.toml` at `<root>/.tau/packages/<name>/<version>/tau.toml`.
+/// Used by [`setup_echo_project`].
+fn write_package_manifest(root: &Path, name: &str, version: &str, kind: &str, source_url: &str) {
+    let pkg_dir = root.join(".tau").join("packages").join(name).join(version);
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+    let manifest = format!(
+        r#"name = "{name}"
+version = "{version}"
+description = "echo plugin fixture"
+authors = ["tester <test@example.com>"]
+source = "{source_url}"
+kind = "{kind}"
+dependencies = []
+capabilities = []
+"#
+    );
+    std::fs::write(pkg_dir.join("tau.toml"), manifest).unwrap();
 }

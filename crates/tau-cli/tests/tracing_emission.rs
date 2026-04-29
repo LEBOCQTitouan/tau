@@ -20,27 +20,24 @@
 //! `runtime.run_started` (info-level). For the higher-fidelity events
 //! we set `RUST_LOG=tau=debug` explicitly so `runtime.turn_started`
 //! and friends are flushed.
+//!
+//! These tests spawn the real `echo-llm` plugin process via
+//! [`common::setup_echo_project`] (Task 21) so the runtime sees a
+//! complete, non-mocked turn lifecycle.
 
 mod common;
 
 use assert_cmd::Command as AssertCmd;
 
 #[test]
-#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_emits_run_started_event_at_info() {
-    let dir = common::setup_project_with_installed_agent(
-        "reviewer",
-        "code-reviewer",
-        "0.1.0",
-        "mock-llm",
-    );
+    let dir = common::setup_echo_project("echo", "canned_text = \"ok\"\n", &[]);
 
     let output = AssertCmd::cargo_bin("tau")
         .unwrap()
-        .args(["run", "reviewer", "hi"])
+        .args(["run", "echo", "hi"])
         .current_dir(dir.path())
         .env("TAU_HOME", dir.path().join("global"))
-        .env("TAU_MOCK_LLM_TEXT", "ok")
         // Default filter is tau=info -> run_started (info!) shows up.
         .env_remove("RUST_LOG")
         .output()
@@ -59,21 +56,14 @@ fn run_emits_run_started_event_at_info() {
 }
 
 #[test]
-#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_emits_turn_lifecycle_events_at_debug() {
-    let dir = common::setup_project_with_installed_agent(
-        "reviewer",
-        "code-reviewer",
-        "0.1.0",
-        "mock-llm",
-    );
+    let dir = common::setup_echo_project("echo", "canned_text = \"ok\"\n", &[]);
 
     let output = AssertCmd::cargo_bin("tau")
         .unwrap()
-        .args(["run", "reviewer", "hi"])
+        .args(["run", "echo", "hi"])
         .current_dir(dir.path())
         .env("TAU_HOME", dir.path().join("global"))
-        .env("TAU_MOCK_LLM_TEXT", "ok")
         .env("RUST_LOG", "tau=debug")
         .output()
         .unwrap();

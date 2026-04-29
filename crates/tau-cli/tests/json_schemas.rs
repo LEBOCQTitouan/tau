@@ -91,22 +91,15 @@ llm_backend  = "anthropic"
 }
 
 #[test]
-#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn json_schema_run_completed() {
-    let dir = common::setup_project_with_installed_agent(
-        "reviewer",
-        "code-reviewer",
-        "0.1.0",
-        "mock-llm",
-    );
+    let dir = common::setup_echo_project("echo", "canned_text = \"ok\"\n", &[]);
     let global_dir = dir.path().join("global");
 
     let mut cmd = Command::cargo_bin("tau").unwrap();
     let output = cmd
-        .args(["run", "reviewer", "hi", "--json"])
+        .args(["run", "echo", "hi", "--json"])
         .current_dir(dir.path())
         .env("TAU_HOME", &global_dir)
-        .env("TAU_MOCK_LLM_TEXT", "ok")
         .output()
         .unwrap();
     assert!(
@@ -118,30 +111,4 @@ fn json_schema_run_completed() {
     let val: Value = serde_json::from_str(std::str::from_utf8(&output.stdout).unwrap().trim())
         .expect("valid JSON");
     assert_json_snapshot!("run_completed_json", val);
-}
-
-#[test]
-#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
-fn json_schema_run_failed() {
-    let dir = common::setup_project_with_installed_agent(
-        "reviewer",
-        "code-reviewer",
-        "0.1.0",
-        "mock-llm",
-    );
-    let global_dir = dir.path().join("global");
-
-    let mut cmd = Command::cargo_bin("tau").unwrap();
-    let output = cmd
-        .args(["run", "reviewer", "hi", "--json", "--max-turns", "1"])
-        .current_dir(dir.path())
-        .env("TAU_HOME", &global_dir)
-        .env("TAU_MOCK_LLM_TOOL_USES", "echo")
-        .output()
-        .unwrap();
-    // Failed exit code 1
-    assert_eq!(output.status.code(), Some(1));
-    let val: Value = serde_json::from_str(std::str::from_utf8(&output.stdout).unwrap().trim())
-        .expect("valid JSON");
-    assert_json_snapshot!("run_failed_json", val);
 }

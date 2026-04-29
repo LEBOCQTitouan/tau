@@ -1,25 +1,27 @@
 //! Integration tests for `tau run`.
 //!
-//! Hand-authors the package fixture (lockfile + `tau.toml`) directly
-//! rather than going through `tau install`, mirroring the
-//! `install_fixture` helper from `crates/tau-cli/src/config/agent.rs`'s
-//! unit tests. The fixture builders themselves live in
-//! `tests/common/mod.rs` so `cmd_chat.rs` and the cross-cutting suites
-//! can share them; this file only orchestrates the assertions.
+//! Two flavours of fixture:
 //!
-//! Tests that exercise the actual run loop are marked
-//! `#[ignore = "TODO(task-21): ..."]` because the v0.1 transitional
-//! `--features test-mock` mock backend was retired in Task 19. Task 21
-//! rewrites them against real `echo-llm` / `echo-tool` binary spawns.
-//! The "easy" tests (agent_id_not_found, missing_project_tau_toml)
-//! still run unconditionally.
+//! - "Easy" tests use `tempfile::TempDir` directly — no plugin spawn,
+//!   so they cover the early-exit paths (`run` without a project
+//!   `tau.toml`, an unknown agent id).
+//! - Run-loop tests use [`common::setup_echo_project`], which builds
+//!   `echo-llm` (and optionally `echo-tool`) once per session and
+//!   synthesizes a project tau.toml + lockfile pointing at the
+//!   pre-built binaries. The CLI then drives a full `tau run` against
+//!   real plugin processes via `tau_runtime::plugin_host::load_*`.
+//!
+//! Plugin-spawning tests are slower (~30 s for the binary's first
+//! invocation, sub-second after); the build cost is amortized via the
+//! `OnceLock`-guarded `ensure_echo_plugins_built` helper so the per-
+//! test overhead is just process spawn + handshake + a single RPC.
 
 mod common;
 
 use assert_cmd::Command as AssertCmd;
 use predicates::prelude::*;
 
-// ---- "easy" tests (no fixture / no mock LLM needed) -------------------------
+// ---- "easy" tests (no fixture / no plugin spawn needed) --------------------
 
 #[test]
 fn run_missing_project_tau_toml_exits_two() {
@@ -63,54 +65,43 @@ llm_backend  = "anthropic"
         .stderr(predicate::str::contains("ghost"));
 }
 
-// ---- run-loop tests (ignored until Task 21 rewires real plugin spawn) ------
-//
-// These tests previously relied on `--features test-mock`'s in-process
-// mock LLM backend; the feature was retired in Task 19 and the tests
-// are kept (marked `#[ignore]`) as a checklist for Task 21, which
-// rewrites them against real `echo-llm` / `echo-tool` subprocess
-// spawns through `tau_runtime::plugin_host::load_*`.
+// ---- run-loop tests (real echo-llm spawn) ----------------------------------
 
 #[test]
-#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_dry_run_prints_preview_and_makes_no_llm_call() {
-    let dir = common::setup_project_with_installed_agent(
-        "reviewer",
-        "code-reviewer",
-        "0.1.0",
-        "mock-llm",
-    );
+    // --dry-run short-circuits before plugin loading so we don't even
+    // need the echo binary built — but we still go through
+    // `setup_echo_project` for parity with the other tests in this
+    // module (and to keep the fixture authoring in one place).
+    let dir = common::setup_echo_project("echo", "canned_text = \"unused on dry-run\"\n", &[]);
 
     AssertCmd::cargo_bin("tau")
         .unwrap()
-        .args(["run", "reviewer", "Review src/auth.rs", "--dry-run"])
+        .args(["run", "echo", "Review src/auth.rs", "--dry-run"])
         .current_dir(dir.path())
         .env("TAU_HOME", dir.path().join("global"))
         .assert()
         .success()
         .stderr(predicate::str::contains("[dry-run]"))
         .stderr(predicate::str::contains("agent:"))
-        .stderr(predicate::str::contains("reviewer"))
+        .stderr(predicate::str::contains("echo"))
         .stderr(predicate::str::contains("max_turns:"))
         .stderr(predicate::str::contains("no LLM call"));
 }
 
 #[test]
-#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_completed_happy_path_emits_text() {
-    let dir = common::setup_project_with_installed_agent(
-        "reviewer",
-        "code-reviewer",
-        "0.1.0",
-        "mock-llm",
+    let dir = common::setup_echo_project(
+        "echo",
+        "canned_text = \"review complete: looks good\"\n",
+        &[],
     );
 
     let output = AssertCmd::cargo_bin("tau")
         .unwrap()
-        .args(["run", "reviewer", "Review src/auth.rs"])
+        .args(["run", "echo", "Review src/auth.rs"])
         .current_dir(dir.path())
         .env("TAU_HOME", dir.path().join("global"))
-        .env("TAU_MOCK_LLM_TEXT", "review complete: looks good")
         .output()
         .unwrap();
 
@@ -128,94 +119,44 @@ fn run_completed_happy_path_emits_text() {
 }
 
 #[test]
-#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
-fn run_with_tool_call_dispatches_echo_and_completes() {
-    let dir = common::setup_project_with_installed_agent(
-        "reviewer",
-        "code-reviewer",
-        "0.1.0",
-        "mock-llm",
-    );
-
-    // Turn 0: emit a tool_use for `echo`. Turn 1: end with text.
-    let output = AssertCmd::cargo_bin("tau")
-        .unwrap()
-        .args(["run", "reviewer", "drive a tool call"])
-        .current_dir(dir.path())
-        .env("TAU_HOME", dir.path().join("global"))
-        .env("TAU_MOCK_LLM_TEXT", "done after tool")
-        .env("TAU_MOCK_LLM_TOOL_USES", "echo")
-        .output()
-        .unwrap();
-
-    assert!(
-        output.status.success(),
-        "expected success; stderr={}\nstdout={}",
-        String::from_utf8_lossy(&output.stderr),
-        String::from_utf8_lossy(&output.stdout),
-    );
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    // The final assistant message is the turn-1 text, not the tool result.
-    assert!(stdout.contains("done after tool"), "stdout: {stdout}");
-}
-
-#[test]
-#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
-fn run_max_turns_reached_when_llm_loops_forever() {
-    // Per `MockLlmBackend::build_response`, tool_uses are emitted on
-    // turn 0 only — so an "infinite" tool-loop isn't reachable through
-    // env-var configuration. Instead, set max_turns = 1 and emit a
-    // tool_use: the loop dispatches the tool on turn 1, then runs out
-    // of turns before reaching the second LLM call. Result: Failed
-    // with OutOfResources → exit code 1.
-    let dir = common::setup_project_with_installed_agent(
-        "reviewer",
-        "code-reviewer",
-        "0.1.0",
-        "mock-llm",
-    );
+fn run_propagates_plugin_crash_as_exit_code_two() {
+    // `crash_after_handshake = true` causes echo-llm to panic on the
+    // first `llm.complete` RPC. The host-side dispatch surfaces this
+    // as a `RuntimeError`, which `run_main` maps to exit code 2.
+    let dir = common::setup_echo_project("echo", "crash_after_handshake = true\n", &[]);
 
     let output = AssertCmd::cargo_bin("tau")
         .unwrap()
-        .args(["run", "reviewer", "loop forever", "--max-turns", "1"])
+        .args(["run", "echo", "anything"])
         .current_dir(dir.path())
         .env("TAU_HOME", dir.path().join("global"))
-        .env("TAU_MOCK_LLM_TEXT", "calling a tool")
-        .env("TAU_MOCK_LLM_TOOL_USES", "echo")
         .output()
         .unwrap();
 
     assert_eq!(
         output.status.code(),
-        Some(1),
-        "expected agent-failed exit code 1; got status={:?}\nstderr={}\nstdout={}",
+        Some(2),
+        "expected kernel-error exit code 2; got {:?}\nstderr={}\nstdout={}",
         output.status.code(),
         String::from_utf8_lossy(&output.stderr),
         String::from_utf8_lossy(&output.stdout),
     );
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("agent failed"),
-        "stderr should announce failure: {stderr}"
+        stderr.contains("echo-llm") || stderr.contains("plugin"),
+        "stderr should mention the plugin; got:\n{stderr}"
     );
 }
 
 #[test]
-#[ignore = "TODO(task-21): rewrite against real echo-llm spawn"]
 fn run_json_completed_emits_outcome_payload() {
-    let dir = common::setup_project_with_installed_agent(
-        "reviewer",
-        "code-reviewer",
-        "0.1.0",
-        "mock-llm",
-    );
+    let dir = common::setup_echo_project("echo", "canned_text = \"pong\"\n", &[]);
 
     let output = AssertCmd::cargo_bin("tau")
         .unwrap()
-        .args(["run", "reviewer", "ping", "--json"])
+        .args(["run", "echo", "ping", "--json"])
         .current_dir(dir.path())
         .env("TAU_HOME", dir.path().join("global"))
-        .env("TAU_MOCK_LLM_TEXT", "pong")
         .output()
         .unwrap();
 
