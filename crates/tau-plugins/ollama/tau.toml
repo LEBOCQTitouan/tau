@@ -1,0 +1,8 @@
+name = "ollama"
+version = "0.1.0"
+description = "Ollama (local LLM runner) backend for tau."
+
+[plugin]
+provides = "llm_backend"
+kind     = "rust-cargo"
+bin      = "ollama-plugin"
