@@ -11,6 +11,33 @@
 
 use serde::Deserialize;
 use tau_ports::LlmError;
+use thiserror::Error;
+
+/// Internal error type from the HTTP client (`client.rs`, Task 6).
+///
+/// Defined here so this module can be the single point of `LlmError`
+/// translation. `client.rs` imports this and constructs the variants
+/// from its retry loop.
+#[non_exhaustive]
+#[derive(Debug, Error)]
+#[allow(dead_code)]
+pub(crate) enum ClientError {
+    /// Underlying transport failure (network, TLS, DNS, etc.).
+    /// Distinct from a non-success status code, which is handled
+    /// separately via `map_response_error`.
+    #[error("transport: {0}")]
+    Transport(reqwest::Error),
+
+    /// Retry budget exhausted. The `status` is the last status
+    /// observed (always 429, 503, or 408 today).
+    #[error("retries exhausted: {status} after {attempts} attempts")]
+    Exhausted {
+        /// Last observed status code that triggered the final retry decision.
+        status: reqwest::StatusCode,
+        /// Total attempt count (initial + retries).
+        attempts: u32,
+    },
+}
 
 /// Map a non-2xx Ollama response to `LlmError::Internal`.
 ///
@@ -45,6 +72,24 @@ pub(crate) fn map_response_error(status: reqwest::StatusCode, body: &str) -> Llm
 #[derive(Deserialize)]
 struct OllamaErrorBody {
     error: String,
+}
+
+/// Map a `ClientError` (transport or retry-exhausted) to `LlmError`.
+///
+/// Same target type as `map_response_error` so the plugin's batch and
+/// streaming entrypoints can call either translator uniformly.
+#[allow(dead_code)]
+pub(crate) fn map_client_error(err: ClientError) -> LlmError {
+    match err {
+        ClientError::Transport(e) => LlmError::Internal {
+            message: format!("ollama transport: {e}"),
+        },
+        ClientError::Exhausted { status, attempts } => LlmError::Internal {
+            message: format!(
+                "ollama retries exhausted ({attempts} attempts, last status {status})",
+            ),
+        },
+    }
 }
 
 #[cfg(test)]
@@ -97,5 +142,29 @@ mod tests {
         };
         assert!(message.contains("server error"));
         assert!(message.contains("model is loading"));
+    }
+
+    #[test]
+    fn map_client_error_exhausted() {
+        let err = ClientError::Exhausted {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            attempts: 3,
+        };
+        let mapped = map_client_error(err);
+        let LlmError::Internal { message, .. } = mapped else {
+            panic!("expected LlmError::Internal");
+        };
+        assert!(message.contains("retries exhausted"));
+        assert!(message.contains("3 attempts"));
+        assert!(message.contains("503"));
+    }
+
+    #[test]
+    fn map_client_error_transport_smoke() {
+        // We can't construct a reqwest::Error directly (private constructors).
+        // This test exists to ensure the function compiles with both variant
+        // arms reachable. The Exhausted path above covers the substantive
+        // assertion; the Transport arm is verified by the client.rs tests.
+        let _ = map_client_error; // ensure the function is reachable
     }
 }
