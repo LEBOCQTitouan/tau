@@ -121,3 +121,37 @@ jobs:
         run: cargo build -p tau-cli --no-default-features
       - name: Test tau-cli (no default features)
         run: cargo test -p tau-cli --no-default-features --lib
+
+  no-default-features-protocol:
+    name: build (tau-plugin-protocol)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build tau-plugin-protocol (no default features)
+        run: cargo build -p tau-plugin-protocol --no-default-features
+      - name: Test tau-plugin-protocol (no default features)
+        run: cargo test -p tau-plugin-protocol --no-default-features --lib
+
+  no-default-features-sdk:
+    name: build (tau-plugin-sdk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build tau-plugin-sdk (no default features)
+        run: cargo build -p tau-plugin-sdk --no-default-features
+      - name: Test tau-plugin-sdk (no default features)
+        run: cargo test -p tau-plugin-sdk --no-default-features --lib
+
+  build-tau-plugins:
+    name: build (tau-plugins)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build toy plugins (release)
+        run: cargo build --release -p echo-llm -p echo-tool
