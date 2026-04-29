@@ -35,7 +35,6 @@ pub(crate) struct OpenAIClient {
 impl OpenAIClient {
     /// Construct a client. The caller (Task 11 `Configure::from_config`)
     /// validates inputs.
-    #[allow(dead_code)]
     pub(crate) fn new(
         inner: reqwest::Client,
         base_url: String,
@@ -55,7 +54,6 @@ impl OpenAIClient {
     /// `POST /v1/chat/completions` with retry. The body is a
     /// `serde_json::Value` produced by `request::build_chat_completions_body`.
     /// `stream == true` adds the `accept: text/event-stream` header.
-    #[allow(dead_code)]
     pub(crate) async fn post_chat_completions(
         &self,
         body: &serde_json::Value,

@@ -12,7 +12,6 @@ use thiserror::Error;
 
 /// Errors raised while building the OpenAI request body.
 #[derive(Debug, Error)]
-#[allow(dead_code)]
 pub(crate) enum BuildError {
     /// A `LlmProviderMessage` variant wasn't recognized — possible if
     /// `tau-ports` adds a new variant before the plugin is updated.
@@ -35,7 +34,6 @@ pub(crate) enum BuildError {
 ///
 /// `stream` controls the `"stream"` field (false for batch, true for
 /// SSE streaming).
-#[allow(dead_code)]
 pub(crate) fn build_chat_completions_body(
     req: &CompletionRequest,
     stream: bool,

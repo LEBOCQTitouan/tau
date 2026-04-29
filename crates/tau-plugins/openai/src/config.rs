@@ -147,7 +147,6 @@ fn default_respect_retry_after() -> bool {
 ///   prefixes).
 ///
 /// Wired into `Configure::from_config` in Task 11.
-#[allow(dead_code)]
 pub(crate) fn resolve_api_key(cfg: &OpenAIConfig) -> Result<String, ConfigError> {
     let key = if let Some(direct) = cfg.api_key.as_ref() {
         tracing::warn!(
@@ -174,7 +173,6 @@ pub(crate) fn resolve_api_key(cfg: &OpenAIConfig) -> Result<String, ConfigError>
 /// Validate retry-config invariants beyond what serde catches.
 ///
 /// Wired into `Configure::from_config` in Task 11.
-#[allow(dead_code)]
 pub(crate) fn validate_retry(retry: &RetryConfig) -> Result<(), ConfigError> {
     if retry.max_attempts == 0 {
         return Err(ConfigError::InvalidValue {

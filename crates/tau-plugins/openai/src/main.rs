@@ -1,10 +1,19 @@
 //! `openai-plugin` binary. Spawned by tau-runtime::plugin_host as a
 //! subprocess; talks MessagePack-RPC over stdio per ADR-0008.
 //!
-//! The full implementation lands in Task 11. For Task 1, this stub
-//! exists only so that `cargo build` succeeds.
+//! Thin shim over [`tau_plugin_sdk::run_llm_backend_with_config`]:
+//! the SDK runner drives the handshake, deserializes [`OpenAIConfig`]
+//! from the handshake `config` field, constructs the plugin via
+//! [`OpenAIPlugin::from_config`], and runs the dispatch loop.
+//!
+//! [`OpenAIConfig`]: openai_plugin_lib::config::OpenAIConfig
+//! [`OpenAIPlugin::from_config`]: openai_plugin_lib::plugin::OpenAIPlugin
 
-fn main() {
-    eprintln!("openai-plugin: not yet wired (placeholder; see Task 11)");
-    std::process::exit(1);
+use openai_plugin_lib::plugin::OpenAIPlugin;
+use tau_plugin_sdk::{run_llm_backend_with_config, SdkError};
+
+#[tokio::main]
+async fn main() -> Result<(), SdkError> {
+    run_llm_backend_with_config::<OpenAIPlugin>(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+        .await
 }

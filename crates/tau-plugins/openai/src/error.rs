@@ -25,7 +25,6 @@ use thiserror::Error;
 /// from its retry loop.
 #[non_exhaustive]
 #[derive(Debug, Error)]
-#[allow(dead_code)]
 pub(crate) enum ClientError {
     /// Underlying transport failure (network, TLS, DNS, etc.).
     /// Distinct from a non-success status code, which is handled
@@ -72,7 +71,6 @@ fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u32> {
 ///
 /// `headers` is needed for `RateLimited`'s `retry_after_seconds` from
 /// the `Retry-After` header on 429 responses.
-#[allow(dead_code)]
 pub(crate) fn map_response_error(
     status: reqwest::StatusCode,
     headers: &reqwest::header::HeaderMap,
@@ -126,7 +124,6 @@ fn format_invalid_request(prefix: &str, detail: &OpenAIErrorDetail) -> String {
 /// - `Exhausted { 408, attempts }` → `Transport` (synthesized from timeout).
 /// - `Exhausted { 5xx, attempts }` → `Provider` (retryable transient).
 /// - `Exhausted { other, attempts }` → `Provider` (catch-all transient bucket).
-#[allow(dead_code)]
 pub(crate) fn map_client_error(err: ClientError) -> LlmError {
     match err {
         ClientError::Transport(e) => LlmError::Transport {

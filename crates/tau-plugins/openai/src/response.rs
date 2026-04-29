@@ -13,7 +13,6 @@ use thiserror::Error;
 /// Errors raised while parsing the OpenAI `/v1/chat/completions`
 /// batch response.
 #[derive(Debug, Error)]
-#[allow(dead_code)]
 pub(crate) enum ParseError {
     /// The response body could not be deserialized as the OpenAI
     /// response shape.
@@ -95,7 +94,6 @@ struct OpenAIUsage {
 ///   `arguments` string wasn't valid JSON.
 /// - `ParseError::UnexpectedChoicesCount { got }` — `choices` had a
 ///   length other than 1 (v0.1 only handles n=1).
-#[allow(dead_code)]
 pub(crate) fn parse_chat_completions_response(
     body: &str,
 ) -> Result<CompletionResponse, ParseError> {
@@ -158,7 +156,6 @@ pub(crate) fn parse_chat_completions_response(
 /// - `"content_filter"` (filtered by safety system) → `Error`
 /// - `"function_call"` (deprecated legacy field) → `ToolUse` with warn
 /// - any other → `EndTurn` with warn
-#[allow(dead_code)]
 pub(crate) fn map_finish_reason(s: &str) -> StopReason {
     match s {
         "stop" => StopReason::EndTurn,

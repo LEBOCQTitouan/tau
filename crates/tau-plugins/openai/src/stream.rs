@@ -34,7 +34,6 @@ use crate::response::map_finish_reason;
 
 /// Drive `body.bytes_stream()` through `eventsource-stream` to
 /// completion, yielding `CompletionChunk`s as deltas arrive.
-#[allow(dead_code)]
 pub(crate) async fn parse_sse(body: reqwest::Response) -> Result<CompletionStream, LlmError> {
     let bytes_stream = body.bytes_stream();
     Ok(Box::pin(stream_events(bytes_stream)))
@@ -162,7 +161,6 @@ where
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct StreamEvent {
     #[serde(default)]
     choices: Vec<StreamChoice>,
