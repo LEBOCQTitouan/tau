@@ -492,10 +492,15 @@ fn build_rust_cargo_plugin(
         });
     }
 
+    // Cargo appends the platform-specific executable extension
+    // (`.exe` on Windows, empty elsewhere). Match it via
+    // `std::env::consts::EXE_SUFFIX` so Windows installs find their
+    // binaries.
+    let bin_filename = format!("{}{}", plugin_manifest.bin, std::env::consts::EXE_SUFFIX);
     let binary_path = package_dir
         .join("target")
         .join("release")
-        .join(&plugin_manifest.bin);
+        .join(&bin_filename);
     let canonical = binary_path
         .canonicalize()
         .map_err(|e| InstallError::BuildFailed {
