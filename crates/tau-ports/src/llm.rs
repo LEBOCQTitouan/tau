@@ -745,6 +745,7 @@ mod helper_tests {
         assert_eq!(resp2.stop_reason, StopReason::ToolUse);
     }
 
+    #[cfg(feature = "serde")]
     #[test]
     fn tool_use_accumulator_round_trip() {
         let mut acc = ToolUseAccumulator::new("toolu_xyz".into(), "search".into());
@@ -766,6 +767,7 @@ mod helper_tests {
         assert_eq!(map.get("q"), Some(&Value::String("hello world".into())));
     }
 
+    #[cfg(feature = "serde")]
     #[test]
     fn tool_use_accumulator_invalid_json() {
         let mut acc = ToolUseAccumulator::new("toolu_bad".into(), "search".into());
