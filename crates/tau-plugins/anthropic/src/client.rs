@@ -12,8 +12,6 @@
 //! - Network timeout → retry.
 //! - Other transport error (DNS, TLS, connection refused) → ClientError::Transport, no retry.
 
-#![allow(dead_code)] // Wired into AnthropicPlugin in Task 9.
-
 use reqwest::{Response, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
 use std::time::Duration;

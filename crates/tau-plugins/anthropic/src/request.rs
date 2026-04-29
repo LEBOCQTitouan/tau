@@ -8,10 +8,6 @@
 //! - `req.tool_choice` maps per the variant table.
 //! - `req.provider_specific` is ignored in v0.1 with a debug-level log.
 
-// Items in this module are wired into `plugin.rs` in Task 9; until then
-// they're only reachable from the unit tests here.
-#![allow(dead_code)]
-
 use serde::ser::Error as _;
 use serde_json::Value as JsonValue;
 use tau_ports::{CompletionRequest, ContentBlock, LlmProviderMessage, ToolChoice, ToolSpec};

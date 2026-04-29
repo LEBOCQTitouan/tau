@@ -11,8 +11,6 @@
 //! Mid-stream errors do NOT retry (spec §5.3): the retry layer in
 //! `client.rs` only retries before bytes are consumed.
 
-#![allow(dead_code)] // Wired into AnthropicPlugin in Task 9.
-
 use std::collections::HashMap;
 
 use eventsource_stream::Eventsource;

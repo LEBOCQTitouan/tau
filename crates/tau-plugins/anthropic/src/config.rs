@@ -143,7 +143,6 @@ fn default_respect_retry_after() -> bool {
 /// missing env var, `InvalidValue` for malformed key shape).
 ///
 /// Wired into `Configure::from_config` in Task 9.
-#[allow(dead_code)]
 pub(crate) fn resolve_api_key(cfg: &AnthropicConfig) -> Result<String, ConfigError> {
     let key = if let Some(direct) = cfg.api_key.as_ref() {
         tracing::warn!(
@@ -170,7 +169,6 @@ pub(crate) fn resolve_api_key(cfg: &AnthropicConfig) -> Result<String, ConfigErr
 /// Validate retry-config invariants beyond what serde catches.
 ///
 /// Wired into `Configure::from_config` in Task 9.
-#[allow(dead_code)]
 pub(crate) fn validate_retry(retry: &RetryConfig) -> Result<(), ConfigError> {
     if retry.max_attempts == 0 {
         return Err(ConfigError::InvalidValue {

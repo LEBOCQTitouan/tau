@@ -20,10 +20,6 @@
 //! helper is the in-tree convention for building canonical
 //! `CompletionResponse` values from outside `tau-ports`.
 
-// Items in this module are wired into `plugin.rs` in Task 9; until then
-// they're only reachable from the unit tests here.
-#![allow(dead_code)]
-
 use serde::Deserialize;
 use tau_ports::fixtures::make_completion_response;
 use tau_ports::{CompletionResponse, StopReason, TokenUsage, ToolUse};

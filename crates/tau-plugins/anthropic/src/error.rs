@@ -9,8 +9,6 @@
 //! - Richer variants (`RateLimited`, `Auth`, etc.) are deferred to a
 //!   future ADR-amendment paired with the second LLM-backend plugin.
 
-#![allow(dead_code)] // Wired into AnthropicPlugin in Task 9.
-
 use serde::Deserialize;
 use tau_ports::LlmError;
 use thiserror::Error;
