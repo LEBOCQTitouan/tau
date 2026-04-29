@@ -8,5 +8,4 @@
 //! §3.1 + §9.1 for design rationale (rule-of-three refactor of the
 //! cassette replayer that originated in the anthropic plugin).
 
-// The `cassette` module lands in Task 2 (lifted verbatim from
-// crates/tau-plugins/anthropic/tests/common/cassette.rs).
+pub mod cassette;

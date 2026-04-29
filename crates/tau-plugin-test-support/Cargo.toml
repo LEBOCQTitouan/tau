@@ -16,3 +16,6 @@ path = "src/lib.rs"
 tokio       = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "io-util", "net"] }
 serde       = { workspace = true }
 serde_yaml  = "0.9"
+
+[dev-dependencies]
+reqwest     = { workspace = true }
