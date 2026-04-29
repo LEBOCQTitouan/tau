@@ -173,3 +173,44 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build ollama-plugin (release)
         run: cargo build --release -p ollama
+
+  build-openai-plugin:
+    name: build (openai-plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build openai-plugin (release)
+        run: cargo build --release -p openai
+
+  build-tau-plugin-test-support:
+    name: build (tau-plugin-test-support)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build tau-plugin-test-support
+        run: cargo build -p tau-plugin-test-support
+      - name: Test tau-plugin-test-support
+        run: cargo test -p tau-plugin-test-support --all-targets
+
+  build-tau-plugin-conformance:
+    name: build (tau-plugin-conformance)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build tau-plugin-conformance
+        run: cargo build -p tau-plugin-conformance
+
+  test-conformance:
+    name: test (conformance)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run conformance suite against all 3 plugins
+        run: |
+          cargo test -p anthropic --test conformance -- --nocapture
+          cargo test -p ollama    --test conformance -- --nocapture
+          cargo test -p openai    --test conformance -- --nocapture
