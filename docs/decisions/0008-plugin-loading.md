@@ -1,6 +1,6 @@
 # ADR-0008: Plugin loading mechanism — IPC over MessagePack-RPC + tau-pkg, tau-runtime, tau-domain amendments
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-04-28
 **Supersedes:** —
 **Closes:** [ADR-0007](0007-tau-cli.md) §18 ("plugin loading deferred to
