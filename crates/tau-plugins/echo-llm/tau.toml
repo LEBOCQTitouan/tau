@@ -1,0 +1,8 @@
+name = "echo-llm"
+version = "0.1.0"
+description = "Toy LlmBackend plugin: replays canned responses for tau integration tests."
+
+[plugin]
+provides = "llm_backend"
+kind     = "rust-cargo"
+bin      = "echo-llm"

@@ -432,10 +432,28 @@ dependencies = [
 [[package]]
 name = "echo-llm"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tau-domain",
+ "tau-plugin-protocol",
+ "tau-plugin-sdk",
+ "tau-ports",
+ "tokio",
+]
 
 [[package]]
 name = "echo-tool"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tau-domain",
+ "tau-plugin-protocol",
+ "tau-plugin-sdk",
+ "tau-ports",
+ "tokio",
+]
 
 [[package]]
 name = "encode_unicode"
