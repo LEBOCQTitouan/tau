@@ -34,6 +34,10 @@ use super::process::{PluginProcess, RpcResult};
 /// Wire method names for the tool port.
 const TOOL_CALL_METHOD: &str = "tool.call";
 const TOOL_DESCRIBE_METHOD: &str = "tool.describe";
+/// Wire method name for fetching the tool's required capabilities.
+/// Called once during plugin loading; returns Vec<tau_domain::Capability>.
+#[allow(dead_code)] // consumed by Task 5 (sdk runner) / Task 6 (plugin_host caller)
+const TOOL_DESCRIBE_CAPABILITIES_METHOD: &str = "tool.describe_capabilities";
 
 /// IPC-backed [`DynTool`] adapter.
 ///

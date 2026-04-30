@@ -36,6 +36,10 @@ use crate::tracing_layer;
 const TOOL_CALL_METHOD: &str = "tool.call";
 /// Method name for retrieving the tool's [`tau_ports::ToolSpec`].
 const TOOL_DESCRIBE_METHOD: &str = "tool.describe";
+/// Wire method name for fetching the tool's required capabilities.
+/// Called once during plugin loading; returns Vec<tau_domain::Capability>.
+#[allow(dead_code)] // consumed by Task 5 (sdk runner) / Task 6 (plugin_host caller)
+const TOOL_DESCRIBE_CAPABILITIES_METHOD: &str = "tool.describe_capabilities";
 
 /// Run a plugin that implements [`Tool`]. Reads frames from stdin,
 /// writes frames to stdout. Returns when:
