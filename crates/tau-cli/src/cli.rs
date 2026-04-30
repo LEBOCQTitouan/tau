@@ -173,6 +173,11 @@ pub struct ListArgs {
     /// (Ignored when `resource` is `agents`; agents are always project-scoped.)
     #[arg(long)]
     pub all: bool,
+    /// When listing agents, also print the effective capability set
+    /// (allow + deny per agent, computed against the package manifest).
+    /// Ignored when `resource` is `packages`.
+    #[arg(long)]
+    pub capabilities: bool,
     /// Rejected explicitly: `tau list` is read-only.
     #[arg(long, hide = true)]
     pub dry_run: bool,
@@ -303,6 +308,16 @@ mod tests {
             panic!()
         };
         assert!(matches!(args.resource, ListResource::Agents));
+    }
+
+    #[test]
+    fn parses_list_agents_with_capabilities_flag() {
+        let args = Cli::try_parse_from(["tau", "list", "agents", "--capabilities"]).unwrap();
+        let Command::List(args) = args.command else {
+            panic!("expected List command")
+        };
+        assert!(matches!(args.resource, ListResource::Agents));
+        assert!(args.capabilities);
     }
 
     #[test]

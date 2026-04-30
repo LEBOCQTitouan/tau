@@ -193,3 +193,106 @@ fn list_global_and_all_mutually_exclusive() {
         .assert()
         .failure();
 }
+
+#[test]
+fn list_agents_without_capabilities_flag_omits_effective_caps() {
+    let dir = tempfile::tempdir().unwrap();
+    let toml_str = r#"
+[project]
+name = "demo"
+
+[agents.reviewer]
+display_name = "Code Reviewer"
+package      = "code-reviewer@^0.1"
+llm_backend  = "anthropic"
+"#;
+    std::fs::write(dir.path().join("tau.toml"), toml_str).unwrap();
+
+    let output = Command::cargo_bin("tau")
+        .unwrap()
+        .args(["list", "agents"])
+        .current_dir(dir.path())
+        .env("TAU_HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The "effective_capabilities" header / token should NOT appear.
+    assert!(
+        !stdout.contains("effective_capabilities"),
+        "expected --capabilities-off to skip effective_caps column; got: {stdout}"
+    );
+}
+
+#[test]
+fn list_agents_with_capabilities_flag_renders_package_not_installed() {
+    // The agent's package isn't installed in this temp scope, so the row
+    // should render with "(package not installed)" — non-fatal, exit 0.
+    let dir = tempfile::tempdir().unwrap();
+    let toml_str = r#"
+[project]
+name = "demo"
+
+[agents.reviewer]
+display_name = "Code Reviewer"
+package      = "code-reviewer@^0.1"
+llm_backend  = "anthropic"
+"#;
+    std::fs::write(dir.path().join("tau.toml"), toml_str).unwrap();
+
+    Command::cargo_bin("tau")
+        .unwrap()
+        .args(["list", "agents", "--capabilities"])
+        .current_dir(dir.path())
+        .env("TAU_HOME", dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("reviewer"))
+        .stdout(predicate::str::contains("package not installed"));
+}
+
+#[test]
+fn list_agents_with_capabilities_json_emits_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let toml_str = r#"
+[project]
+name = "demo"
+
+[agents.reviewer]
+display_name = "Code Reviewer"
+package      = "code-reviewer@^0.1"
+llm_backend  = "anthropic"
+"#;
+    std::fs::write(dir.path().join("tau.toml"), toml_str).unwrap();
+
+    let output = Command::cargo_bin("tau")
+        .unwrap()
+        .args(["list", "agents", "--capabilities", "--json"])
+        .current_dir(dir.path())
+        .env("TAU_HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let rows: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let arr = rows.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    // effective_capabilities is omitted when None; it should not appear
+    // for an uninstalled package.
+    assert!(arr[0].get("id").is_some());
+    assert!(arr[0].get("effective_capabilities").is_none());
+}
+
+#[test]
+fn list_agents_capabilities_flag_does_not_affect_package_listing() {
+    // --capabilities is silently ignored on `tau list packages`.
+    let dir = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("tau")
+        .unwrap()
+        .args(["list", "packages", "--capabilities"])
+        .current_dir(dir.path())
+        .env("TAU_HOME", dir.path())
+        .assert()
+        .success();
+}
