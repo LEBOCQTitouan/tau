@@ -5,8 +5,9 @@
 //! Per spec §3.3 and §3.4: walks the per-scope lockfile to find the
 //! highest-version installed package matching the entry's `package`
 //! reference, reads its manifest, verifies the declared `llm_backend`
-//! and `requires.tools` packages are installed, and materializes the
-//! `system_prompt` (inline or file).
+//! is installed, and materializes the `system_prompt` (inline or file).
+//! `requires.tools` resolve+install happens at the CLI call sites
+//! (cmd/run.rs, cmd/chat.rs, cmd/resolve.rs) before this function runs.
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -65,15 +66,6 @@ pub enum AgentResolutionError {
         agent_id: String,
         /// Raw `llm_backend = "..."` from the entry.
         backend: String,
-    },
-
-    /// `requires.tools` lists a tool package not installed in scope.
-    #[error("agent {agent_id:?} requires.tools entry {tool:?} not installed in scope")]
-    RequiredToolMissing {
-        /// Agent id from `[agents.<id>]`.
-        agent_id: String,
-        /// The missing tool package name.
-        tool: String,
     },
 
     /// Failed to read the resolved package's `tau.toml` manifest.
@@ -144,7 +136,8 @@ pub enum AgentResolutionError {
 /// 3. Read the resolved package's manifest from
 ///    `scope.package_dir(name, version)/tau.toml`.
 /// 4. Verify `entry.llm_backend` resolves to an installed package.
-/// 5. Verify each `entry.requires.tools` entry is installed.
+/// 5. (Removed) `requires.tools` is no longer verified here; resolve+install
+///    happens at the CLI call sites before `build_agent_definition` is called.
 /// 6. Read `prompt.system` / `prompt.system_file` (path relative to
 ///    `project_root`) into `Option<String>`.
 /// 7. Construct `AgentDefinition::new(...)` chained with
@@ -237,21 +230,10 @@ pub fn build_agent_definition(
         });
     }
 
-    // Step 5: verify each requires.tools entry is installed.
-    for tool_name in &entry.requires.tools {
-        let tool_pn = PackageName::from_str(tool_name).map_err(|e| {
-            AgentResolutionError::InvalidIdentifier {
-                agent_id: entry.id.clone(),
-                message: format!("requires.tools entry {tool_name:?}: {e}"),
-            }
-        })?;
-        if !installed.iter().any(|pkg| pkg.name == tool_pn) {
-            return Err(AgentResolutionError::RequiredToolMissing {
-                agent_id: entry.id.clone(),
-                tool: tool_name.clone(),
-            });
-        }
-    }
+    // Step 5 (verify requires.tools) was removed in Tier 2 priority 5.
+    // resolve+install for requires.tools now lives at the CLI call sites
+    // (cmd/run.rs, cmd/chat.rs, cmd/resolve.rs). By the time
+    // build_agent_definition runs, the lockfile is authoritative.
 
     // Step 6: read system prompt (inline / file / none).
     let system_prompt = match &entry.prompt {
@@ -611,8 +593,29 @@ generated_at = "{now_rfc3339}"
         }
     }
 
+    /// Build a `tau_pkg::RequiredTool` for use in tests.
+    ///
+    /// Task 5 will lift this helper into `tests/common/mod.rs` for
+    /// cross-test reuse. Placed here temporarily.
+    fn make_required_tool(name: &str, source_url: &str, version: &str) -> tau_pkg::RequiredTool {
+        use std::str::FromStr;
+        tau_pkg::RequiredTool::new(
+            tau_domain::PackageName::from_str(name).unwrap(),
+            tau_domain::PackageSource::from_str(source_url).unwrap(),
+            semver::VersionReq::parse(version).unwrap(),
+        )
+    }
+
     #[test]
-    fn build_agent_definition_returns_required_tool_missing() {
+    fn build_agent_definition_does_not_check_requires_tools() {
+        // Step 5 verify was removed in Tier 2 priority 5 — the resolve+install
+        // happens at cmd/run.rs / cmd/chat.rs / cmd/resolve.rs before
+        // build_agent_definition is called. By the time we reach this code path,
+        // the lockfile is authoritative; we no longer iterate requires.tools here.
+        //
+        // Confirm: a non-empty requires.tools list pointing at a package that is
+        // NOT installed does NOT trip build_agent_definition — the function still
+        // returns Ok.
         let (_tmp, project_root, scope) = make_project_scope();
         install_fixture(
             &scope,
@@ -628,17 +631,14 @@ generated_at = "{now_rfc3339}"
             "llm-backend",
             "https://example.com/anthropic.git",
         );
-        // Note: "fs-read" is intentionally NOT installed.
+        // "fs-read" is intentionally NOT installed; Step 5 was deleted so this
+        // must NOT cause an error.
+        let tool = make_required_tool("fs-read", "https://example.com/fs-read.git", "^0.1");
 
-        let entry = entry(|e| e.requires.tools = vec!["fs-read".into()]);
-        let err = build_agent_definition(&entry, &project_root, &scope).unwrap_err();
-        match err {
-            AgentResolutionError::RequiredToolMissing { agent_id, tool } => {
-                assert_eq!(agent_id, "reviewer");
-                assert_eq!(tool, "fs-read");
-            }
-            other => panic!("expected RequiredToolMissing, got: {other:?}"),
-        }
+        let entry = entry(|e| e.requires.tools = vec![tool]);
+        // Should succeed: requires.tools is no longer checked at this layer.
+        let (def, _manifest) = build_agent_definition(&entry, &project_root, &scope).unwrap();
+        assert_eq!(def.id.as_str(), "reviewer");
     }
 
     #[test]
