@@ -1,10 +1,15 @@
 //! `shell-plugin` binary. Spawned by tau-runtime::plugin_host as a
 //! subprocess; talks MessagePack-RPC over stdio per ADR-0008.
 //!
-//! The full implementation lands in Task 13. For Task 1 this stub
-//! exists only so that `cargo build` succeeds.
+//! Thin shim over [`tau_plugin_sdk::run_tool_with_config`].
+//!
+//! [`ShellConfig`]: shell_plugin_lib::config::ShellConfig
+//! [`ShellPlugin::from_config`]: shell_plugin_lib::plugin::ShellPlugin
 
-fn main() {
-    eprintln!("shell-plugin: not yet wired (placeholder; see Task 13)");
-    std::process::exit(1);
+use shell_plugin_lib::plugin::ShellPlugin;
+use tau_plugin_sdk::{run_tool_with_config, SdkError};
+
+#[tokio::main]
+async fn main() -> Result<(), SdkError> {
+    run_tool_with_config::<ShellPlugin>(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")).await
 }

@@ -60,7 +60,6 @@ fn default_max_timeout_secs() -> u64 {
 /// Returns `ConfigError::InvalidValue` when:
 /// - either timeout is zero, OR
 /// - `default_timeout_secs > max_timeout_secs`.
-#[allow(dead_code)]
 pub(crate) fn validate(cfg: &ShellConfig) -> Result<(), ConfigError> {
     if cfg.default_timeout_secs == 0 {
         return Err(ConfigError::InvalidValue {

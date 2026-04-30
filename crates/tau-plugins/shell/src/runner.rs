@@ -9,8 +9,6 @@
 //! - Each buffer capped at MAX_OUTPUT_BYTES (1 MiB); excess truncated
 //!   and the `*_truncated: bool` flag set.
 
-#![allow(dead_code)] // consumed by Task 13 (plugin.rs invoke).
-
 use std::process::Stdio;
 use std::time::Duration;
 

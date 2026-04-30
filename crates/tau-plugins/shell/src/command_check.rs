@@ -3,8 +3,6 @@
 //! See `docs/superpowers/specs/2026-04-29-tool-plugins-design.md`
 //! §5.1, §7.
 
-#![allow(dead_code)] // consumed by Task 13 (plugin.rs invoke).
-
 use tau_domain::{Capability, ProcessCapability};
 
 /// Extract the allow-listed command names from the agent's grant.

@@ -12,4 +12,5 @@
 
 pub(crate) mod command_check;
 pub mod config;
+pub mod plugin;
 pub(crate) mod runner;
