@@ -40,6 +40,9 @@ base64              = { workspace = true }
 # Used by capability_override::glob_subset for glob-subset analysis when
 # a project tau.toml narrows fs.* paths under a package manifest's grant.
 globset             = { workspace = true }
+# JSON Schema validation for tool args at the kernel boundary.
+# Realizes ADR-0010 (Tier 2 priority 6).
+jsonschema          = { workspace = true }
 
 [features]
 default = []
