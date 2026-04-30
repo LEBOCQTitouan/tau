@@ -3,6 +3,15 @@
 //! thin `DynTool` adapter that bridges `Session = FsReadSession` to
 //! the `DynTool` interface (which assumes `Session = ()`).
 //!
+//! Gated `#[cfg(unix)]`: the tests embed `tempfile::NamedTempFile`-
+//! produced paths into TOML manifest strings. On Windows these paths
+//! contain backslashes which break TOML string parsing / manifest
+//! validation. The plugin-layer Gap 1 + Gap 2 validation runs on all
+//! platforms via the per-plugin integration tests
+//! (`crates/tau-plugins/fs-read/tests/invoke.rs`).
+
+#![cfg(unix)]
+//!
 //! Three scenarios:
 //!
 //! - **Gap 1 closed:** agent with NO `fs.read` capability →
