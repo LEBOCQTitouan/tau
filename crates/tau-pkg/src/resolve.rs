@@ -148,7 +148,7 @@ pub fn resolve_requires_tools(
     // Phase 3: pick concrete versions.
     // Sort groups by name string for deterministic resolution order.
     let mut sorted_groups: Vec<_> = groups.into_iter().collect();
-    sorted_groups.sort_by(|(a, _), (b, _)| a.to_string().cmp(&b.to_string()));
+    sorted_groups.sort_by_key(|(a, _)| a.to_string());
 
     let installed = registry::list(scope)?;
     let mut plan = ResolutionPlan::default();
