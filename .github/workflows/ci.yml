@@ -183,6 +183,24 @@ jobs:
       - name: Build openai-plugin (release)
         run: cargo build --release -p openai
 
+  build-fs-read-plugin:
+    name: build (fs-read-plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build fs-read-plugin (release)
+        run: cargo build --release -p fs-read
+
+  build-shell-plugin:
+    name: build (shell-plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build shell-plugin (release)
+        run: cargo build --release -p shell
+
   build-tau-plugin-test-support:
     name: build (tau-plugin-test-support)
     runs-on: ubuntu-latest
