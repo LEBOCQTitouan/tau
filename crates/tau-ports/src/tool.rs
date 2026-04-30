@@ -438,4 +438,21 @@ mod tests {
         assert_eq!(entry.kind, "process.spawn");
         assert_eq!(entry.deny, vec!["rm".to_string(), "shutdown".to_string()]);
     }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn session_context_deny_entries_defaults_on_missing_key() {
+        // Defends the #[serde(default)] gate: a payload from an older
+        // plugin/runtime that doesn't include `deny_entries` must
+        // deserialize successfully with the field defaulted to empty.
+        let json = serde_json::json!({
+            "agent_instance_id": tau_domain::AgentInstanceId::new(),
+            "session_id": uuid::Uuid::now_v7(),
+            "deadline": null,
+            "granted_capabilities": []
+        });
+        let ctx: SessionContext =
+            serde_json::from_value(json).expect("SessionContext deserializes without deny_entries");
+        assert!(ctx.deny_entries.is_empty());
+    }
 }
