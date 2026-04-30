@@ -10,4 +10,5 @@
 //! See `docs/superpowers/specs/2026-04-29-tool-plugins-design.md`
 //! for the design rationale.
 
-// Modules will be added in subsequent tasks (config, command_check, runner, plugin).
+pub(crate) mod command_check;
+pub mod config;
