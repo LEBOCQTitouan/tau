@@ -247,7 +247,7 @@ async fn ipc_tool_invoke_roundtrip_via_fake_peer() {
         "echo".into(),
         Value::Object(Default::default()),
     );
-    let tool = IpcTool::new("echo".to_string(), spec.clone(), process);
+    let tool = IpcTool::new("echo".to_string(), spec.clone(), Vec::new(), process);
 
     assert_eq!(tool.name(), "echo");
     assert_eq!(tool.schema().name, "echo");
