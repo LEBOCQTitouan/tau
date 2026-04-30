@@ -56,6 +56,18 @@ pub fn read_tau_toml(dir: &Path) -> String {
     std::fs::read_to_string(dir.join("tau.toml")).expect("read tau.toml")
 }
 
+/// Build a [`tau_pkg::RequiredTool`] from string fixtures.  For tests that
+/// construct in-memory fixtures (vs. emitting TOML through
+/// [`setup_echo_project`]).
+pub fn make_required_tool(name: &str, source_url: &str, version: &str) -> tau_pkg::RequiredTool {
+    use std::str::FromStr;
+    tau_pkg::RequiredTool::new(
+        tau_domain::PackageName::from_str(name).expect("valid package name"),
+        tau_domain::PackageSource::from_str(source_url).expect("valid PackageSource"),
+        semver::VersionReq::parse(version).expect("valid VersionReq"),
+    )
+}
+
 // ---- hand-authored lockfile + project fixtures (run / chat) -----------------
 
 /// Hand-author a lockfile + on-disk package tree under `<root>/.tau/`.
@@ -305,7 +317,7 @@ fn toml_path_string(p: &Path) -> String {
 pub fn setup_echo_project(
     agent_id: &str,
     agent_config_toml: &str,
-    tools_in_requires: &[&str],
+    tools_in_requires: &[(&str, &str, Option<&str>)],
 ) -> TempDir {
     let (echo_llm, echo_tool) = echo_plugins::ensure_echo_plugins_built();
     let dir = tempfile::tempdir().expect("tempdir for echo project");
@@ -400,12 +412,16 @@ bin = "echo-tool"
     let tools_field = if tools_in_requires.is_empty() {
         String::new()
     } else {
-        let list = tools_in_requires
-            .iter()
-            .map(|s| format!("\"{s}\""))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("\n[agents.{agent_id}.requires]\ntools = [{list}]\n")
+        let mut buf = String::new();
+        for (name, source, version) in tools_in_requires {
+            buf.push_str(&format!(
+                "\n[[agents.{agent_id}.requires.tools]]\nname = \"{name}\"\nsource = \"{source}\"\n"
+            ));
+            if let Some(v) = version {
+                buf.push_str(&format!("version = \"{v}\"\n"));
+            }
+        }
+        buf
     };
     let config_field = if agent_config_toml.is_empty() {
         String::new()
