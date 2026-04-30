@@ -54,7 +54,7 @@ fetch.
 | Q1 | Scope of auto-install | **A+B**: extended schema (source + optional version) is foundational; auto-install is the default; `--no-install` falls back to copy-pasteable error hints | One level deep matches ADR-0007 §5's exact deferred semantic; recursive stays deferred under ADR-0004 §10 |
 | Q2 | When auto-install fires | **C**: lazy at `tau run`/`chat` AND a new explicit `tau resolve` subcommand | Lazy fits the existing flow; explicit `tau resolve` serves CI cache warm-up + pre-flight validation |
 | Q3 | Schema change | Reject bare strings; require struct form on every entry | Schema churn is contained (3 test fixtures, no production tau.toml configs ship with bare strings); cleaner long-term schema |
-| Q4 | Source field type | **A**: typed nested `source = { kind = "git", url = "...", rev = "..." }` reusing existing `tau_domain::PackageSource` | Reuses existing typed enum; explicit; easy to evolve |
+| Q4 | Source field type | **A** (reuse existing `tau_domain::PackageSource`). The actual serde format is a Cargo-style string (`<url>` or `<url>#<rev>`) per the existing `PackageSource::FromStr` impl — keeping consistency with how `dependencies` in package manifests already deserialize | Reuses existing typed enum AND its existing wire format; no schema fork between project tau.toml and package manifest |
 | Q5 | UX confirmation | npm-style progress output (one line per phase) over the existing `Output` channel; respects `--quiet` and `--json` | Familiar idiom; non-silent; reuses existing CLI output plumbing |
 | Q6 | Lockfile | Existing per-scope lockfile records auto-installed tool deps (same shape as `tau install`) | No new file; reuse existing `tau_pkg::registry` |
 | Q7 | Error type | New typed `tau_pkg::ResolveError`; new `ProjectConfigError::RequiresToolsBareStringRejected` for the parse-time rejection | Per ADR-0009 typed-error policy |
@@ -68,18 +68,26 @@ fetch.
 ### 4.1 Project tau.toml
 
 `[agents.<id>.requires.tools]` becomes an array-of-tables (or inline array
-of struct tables — both deserialize identically):
+of struct tables — both deserialize identically). The `source` field uses
+the existing `PackageSource` serde format: `"<location>"` or
+`"<location>#<rev>"` (same as the `dependencies` field in package
+manifests):
 
 ```toml
 [[agents.reviewer.requires.tools]]
 name    = "fs-read"
-source  = { kind = "git", url = "https://example.com/fs-read.git" }
+source  = "https://example.com/fs-read.git"
 version = "^0.1"   # optional; defaults to "*" (any version)
 
 [[agents.reviewer.requires.tools]]
 name    = "shell"
-source  = { kind = "git", url = "https://example.com/shell.git", rev = "main" }
+source  = "https://example.com/shell.git#main"
 # version absent → "*"
+
+# Local fixtures (CI / dev) use file:// URLs:
+[[agents.reviewer.requires.tools]]
+name   = "test-tool"
+source = "file:///tmp/test-fixture/test-tool.git"
 ```
 
 Inline-array form (equivalent):
@@ -87,16 +95,19 @@ Inline-array form (equivalent):
 ```toml
 [agents.reviewer.requires]
 tools = [
-  { name = "fs-read", source = { kind = "git", url = "https://example.com/fs-read.git" }, version = "^0.1" },
-  { name = "shell",   source = { kind = "git", url = "https://example.com/shell.git", rev = "main" } },
+  { name = "fs-read", source = "https://example.com/fs-read.git", version = "^0.1" },
+  { name = "shell",   source = "https://example.com/shell.git#main" },
 ]
 ```
 
 ### 4.2 Field semantics
 
 - **`name`** — required; package name (validated against `PackageName` rules).
-- **`source`** — required; typed `PackageSource` (variants `Git { url, rev: Option<String> }`, `Path { path }`).
-  Reused verbatim from `tau-domain`.
+- **`source`** — required; typed `PackageSource` from `tau-domain`. The
+  enum has one variant at v0.1 (`Git { location, rev: Option<String> }`).
+  Wire format is a string per `PackageSource::FromStr`. Local on-disk
+  git repos for tests/dev use `file://` URLs (`git` clones from
+  `file://` natively).
 - **`version`** — optional string; parsed as `semver::VersionReq`. Defaults to
   `"*"` (any version) when absent.
 - **Bare strings rejected at parse.** `tools = ["fs-read"]` produces
@@ -161,20 +172,24 @@ For each `(name, source, [version_reqs...])` triple:
    from the same `source` satisfies *all* `version_reqs`, **reuse**
    (no fetch).
 2. **List available versions.** Otherwise, call
-   `list_versions_at_source(source) -> Vec<Version>`:
-   - For `PackageSource::Git { url, rev: None }`: shell out to
-     `git ls-remote --tags <url>`, parse the tag list, filter to those
-     parsing as `semver::Version` (after stripping a leading `v` if
-     present), drop non-semver tags. The available set is the resulting
-     `Vec<Version>`.
-   - For `PackageSource::Git { url, rev: Some(_) }`: only one version
-     is available — the one declared in the manifest at that exact
-     rev. We clone the rev shallowly, read its `tau.toml`, and return
+   `list_versions_at_source(source) -> Vec<Version>`. `PackageSource`
+   has one variant at v0.1 (`Git`); the dispatch is on the `rev` option:
+   - `Git { location, rev: None }`: shell out to
+     `git ls-remote --tags <location>`, parse the tag list, filter to
+     those parsing as `semver::Version` (after stripping a leading
+     `v` if present), drop non-semver tags. The available set is the
+     resulting `Vec<Version>`.
+   - `Git { location, rev: Some(_) }`: only one version is available —
+     the one declared in the manifest at that exact rev. We clone the
+     rev shallowly into a tempdir, read its `tau.toml`, and return
      `vec![manifest.version()]`. `version_req` must accept that single
      version, otherwise → `NoCompatibleVersion` with `available` = that
      one entry.
-   - For `PackageSource::Path { path }`: read the manifest at `path`,
-     return `vec![manifest.version()]`. Same single-point semantics.
+   - `file://`-scheme URLs work transparently: `git ls-remote --tags
+     file:///path/to/local/repo.git` returns the local repo's tags.
+     This is how integration tests exercise the resolver without real
+     network — the test fixtures are local git repos initialized via
+     `tempfile::tempdir() + git init + git tag`.
 3. **Pick highest-compatible.** Among `available`, find the highest
    `Version` satisfying all `version_reqs`. If none → `ResolveError::NoCompatibleVersion`.
 4. **Fall through to install.** Add `(name, picked_version, source,
@@ -285,7 +300,7 @@ by `--quiet`):
 [resolve] done in 2.0s
 ```
 
-**JSON mode** (`--json`), one event per line via `output.json_event(...)`:
+**JSON mode** (`--json`), one event per line via repeated `output.json(...)` calls (the existing `Output::json` writes one serialized object + newline per call, which is the desired per-event stream when invoked sequentially):
 
 ```json
 {"event":"resolve_start","required":3,"installed":1,"to_fetch":2}
@@ -506,17 +521,21 @@ pub enum CliCommand {
 | Tier | Coverage | Where |
 |------|----------|-------|
 | Unit | semver intersection across 0/1/2/N constraints; conflicting sources; no-compatible-version; lockfile reuse path | `crates/tau-pkg/src/resolve.rs::tests` (~12 tests) |
-| Unit | `list_versions_at_source` parses `git ls-remote --tags` output; handles non-semver tags gracefully; `Path` manifest read | `crates/tau-pkg/src/source_list.rs::tests` (~5 tests) |
+| Unit | `list_versions_at_source` parses `git ls-remote --tags` output; handles non-semver tags gracefully; v-prefix stripping; rev-pinned shallow read | `crates/tau-pkg/src/source_list.rs::tests` (~5 tests, using local `file://` fixtures from `tempdir + git init`) |
 | Unit | `UncheckedRequiredTool` deserialize: struct form OK; bare string rejected; missing `source` rejected; unknown fields rejected; default `version` = `"*"` | `crates/tau-cli/src/config/project.rs::tests` (~5 tests) |
-| Integration | `tau resolve` end-to-end via `assert_cmd`: dry-run, no-install, full install path with `Path` source (avoids real network) | `crates/tau-cli/tests/cmd_resolve.rs` (~5 tests) |
+| Integration | `tau resolve` end-to-end via `assert_cmd`: dry-run, no-install, full install path with `file://` git fixtures (avoids real network) | `crates/tau-cli/tests/cmd_resolve.rs` (~5 tests) |
 | Integration | `tau run --no-install` errors with copy-pasteable install hints when deps missing | `crates/tau-cli/tests/cmd_run.rs` (~2 tests) |
-| Integration | `tau run` lazy path: missing deps trigger install (via `Path` source fixture); run proceeds | `crates/tau-cli/tests/cmd_run.rs` (~2 tests) |
+| Integration | `tau run` lazy path: missing deps trigger install (via `file://` git fixture); run proceeds | `crates/tau-cli/tests/cmd_run.rs` (~2 tests) |
 
-`Path` source is the test workhorse — it lets integration tests exercise
-the install path without `git ls-remote`. A separate `Git` smoke test
-that hits a real public repo (e.g., the project's own GitHub URL) is
-NOT added at this sub-project — flaky network in CI is worse than
-deferring the smoke. Manual smoke documented in the PR description.
+`file://` URLs to local on-disk git repos are the test workhorse — git
+clones from `file://` natively, so integration tests can exercise the
+full install path (clone + manifest read + lockfile write) without
+real network. Test fixtures are built via
+`tempfile::tempdir() + git init + git commit + git tag` and torn down
+when the tempdir drops. A separate live-network smoke test against a
+public GitHub URL is NOT added at this sub-project — flaky network in
+CI is worse than deferring the smoke. Manual smoke documented in the
+PR description.
 
 ---
 
