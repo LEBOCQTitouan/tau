@@ -205,28 +205,61 @@ loop. No run termination on validation failure.
 
 ### 4.5 Call-site integration
 
-At `run.rs:417` (the existing call to the passthrough):
+At `run.rs:415-421` (the existing call to the passthrough). NOTE: the
+current `Err(invoke_err)` arm at `run.rs:436-447` returns `Err(RuntimeError::from(err))`
+— it TERMINATES the run on real plugin invocation failures. That behavior
+is correct for "the plugin process crashed mid-call" and stays unchanged.
+
+Validation failures are a different failure mode: the LLM produced a
+malformed call before the plugin was even reached. We don't want a
+hallucinated arg to terminate the run. So validation failure follows
+its own short-circuit path: skip `Tool::invoke` entirely, write a
+`MessagePayload::ToolError` to the conversation, and `continue` the
+inner `for tool_use` loop so the next tool_use (or the next turn)
+sees the validation error in the conversation context.
 
 ```rust
-let validated = match validate_tool_args(&tool_use.input, &tool_use.name, &registered.validator) {
-    Ok(v) => v,
+// Replaces the existing line 417 call to deserialize_tool_args.
+match validate_tool_args(&tool_use.input, &tool_use.name, &registered.validator) {
+    Ok(_) => { /* proceed to Tool::invoke as before */ }
     Err(tool_err) => {
         warn!(name = "tool.args_validation_failed", tool_name = %tool_use.name);
-        // Funnel through the existing Err(ToolError) handling that
-        // writes a MessagePayload::ToolError into the conversation
-        // and continues. The LLM sees the structured error next turn
-        // and self-corrects.
-        // ... (mirror the existing match-on-Err(ToolError) arm)
+        // Best-effort teardown of the session we just opened, mirroring
+        // the existing Err(invoke_err) arm at line 444-445 — but we
+        // continue rather than return, because validation failure is
+        // recoverable.
+        let _ = tool.teardown(()).await;
+        // Write the validation error into the conversation as a
+        // MessagePayload::ToolError so the LLM sees the structured
+        // error next turn and self-corrects.
+        let validation_msg = match &tool_err {
+            ToolError::BadArgs { reason } => reason.clone(),
+            other => format!("{other}"), // defensive — validate_tool_args only emits BadArgs
+        };
+        messages.push(Message::new(
+            tool_addr.clone(),
+            agent_addr.clone(),
+            MessagePayload::ToolError {
+                kind: "tool_args_validation".into(),
+                message: validation_msg,
+                details: None,
+            },
+        ));
+        trace!(name = "message.added", kind = "tool_error");
+        continue;  // advances to the next tool_use in the inner for loop
     }
-};
-let outcome = tool.invoke(&ctx, &mut (), validated.clone())...
+}
 ```
 
-The exact integration depends on the existing `Err(ToolError)` handling
-in `run.rs` (which already builds a `MessagePayload::ToolError`,
-appends it to the conversation, and `continue`s the per-tool-call
-loop). Validation failure routes through the same path so behavior
-is uniform with all other tool-error origins.
+This path doesn't reuse the `Err(invoke_err)` arm at line 436-447
+(which `return`s a `RuntimeError`). Validation failures are
+short-circuited before `Tool::invoke` is even called and continue the
+loop so the LLM gets to retry on the next turn.
+
+The existing `Err(invoke_err)` arm continues to `return` on real
+plugin invocation crashes — that's a kernel-level failure (the plugin
+process likely died or violated the wire contract) and run-termination
+is the right outcome there. Validation is a non-overlapping new path.
 
 ### 4.6 The MANDATORY error template
 
