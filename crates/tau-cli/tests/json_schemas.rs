@@ -108,7 +108,13 @@ fn json_schema_run_completed() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
-    let val: Value = serde_json::from_str(std::str::from_utf8(&output.stdout).unwrap().trim())
-        .expect("valid JSON");
+    // `tau run --json` now emits one JSON object per line (resolve events +
+    // outcome). Find the outcome line (contains "outcome" key).
+    let stdout_str = std::str::from_utf8(&output.stdout).unwrap();
+    let val: Value = stdout_str
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|v| v.get("outcome").is_some())
+        .expect("stdout should contain an outcome JSON line");
     assert_json_snapshot!("run_completed_json", val);
 }

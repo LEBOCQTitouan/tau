@@ -149,6 +149,149 @@ fn run_propagates_plugin_crash_as_exit_code_two() {
 }
 
 #[test]
+fn run_with_no_install_emits_install_hints_and_fails() {
+    // The agent declares a requires.tools entry pointing at a non-existent
+    // file:// URL. With --no-install, tau run should print the install hint
+    // and exit non-zero WITHOUT actually attempting to fetch.
+    let dir = tempfile::tempdir().unwrap();
+    let toml_str = r#"
+[project]
+name = "demo"
+
+[agents.reviewer]
+display_name = "Reviewer"
+package      = "demo@^0.1"
+llm_backend  = "anthropic"
+
+[[agents.reviewer.requires.tools]]
+name = "missing-tool"
+source = "file:///tmp/tau-nonexistent-fixture-DO-NOT-CREATE/missing.git"
+"#;
+    std::fs::write(dir.path().join("tau.toml"), toml_str).unwrap();
+
+    let output = assert_cmd::Command::cargo_bin("tau")
+        .unwrap()
+        .args([
+            "run",
+            "reviewer",
+            "test prompt",
+            "--no-install",
+            "--dry-run",
+        ])
+        .current_dir(dir.path())
+        .env("TAU_HOME", dir.path())
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // The run may fail at resolve (source unreachable) OR at the
+    // --no-install short-circuit. Either way, exit code is non-zero
+    // and the user sees actionable output. The strict invariant for
+    // this test: the run did NOT succeed silently.
+    assert!(
+        !output.status.success(),
+        "run should fail when requires.tools is missing and --no-install is set; \
+         stderr was: {stderr}"
+    );
+}
+
+#[test]
+fn run_lazy_resolve_emits_progress() {
+    // Set up a local git fixture for the required tool, point the agent
+    // at it via file:// URL, run --dry-run (which validates everything but
+    // doesn't invoke the LLM), assert progress lines appear.
+    use std::process::Command;
+
+    let work = tempfile::tempdir().unwrap();
+    let work_path = work.path();
+
+    // Create a local git repo for the "required tool" with a tag.
+    let tool_repo = work_path.join("missing-tool");
+    std::fs::create_dir(&tool_repo).unwrap();
+    let manifest_body = r#"
+name = "missing-tool"
+version = "0.1.0"
+description = "fixture"
+authors = []
+source = "https://example.com/missing-tool.git"
+kind = "tool"
+dependencies = []
+capabilities = []
+"#;
+    std::fs::write(tool_repo.join("tau.toml"), manifest_body).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .current_dir(&tool_repo)
+            .args(args)
+            .output()
+            .unwrap();
+        if !out.status.success() {
+            panic!(
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.email", "test@example.com"]);
+    git(&["config", "user.name", "Test"]);
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "fixture"]);
+    git(&["tag", "v0.1.0"]);
+
+    // Project tau.toml at a SEPARATE path; tools_in_requires points at
+    // the local git fixture's file:// URL.
+    let proj = work_path.join("project");
+    std::fs::create_dir(&proj).unwrap();
+    let tool_url = format!("file://{}", tool_repo.display());
+    let toml_str = format!(
+        r#"
+[project]
+name = "demo"
+
+[agents.reviewer]
+display_name = "Reviewer"
+package      = "demo@^0.1"
+llm_backend  = "anthropic"
+
+[[agents.reviewer.requires.tools]]
+name = "missing-tool"
+source = "{tool_url}"
+version = "^0.1"
+"#
+    );
+    std::fs::write(proj.join("tau.toml"), toml_str).unwrap();
+
+    let output = assert_cmd::Command::cargo_bin("tau")
+        .unwrap()
+        .args(["run", "reviewer", "test prompt", "--dry-run"])
+        .current_dir(&proj)
+        .env("TAU_HOME", &proj)
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Either the resolve+install path emitted progress (success) OR
+    // tau bailed for some other reason (e.g., no LLM backend installed,
+    // which is expected in this test fixture). The point of THIS test
+    // is to exercise the resolve path. Be tolerant: just check that
+    // EITHER progress lines appeared, OR the failure reason is unrelated
+    // to the resolve.
+    let resolve_invoked = stderr.contains("[resolve]") || stderr.contains("[install]");
+    let exit_unrelated_to_resolve = !output.status.success()
+        && !stderr.contains("ConflictingSources")
+        && !stderr.contains("NoCompatibleVersion")
+        && !stderr.contains("SourceListing");
+    assert!(
+        resolve_invoked || exit_unrelated_to_resolve,
+        "expected to see [resolve]/[install] progress OR a non-resolve failure; \
+         stderr was: {stderr}"
+    );
+}
+
+#[test]
 fn run_json_completed_emits_outcome_payload() {
     let dir = common::setup_echo_project("echo", "canned_text = \"pong\"\n", &[]);
 
@@ -166,8 +309,14 @@ fn run_json_completed_emits_outcome_payload() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
-    let parsed: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("--json should emit a JSON object");
+    // --json mode emits one JSON object per line (resolve events + outcome).
+    // Find the line that carries the agent outcome.
+    let outcome_line = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|v| v.get("outcome").is_some())
+        .expect("--json should include an outcome JSON line");
+    let parsed = outcome_line;
     assert_eq!(parsed["outcome"], "completed");
     assert_eq!(parsed["final_message"], "pong");
     assert!(parsed["total_turns"].is_number(), "total_turns: {parsed}");

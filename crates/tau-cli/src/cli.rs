@@ -196,6 +196,11 @@ pub struct RunArgs {
     /// Validate setup without invoking the LLM.
     #[arg(long)]
     pub dry_run: bool,
+    /// Skip auto-install of missing requires.tools dependencies. If
+    /// anything would need fetching, exit 2 with copy-pasteable
+    /// `tau install <url>` hints instead.
+    #[arg(long)]
+    pub no_install: bool,
 }
 
 /// Arguments for `tau chat`.
