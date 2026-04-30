@@ -32,8 +32,8 @@ use tau_domain::{
     MessagePayload, PackageManifest, Value,
 };
 use tau_ports::{
-    CompletionRequest, ContentBlock, LlmProviderMessage, SessionContext, ToolContent, ToolResult,
-    ToolSpec, ToolUse,
+    CompletionRequest, ContentBlock, LlmProviderMessage, SessionContext, ToolContent, ToolError,
+    ToolResult, ToolSpec, ToolUse,
 };
 use tracing::{debug, debug_span, info, info_span, instrument, trace, warn, Instrument};
 
@@ -412,13 +412,52 @@ impl Runtime {
                         tool_name = %tool_use.name,
                         args_preview = %preview,
                     );
-                    // v0.1 passthrough; the helper is a hook for the
-                    // Phase-1 schema-validation pass.
-                    let _validated = deserialize_tool_args(
+                    // Validate the LLM's args against the tool's declared
+                    // input_schema (ADR-0010). Validation failure is
+                    // recoverable: write a structured ToolError into the
+                    // conversation and continue to the next tool_use so
+                    // the LLM gets to self-correct on the next turn. We
+                    // do NOT propagate via `?` (which would terminate the
+                    // run via RuntimeError::Tool).
+                    let validator = self.tool_validators().get(tool_use.name.as_str()).expect(
+                        "tool_validators is in 1:1 correspondence with tools \
+                             (Task 3 invariant). If this fires, the registration \
+                             pipeline is broken.",
+                    );
+                    if let Err(reason) = crate::tool_args::validate_tool_args(
                         &tool_use.input,
                         &tool_use.name,
-                        agent_def.llm_backend.as_str(),
-                    )?;
+                        validator,
+                    ) {
+                        let ToolError::BadArgs { reason } = reason else {
+                            // validate_tool_args only emits BadArgs in v0.1 — defensive.
+                            // Reach here only if the validator's contract changes.
+                            let _ = tool.teardown(()).await;
+                            return Err(RuntimeError::from(reason));
+                        };
+                        warn!(
+                            name = "tool.args_validation_failed",
+                            tool_name = %tool_use.name,
+                        );
+                        // Best-effort teardown so the plugin gets a chance
+                        // to clean up, mirroring the existing Err(invoke_err)
+                        // arm at line 444-445. Errors here are swallowed.
+                        let _ = tool.teardown(()).await;
+                        // Write the validation error into the conversation
+                        // as a MessagePayload::ToolError so the LLM sees it
+                        // next turn and self-corrects.
+                        messages.push(Message::new(
+                            tool_addr.clone(),
+                            agent_addr.clone(),
+                            MessagePayload::ToolError {
+                                kind: "tool_args_validation".into(),
+                                message: reason,
+                                details: None,
+                            },
+                        ));
+                        trace!(name = "message.added", kind = "tool_error");
+                        continue; // advance to next tool_use; the loop survives
+                    }
                     let outcome = tool
                         .invoke(&ctx, &mut (), tool_use.input.clone())
                         .instrument(invoke_span)
@@ -550,24 +589,6 @@ impl Runtime {
 // ---------------------------------------------------------------------------
 // Internal helpers (named per the plan; each has a unit test below)
 // ---------------------------------------------------------------------------
-
-/// Validate tool-call arguments emitted by the LLM against the tool's
-/// expected shape.
-///
-/// **v0.1: passthrough.** Returns the input as-is. Schema-driven
-/// validation (per the tool's [`ToolSpec::input_schema`]) is deferred
-/// to Phase 1; the helper exists so the run loop has a single, named
-/// failure boundary that can later raise
-/// [`RuntimeError::PluginContractViolation`] without further
-/// restructuring. Unit-tested for shape; spec-level violations are
-/// surfaced by integration tests in Tasks 11-16.
-pub(crate) fn deserialize_tool_args<'a>(
-    value: &'a Value,
-    _tool_name: &str,
-    _llm_backend_name: &str,
-) -> Result<&'a Value, RuntimeError> {
-    Ok(value)
-}
 
 /// Build the `RunOutcome::Failed { kind: PolicyDenied, .. }` returned
 /// when [`check_capabilities`] rejects a tool invocation. Centralizes
@@ -880,26 +901,6 @@ mod tests {
                 content: content.into(),
             },
         )
-    }
-
-    // -------------------- deserialize_tool_args --------------------
-
-    #[test]
-    fn deserialize_tool_args_passthrough_for_object() {
-        let mut obj = BTreeMap::new();
-        obj.insert("q".into(), Value::String("hello".into()));
-        let v = Value::Object(obj);
-        let got = deserialize_tool_args(&v, "search", "mock-llm").expect("passthrough");
-        assert_eq!(got, &v);
-    }
-
-    #[test]
-    fn deserialize_tool_args_passthrough_for_null() {
-        // v0.1 is unconditional passthrough; richer shape-checks are
-        // deferred to Phase 1 per the helper's doc comment.
-        let v = Value::Null;
-        let got = deserialize_tool_args(&v, "noop", "mock-llm").expect("passthrough");
-        assert_eq!(got, &v);
     }
 
     // -------------------- build_policy_denied_outcome --------------------
