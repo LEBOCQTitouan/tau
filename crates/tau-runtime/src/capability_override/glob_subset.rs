@@ -107,8 +107,12 @@ fn sample_subset(child: &str, parent: &str) -> bool {
 }
 
 /// Generate sample paths by enumerating `?` (one ASCII letter) and simple
-/// character classes `[abc]`. `*` and `**` expand to a fixed seed string.
-/// Returns `None` if the sample count would exceed `cap`.
+/// character classes `[abc]`. `*` and `**` expand to a fixed seed string —
+/// this is sound because `prefix_subset` intercepts every parent of the
+/// form `<prefix>/**` before this fallback runs, and capability configs
+/// only ever use `/**`-tree patterns. For any other parent shape the
+/// result is conservative-by-default for realistic inputs but is not a
+/// formal proof. Returns `None` if the sample count would exceed `cap`.
 fn generate_samples(child: &str, cap: usize) -> Option<Vec<String>> {
     let mut accum: Vec<String> = vec![String::new()];
     let mut chars = child.chars().peekable();
@@ -235,6 +239,14 @@ mod tests {
     fn question_mark_sample_fallback_admits() {
         // `/proj/?` matches one-char names — all admitted under /proj/**.
         assert!(is_glob_subset("/proj/?", "/proj/**"));
+    }
+
+    #[test]
+    fn question_mark_does_not_admit_path_outside_parent_scope() {
+        // `?` is one non-separator character; `/proj/?` should NOT be a
+        // subset of `/proj/src/**` because seed expansion under `/proj/`
+        // is outside `/proj/src/`.
+        assert!(!is_glob_subset("/proj/?", "/proj/src/**"));
     }
 
     #[test]
