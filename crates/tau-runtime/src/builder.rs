@@ -288,9 +288,30 @@ impl<T: Sandbox<Handle = ()> + 'static> DynSandbox for T {
 pub struct Runtime {
     llm_backends: HashMap<String, Arc<dyn DynLlmBackend>>,
     tools: HashMap<String, Arc<dyn DynTool>>,
+    /// Pre-compiled input_schema validators, keyed by tool name. One
+    /// entry per registered tool (in 1:1 correspondence with `tools`).
+    /// Built once at `RuntimeBuilder::build()` per ADR-0010.
+    tool_validators: HashMap<String, crate::tool_args::ToolArgsValidator>,
     #[allow(dead_code)]
     storages: HashMap<String, Arc<dyn DynStorage>>,
     // sandboxes reserved for forward compat (not used at v0.1).
+}
+
+impl std::fmt::Debug for Runtime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Runtime")
+            .field(
+                "llm_backends",
+                &self.llm_backends.keys().collect::<Vec<_>>(),
+            )
+            .field("tools", &self.tools.keys().collect::<Vec<_>>())
+            .field(
+                "tool_validators",
+                &self.tool_validators.keys().collect::<Vec<_>>(),
+            )
+            .field("storages", &self.storages.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 impl Runtime {
@@ -309,6 +330,14 @@ impl Runtime {
     /// resolution helpers (Task 9) and the run loop (Task 10).
     pub(crate) fn tools(&self) -> &HashMap<String, Arc<dyn DynTool>> {
         &self.tools
+    }
+
+    /// Read-only access to the per-tool input_schema validators. Used
+    /// by the run loop's call-site integration in `run.rs` (replaces
+    /// the v0.1 `deserialize_tool_args` passthrough). Realizes ADR-0010.
+    #[allow(dead_code)] // wired up by Task 4 (run.rs call-site integration)
+    pub(crate) fn tool_validators(&self) -> &HashMap<String, crate::tool_args::ToolArgsValidator> {
+        &self.tool_validators
     }
 
     /// Read-only access to the storage registry. Reserved for future
@@ -433,11 +462,12 @@ impl RuntimeBuilder {
             return Err(BuildError::NoLlmBackend);
         }
         let llm_backends = collect_llm_backends_by_name(self.llm_backends)?;
-        let tools = collect_tools_by_name(self.tools)?;
+        let (tools, tool_validators) = collect_tools_by_name(self.tools)?;
         let storages = collect_storages_by_name(self.storages)?;
         Ok(Runtime {
             llm_backends,
             tools,
+            tool_validators,
             storages,
         })
     }
@@ -464,21 +494,43 @@ fn collect_llm_backends_by_name(
     Ok(map)
 }
 
+// The return type carries two parallel maps; a type alias would be
+// private-implementation detail noise with no benefit at the call site.
+#[allow(clippy::type_complexity)]
 fn collect_tools_by_name(
     tools: Vec<Arc<dyn DynTool>>,
-) -> Result<HashMap<String, Arc<dyn DynTool>>, BuildError> {
-    let mut map: HashMap<String, Arc<dyn DynTool>> = HashMap::with_capacity(tools.len());
+) -> Result<
+    (
+        HashMap<String, Arc<dyn DynTool>>,
+        HashMap<String, crate::tool_args::ToolArgsValidator>,
+    ),
+    BuildError,
+> {
+    let mut tool_map: HashMap<String, Arc<dyn DynTool>> = HashMap::with_capacity(tools.len());
+    let mut validator_map: HashMap<String, crate::tool_args::ToolArgsValidator> =
+        HashMap::with_capacity(tools.len());
     for tool in tools {
         let name = tool.name().to_string();
-        if map.contains_key(&name) {
+        if tool_map.contains_key(&name) {
             return Err(BuildError::NameCollision {
                 kind: PluginKind::Tool,
                 name,
             });
         }
-        map.insert(name, tool);
+        // Compile the input_schema once at build time; failure surfaces
+        // as BuildError::ToolSchemaInvalid before any LLM round-trip.
+        let spec = tool.schema();
+        let validator =
+            crate::tool_args::ToolArgsValidator::compile(&spec.input_schema).map_err(|e| {
+                BuildError::ToolSchemaInvalid {
+                    tool_name: name.clone(),
+                    detail: format!("{}; excerpt: {}", e.kind, e.schema_excerpt),
+                }
+            })?;
+        tool_map.insert(name.clone(), tool);
+        validator_map.insert(name, validator);
     }
-    Ok(map)
+    Ok((tool_map, validator_map))
 }
 
 fn collect_storages_by_name(
@@ -598,5 +650,128 @@ mod tests {
         };
         assert_eq!(kind, PluginKind::Storage);
         assert_eq!(name, "mem");
+    }
+
+    /// A test-only DynTool whose schema we control — used to test
+    /// build-time schema validation without touching the existing
+    /// production plugins.
+    struct TestSchemaTool {
+        name: &'static str,
+        schema_value: tau_domain::Value,
+    }
+
+    impl DynTool for TestSchemaTool {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn schema(&self) -> tau_ports::ToolSpec {
+            tau_ports::fixtures::make_tool_spec(
+                self.name.into(),
+                "test".into(),
+                self.schema_value.clone(),
+            )
+        }
+
+        fn capabilities(&self) -> &[tau_domain::Capability] {
+            &[]
+        }
+
+        fn init<'a>(
+            &'a self,
+            _ctx: tau_ports::SessionContext,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<(), tau_ports::ToolError>> + 'a>,
+        > {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn invoke<'a>(
+            &'a self,
+            _ctx: &'a tau_ports::SessionContext,
+            _session: &'a mut (),
+            _args: tau_domain::Value,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<tau_ports::ToolResult, tau_ports::ToolError>,
+                    > + 'a,
+            >,
+        > {
+            Box::pin(async { Ok(tau_ports::fixtures::make_tool_result(vec![], false)) })
+        }
+
+        fn teardown<'a>(
+            &'a self,
+            _session: (),
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<(), tau_ports::ToolError>> + 'a>,
+        > {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    fn schema_value(json: serde_json::Value) -> tau_domain::Value {
+        let s = serde_json::to_string(&json).expect("schema serializes");
+        serde_json::from_str(&s).expect("schema round-trips")
+    }
+
+    fn mock_llm() -> tau_ports::fixtures::MockLlmBackend {
+        tau_ports::fixtures::MockLlmBackend::new("mock-llm")
+    }
+
+    #[test]
+    fn build_compiles_each_tools_input_schema() {
+        let tool = TestSchemaTool {
+            name: "echo",
+            schema_value: schema_value(serde_json::json!({
+                "type": "object",
+                "properties": { "text": { "type": "string" } }
+            })),
+        };
+        let runtime = Runtime::builder()
+            .with_dyn_tool(std::sync::Arc::new(tool))
+            .with_llm_backend(mock_llm())
+            .build()
+            .expect("build succeeds with valid schema");
+        assert!(
+            runtime.tool_validators().contains_key("echo"),
+            "validator stored under tool name"
+        );
+    }
+
+    #[test]
+    fn build_rejects_tool_with_malformed_schema() {
+        let tool = TestSchemaTool {
+            name: "broken",
+            schema_value: schema_value(serde_json::json!({ "type": "objectt" })), // typo
+        };
+        let err = Runtime::builder()
+            .with_dyn_tool(std::sync::Arc::new(tool))
+            .with_llm_backend(mock_llm())
+            .build()
+            .unwrap_err();
+        let BuildError::ToolSchemaInvalid { tool_name, detail } = err else {
+            panic!("expected BuildError::ToolSchemaInvalid, got: {err:?}");
+        };
+        assert_eq!(tool_name, "broken");
+        assert!(detail.contains("compile"), "detail: {detail}");
+    }
+
+    #[test]
+    fn build_handles_empty_schema_as_opt_out() {
+        let tool = TestSchemaTool {
+            name: "any-args",
+            schema_value: schema_value(serde_json::json!({})),
+        };
+        let runtime = Runtime::builder()
+            .with_dyn_tool(std::sync::Arc::new(tool))
+            .with_llm_backend(mock_llm())
+            .build()
+            .expect("build succeeds with empty schema");
+        assert!(
+            runtime.tool_validators().contains_key("any-args"),
+            "validator stored even on opt-out"
+        );
     }
 }
