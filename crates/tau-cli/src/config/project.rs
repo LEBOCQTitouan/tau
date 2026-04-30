@@ -39,9 +39,11 @@ pub struct UncheckedAgent {
     /// Optional `[agents.<id>.requires]` sub-table.
     #[serde(default)]
     pub requires: Option<UncheckedRequires>,
-    /// Reserved for Phase 1+ per spec §3.2; presence at v0.1 is a hard error.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub capabilities: Option<toml::Value>,
+    /// Capability override entries; default empty. Each entry must
+    /// match a `kind` declared by the agent's package manifest.
+    /// Validation runs in `validate_agent`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<UncheckedCapabilityOverride>,
     /// Free-form `[agents.<id>.config]` sub-table; passed through.
     #[serde(default)]
     pub config: Option<toml::Table>,
@@ -70,6 +72,36 @@ pub struct UncheckedPrompt {
     /// Path to a system prompt file; mutually exclusive with `system`.
     #[serde(default)]
     pub system_file: Option<PathBuf>,
+}
+
+/// Single `[[agents.<id>.capabilities]]` array-of-tables entry.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UncheckedCapabilityOverride {
+    /// Capability kind discriminator (`fs.read`, `fs.write`, `fs.exec`,
+    /// `net.http`, `process.spawn`).
+    pub kind: String,
+    /// Narrowed allow-list (paths). Optional; absent = "use package's
+    /// allow-list verbatim".
+    #[serde(default)]
+    pub allow_paths: Option<Vec<String>>,
+    /// Path globs to subtract from the effective allow-list.
+    #[serde(default)]
+    pub deny_paths: Vec<String>,
+    /// Narrowed allow-list (hosts) for `net.http`.
+    #[serde(default)]
+    pub allow_hosts: Option<Vec<String>>,
+    /// Hosts to subtract from the effective allow-list (`net.http`).
+    #[serde(default)]
+    pub deny_hosts: Vec<String>,
+    /// Narrowed allow-list (commands) for `process.spawn`.
+    #[serde(default)]
+    pub allow_commands: Option<Vec<String>>,
+    /// Commands to subtract (`process.spawn`).
+    #[serde(default)]
+    pub deny_commands: Vec<String>,
+    /// Narrowed `max_bytes` (only meaningful for `fs.write`).
+    #[serde(default)]
+    pub max_bytes: Option<u64>,
 }
 
 // ----- Validated shapes -----
@@ -105,6 +137,12 @@ pub struct AgentEntry {
     pub config: BTreeMap<String, toml::Value>,
     /// Validated prompt selection.
     pub prompt: PromptEntry,
+    /// Project-supplied capability overrides (raw, validated only for
+    /// shape + duplicate-kind at parse time). The intersect-vs-manifest
+    /// check runs at `tau run` time (in tau-runtime) and at
+    /// `tau list --capabilities` rendering time. Empty = no override
+    /// (effective grant = package manifest verbatim).
+    pub capability_overrides: Vec<tau_runtime::capability_override::CapabilityOverride>,
 }
 
 /// Validated `requires` sub-table.
@@ -172,15 +210,16 @@ pub enum ProjectConfigError {
         message: String,
     },
 
-    /// Agent declared a `[agents.<id>.capabilities]` sub-table; reserved for Phase 1+.
-    #[error(
-        "agent {id:?}: capability override is not supported at v0.1; \
-         see Phase 1+ roadmap entry: docs/retrospectives/phase-0-mid.md \
-         §'What's NOT in scope for this memo'"
-    )]
-    CapabilityOverrideUnsupported {
-        /// Agent id that contained the unsupported capability override.
+    /// Project override on `kind` expanded the package's grant. Carries
+    /// the agent id, the failing kind, and a human-readable reason.
+    #[error("agent {id:?}: capability override on {kind:?} expands the package's grant: {reason}")]
+    CapabilityOverrideExpands {
+        /// Agent id whose override failed validation.
         id: String,
+        /// The capability kind that expanded.
+        kind: String,
+        /// Human-readable reason from `compute_effective`.
+        reason: String,
     },
 
     /// Agent declared both `prompt.system` and `prompt.system_file`.
@@ -233,8 +272,29 @@ fn validate_agent(id: String, raw: UncheckedAgent) -> Result<AgentEntry, Project
         });
     }
 
-    if raw.capabilities.is_some() {
-        return Err(ProjectConfigError::CapabilityOverrideUnsupported { id });
+    // Convert the typed unchecked overrides into runtime-shape
+    // CapabilityOverride values. The intersect-vs-manifest check runs
+    // at `tau run` time (Task 5) and at `tau list --capabilities`
+    // rendering time (Task 9); here we only validate parse-local
+    // invariants (duplicate kinds).
+    let capability_overrides: Vec<tau_runtime::capability_override::CapabilityOverride> = raw
+        .capabilities
+        .iter()
+        .map(unchecked_to_capability_override)
+        .collect();
+
+    {
+        use std::collections::BTreeSet;
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        for ov in &capability_overrides {
+            if !seen.insert(ov.kind.clone()) {
+                return Err(ProjectConfigError::CapabilityOverrideExpands {
+                    id: id.clone(),
+                    kind: ov.kind.clone(),
+                    reason: "duplicate kind in project override".into(),
+                });
+            }
+        }
     }
 
     let prompt = match raw.prompt {
@@ -267,7 +327,25 @@ fn validate_agent(id: String, raw: UncheckedAgent) -> Result<AgentEntry, Project
         requires,
         config,
         prompt,
+        capability_overrides,
     })
+}
+
+fn unchecked_to_capability_override(
+    raw: &UncheckedCapabilityOverride,
+) -> tau_runtime::capability_override::CapabilityOverride {
+    use tau_runtime::capability_override::CapabilityOverride;
+
+    // Fold the kind-specific allow_* / deny_* fields into a single
+    // `(allow, deny)` pair. The runtime cap_kind() picks the right
+    // strings based on the matching package capability.
+    let (allow, deny) = match raw.kind.as_str() {
+        "fs.read" | "fs.write" | "fs.exec" => (raw.allow_paths.clone(), raw.deny_paths.clone()),
+        "net.http" => (raw.allow_hosts.clone(), raw.deny_hosts.clone()),
+        "process.spawn" => (raw.allow_commands.clone(), raw.deny_commands.clone()),
+        _ => (None, Vec::new()),
+    };
+    CapabilityOverride::new(raw.kind.clone(), allow, deny, raw.max_bytes)
 }
 
 // ----- File entrypoint -----
@@ -349,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_capability_override() {
+    fn validate_accepts_capability_override() {
         let toml_str = r#"
             [project]
             name = "x"
@@ -359,14 +437,64 @@ mod tests {
             package      = "p@^0.1"
             llm_backend  = "anthropic"
 
-            [agents.r.capabilities]
-            "filesystem.read" = ["src/**"]
+            [[agents.r.capabilities]]
+            kind        = "fs.read"
+            allow_paths = ["${PROJECT}/src/**"]
+            deny_paths  = ["${PROJECT}/.env"]
+        "#;
+        let cfg = parse(toml_str).unwrap();
+        let agent = cfg.agents.get("r").unwrap();
+        assert_eq!(agent.capability_overrides.len(), 1);
+        let ov = &agent.capability_overrides[0];
+        assert_eq!(ov.kind, "fs.read");
+        assert_eq!(
+            ov.allow.as_deref().unwrap(),
+            &["${PROJECT}/src/**".to_string()]
+        );
+        assert_eq!(ov.deny, vec!["${PROJECT}/.env".to_string()]);
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_kind_in_override() {
+        let toml_str = r#"
+            [project]
+            name = "x"
+
+            [agents.r]
+            display_name = "R"
+            package      = "p@^0.1"
+            llm_backend  = "anthropic"
+
+            [[agents.r.capabilities]]
+            kind        = "fs.read"
+            allow_paths = ["${PROJECT}/src/**"]
+
+            [[agents.r.capabilities]]
+            kind        = "fs.read"
+            allow_paths = ["${PROJECT}/docs/**"]
         "#;
         let result = parse(toml_str);
-        let Err(ProjectConfigError::CapabilityOverrideUnsupported { id, .. }) = result else {
-            panic!("expected CapabilityOverrideUnsupported: {result:?}")
+        let Err(ProjectConfigError::CapabilityOverrideExpands { id, kind, reason }) = result else {
+            panic!("expected CapabilityOverrideExpands: {result:?}")
         };
         assert_eq!(id, "r");
+        assert_eq!(kind, "fs.read");
+        assert!(reason.contains("duplicate"));
+    }
+
+    #[test]
+    fn validate_no_capability_block_keeps_overrides_empty() {
+        let toml_str = r#"
+            [project]
+            name = "x"
+
+            [agents.r]
+            display_name = "R"
+            package      = "p@^0.1"
+            llm_backend  = "anthropic"
+        "#;
+        let cfg = parse(toml_str).unwrap();
+        assert!(cfg.agents.get("r").unwrap().capability_overrides.is_empty());
     }
 
     #[test]
@@ -559,7 +687,7 @@ mod proptests {
                         package: format!("{pkg}@^0.1"),
                         llm_backend: llm,
                         requires: None,
-                        capabilities: None,
+                        capabilities: Vec::new(),
                         config: None,
                         prompt: None,
                     },

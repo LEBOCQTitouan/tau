@@ -360,6 +360,7 @@ mod tests {
             requires: RequiresEntry::default(),
             config: BTreeMap::new(),
             prompt: PromptEntry::None,
+            capability_overrides: Vec::new(),
         };
         mutate(&mut e);
         e

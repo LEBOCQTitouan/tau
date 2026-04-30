@@ -18,7 +18,7 @@
 
 pub mod builder;
 pub(crate) mod capability;
-pub(crate) mod capability_override;
+pub mod capability_override;
 pub(crate) mod dispatch;
 pub mod error;
 pub mod options;
