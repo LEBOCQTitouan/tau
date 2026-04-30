@@ -233,6 +233,17 @@ pub enum RuntimeError {
     #[error("manifest validation: {0}")]
     Manifest(#[from] tau_domain::PackageManifestError),
 
+    /// Project capability override expanded the package's grant.
+    /// Raised at runtime as a defense-in-depth check (tau-cli also
+    /// rejects at parse time via its own ProjectConfigError variant).
+    #[error("capability override on {kind:?} expands package grant: {reason}")]
+    CapabilityOverrideExpands {
+        /// The capability kind that expanded.
+        kind: String,
+        /// Human-readable reason from `compute_effective`.
+        reason: String,
+    },
+
     /// Catch-all for invariant violations / unexpected states.
     /// See: [escape-hatches.md#runtimeerror-internal](../docs/explanation/escape-hatches.md#runtimeerror-internal).
     #[error("internal: {message}")]
@@ -529,5 +540,16 @@ mod tests {
         let s = format!("{err}");
         assert!(s.contains("internal"), "got: {s}");
         assert!(s.contains("unexpected"), "got: {s}");
+    }
+
+    #[test]
+    fn capability_override_expands_displays_with_kind_and_reason() {
+        let err = RuntimeError::CapabilityOverrideExpands {
+            kind: "fs.read".into(),
+            reason: "/etc/** is not a subset".into(),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("fs.read"));
+        assert!(msg.contains("not a subset"));
     }
 }
