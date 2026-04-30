@@ -130,9 +130,18 @@ impl Runtime {
             package_manifest.capabilities(),
             &options.project_override,
         )
-        .map_err(|e| RuntimeError::CapabilityOverrideExpands {
-            kind: e.kind,
-            reason: e.reason,
+        .map_err(|e| {
+            warn!(
+                name = "runtime.capability_override_rejected",
+                agent_id = %agent_def.id,
+                package_id = %agent_def.package.name,
+                kind = %e.kind,
+                reason = %e.reason,
+            );
+            RuntimeError::CapabilityOverrideExpands {
+                kind: e.kind,
+                reason: e.reason,
+            }
         })?;
         let granted_for_kernel: Vec<Capability> =
             effective.iter().map(|e| e.source.clone()).collect();
@@ -142,6 +151,32 @@ impl Runtime {
             count = granted.len(),
             overrides_applied = options.project_override.len(),
         );
+
+        // Precompute the session-scoped views of the effective capability set
+        // once per run. `effective` is immutable from this point forward, so
+        // these values are identical for every tool call in every turn — there
+        // is no need to recompute them inside the per-tool-call loop.
+        let granted_for_session: Vec<Capability> = effective
+            .iter()
+            .map(narrowed_capability_for_session)
+            .collect();
+        let deny_entries: Vec<tau_ports::DenyEntry> = effective
+            .iter()
+            .filter(|e| !e.deny.is_empty())
+            .map(|e| {
+                let kind = match &e.source {
+                    Capability::Filesystem(tau_domain::FsCapability::Read { .. }) => "fs.read",
+                    Capability::Filesystem(tau_domain::FsCapability::Write { .. }) => "fs.write",
+                    Capability::Filesystem(tau_domain::FsCapability::Exec { .. }) => "fs.exec",
+                    Capability::Network(tau_domain::NetCapability::Http { .. }) => "net.http",
+                    Capability::Process(tau_domain::ProcessCapability::Spawn { .. }) => {
+                        "process.spawn"
+                    }
+                    _ => "unknown",
+                };
+                tau_ports::DenyEntry::new(kind.to_string(), e.deny.clone())
+            })
+            .collect();
 
         // The instance-id is generated once per `run()` call and used
         // for every assistant-authored `Message` and every
@@ -353,38 +388,9 @@ impl Runtime {
                 // plugin process so plugins can perform finer-grained scope
                 // checks (path globs, command allowlists) beyond the kernel's
                 // structural capability check at run.rs:272.
-                let granted_for_session: Vec<Capability> = effective
-                    .iter()
-                    .map(narrowed_capability_for_session)
-                    .collect();
-                let deny_entries: Vec<tau_ports::DenyEntry> = effective
-                    .iter()
-                    .filter(|e| !e.deny.is_empty())
-                    .map(|e| {
-                        let kind = match &e.source {
-                            Capability::Filesystem(tau_domain::FsCapability::Read { .. }) => {
-                                "fs.read"
-                            }
-                            Capability::Filesystem(tau_domain::FsCapability::Write { .. }) => {
-                                "fs.write"
-                            }
-                            Capability::Filesystem(tau_domain::FsCapability::Exec { .. }) => {
-                                "fs.exec"
-                            }
-                            Capability::Network(tau_domain::NetCapability::Http { .. }) => {
-                                "net.http"
-                            }
-                            Capability::Process(tau_domain::ProcessCapability::Spawn {
-                                ..
-                            }) => "process.spawn",
-                            _ => "unknown",
-                        };
-                        tau_ports::DenyEntry::new(kind.to_string(), e.deny.clone())
-                    })
-                    .collect();
                 let ctx = SessionContext::new(agent_instance_id, uuid::Uuid::new_v4(), None)
-                    .with_granted_capabilities(granted_for_session)
-                    .with_deny_entries(deny_entries);
+                    .with_granted_capabilities(granted_for_session.clone())
+                    .with_deny_entries(deny_entries.clone());
                 {
                     let session_open_span =
                         info_span!("tool.session_open", tool_name = %tool_use.name);
@@ -801,14 +807,22 @@ fn value_to_preview_string(v: &Value) -> String {
 /// `#[non_exhaustive]` and can't be constructed cross-crate; we serialize
 /// the source, splice in the narrowed allow-list / max_bytes, and
 /// deserialize back.
+///
+/// Failure-safe: any serialization failure falls back to `eff.source.clone()`.
+/// The kernel's structural cap check still applies — narrowing is best-effort
+/// at this layer; panicking on a security-enforcement path would be the
+/// wrong failure mode.
 fn narrowed_capability_for_session(eff: &EffectiveCapability) -> Capability {
     use serde_json::{json, Value as Jv};
 
-    let source_json = serde_json::to_value(&eff.source).expect("Capability serializes");
-    let mut obj = source_json
-        .as_object()
-        .expect("Capability serializes to map")
-        .clone();
+    let source_json = match serde_json::to_value(&eff.source) {
+        Ok(v) => v,
+        Err(_) => return eff.source.clone(),
+    };
+    let mut obj = match source_json.as_object() {
+        Some(m) => m.clone(),
+        None => return eff.source.clone(),
+    };
     if let Some(allow) = &eff.allow_override {
         // Replace the kind-appropriate field. For unknown kinds (e.g. Custom),
         // bail and return source unchanged — narrowing is unsupported.
@@ -823,7 +837,7 @@ fn narrowed_capability_for_session(eff: &EffectiveCapability) -> Capability {
     if let Some(mb) = eff.max_bytes_override {
         obj.insert("max_bytes".to_string(), json!(mb));
     }
-    serde_json::from_value(Jv::Object(obj)).expect("narrowed capability deserializes")
+    serde_json::from_value(Jv::Object(obj)).unwrap_or_else(|_| eff.source.clone())
 }
 
 /// Top-level capability kind string used in
