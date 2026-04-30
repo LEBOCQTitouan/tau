@@ -1,0 +1,12 @@
+name = "fs-read"
+version = "0.1.0"
+description = "Read bytes from a single absolute path under fs.read capability scope."
+
+[plugin]
+provides = "tool"
+kind     = "rust-cargo"
+bin      = "fs-read-plugin"
+
+[[capabilities]]
+kind = "fs.read"
+paths = []

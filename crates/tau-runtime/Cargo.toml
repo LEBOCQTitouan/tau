@@ -63,3 +63,6 @@ futures-util       = "0.3"
 # Used by `plugin_host_recording.rs` (and the recording-module unit
 # tests) to allocate a temp directory for the JSONL sink.
 tempfile           = { workspace = true }
+# Used by `tool_plugin_e2e.rs` to drive FsReadPlugin in-process.
+fs-read            = { path = "../tau-plugins/fs-read" }
+tau-plugin-sdk     = { workspace = true }

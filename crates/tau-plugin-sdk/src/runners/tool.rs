@@ -36,6 +36,9 @@ use crate::tracing_layer;
 const TOOL_CALL_METHOD: &str = "tool.call";
 /// Method name for retrieving the tool's [`tau_ports::ToolSpec`].
 const TOOL_DESCRIBE_METHOD: &str = "tool.describe";
+/// Wire method name for fetching the tool's required capabilities.
+/// Called once during plugin loading; returns Vec<tau_domain::Capability>.
+const TOOL_DESCRIBE_CAPABILITIES_METHOD: &str = "tool.describe_capabilities";
 
 /// Run a plugin that implements [`Tool`]. Reads frames from stdin,
 /// writes frames to stdout. Returns when:
@@ -282,6 +285,39 @@ where
             }
             let spec = plugin.schema();
             let result_bytes = rmp_serde::to_vec(&spec)?;
+            let frame = Frame::Response {
+                id,
+                error: None,
+                result: Some(result_bytes),
+            };
+            writer.write_frame(&frame.encode()?).await?;
+        }
+        TOOL_DESCRIBE_CAPABILITIES_METHOD => {
+            // params is `[]` (0-element). Returns Vec<Capability>
+            // from plugin.capabilities().
+            let parsed: Vec<()> = match rmp_serde::from_slice(params) {
+                Ok(p) => p,
+                Err(e) => {
+                    send_invalid_params(
+                        writer,
+                        id,
+                        &format!("tool.describe_capabilities params decode failed: {e}"),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            };
+            if !parsed.is_empty() {
+                send_invalid_params(
+                    writer,
+                    id,
+                    "tool.describe_capabilities params must be a 0-element array",
+                )
+                .await?;
+                return Ok(());
+            }
+            let caps: Vec<tau_domain::Capability> = plugin.capabilities().to_vec();
+            let result_bytes = rmp_serde::to_vec(&caps)?;
             let frame = Frame::Response {
                 id,
                 error: None,

@@ -328,11 +328,17 @@ impl Runtime {
                 trace!(name = "message.added", kind = "tool_call");
 
                 // ----- Open a session ----------------------------------------
+                // ctx is declared here so it remains in scope for the invoke call below.
+                // granted_capabilities flows the agent's package grants to the
+                // plugin process so plugins can perform finer-grained scope
+                // checks (path globs, command allowlists) beyond the kernel's
+                // structural capability check at run.rs:272.
+                let ctx = SessionContext::new(agent_instance_id, uuid::Uuid::new_v4(), None)
+                    .with_granted_capabilities(granted.to_vec());
                 {
                     let session_open_span =
                         info_span!("tool.session_open", tool_name = %tool_use.name);
-                    let ctx = SessionContext::new(agent_instance_id, uuid::Uuid::new_v4(), None);
-                    if let Err(err) = tool.init(ctx).instrument(session_open_span).await {
+                    if let Err(err) = tool.init(ctx.clone()).instrument(session_open_span).await {
                         warn!(
                             name = "tool.session_open_failed",
                             tool_name = %tool_use.name,
@@ -358,7 +364,7 @@ impl Runtime {
                         agent_def.llm_backend.as_str(),
                     )?;
                     let outcome = tool
-                        .invoke(&mut (), tool_use.input.clone())
+                        .invoke(&ctx, &mut (), tool_use.input.clone())
                         .instrument(invoke_span)
                         .await;
                     match outcome {

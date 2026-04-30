@@ -12,9 +12,8 @@
 //!
 //! `name`/`schema`/`capabilities` are cached at construction time:
 //! `name` from the plugin manifest, `schema` from the `tool.describe`
-//! RPC the host issues during loading, and `capabilities` is empty at
-//! v0.1 because the host can't introspect plugin capabilities over
-//! the wire (additive in Phase 1).
+//! RPC, and `capabilities` from the `tool.describe_capabilities` RPC,
+//! both issued by the host during plugin loading.
 //!
 //! See spec §7.4. Streaming tool output is out of scope for v0.1.
 
@@ -34,6 +33,10 @@ use super::process::{PluginProcess, RpcResult};
 /// Wire method names for the tool port.
 const TOOL_CALL_METHOD: &str = "tool.call";
 const TOOL_DESCRIBE_METHOD: &str = "tool.describe";
+/// Wire method name for fetching the tool's required capabilities.
+/// Called once during plugin loading; returns Vec<tau_domain::Capability>.
+#[allow(dead_code)] // consumed by Task 5 (sdk runner) / Task 6 (plugin_host caller)
+const TOOL_DESCRIBE_CAPABILITIES_METHOD: &str = "tool.describe_capabilities";
 
 /// IPC-backed [`DynTool`] adapter.
 ///
@@ -46,22 +49,34 @@ const TOOL_DESCRIBE_METHOD: &str = "tool.describe";
 pub struct IpcTool {
     pub(crate) name: String,
     pub(crate) schema: ToolSpec,
-    /// Empty at v0.1 — the wire protocol doesn't yet surface plugin-
-    /// declared capabilities. The kernel's capability filter therefore
-    /// trivially admits every IPC-backed tool; agent-package grants
-    /// are still enforced for in-process tools.
+    /// Capabilities the plugin requires of the calling agent's package.
+    /// Populated during plugin loading via the
+    /// `tool.describe_capabilities` wire method. The kernel's capability
+    /// filter at `run.rs:272` enforces this against the calling agent's
+    /// package grants.
     pub(crate) capabilities: Vec<tau_domain::Capability>,
     pub(crate) process: Arc<PluginProcess>,
 }
 
 impl IpcTool {
     /// Construct an `IpcTool` from a plugin name, a pre-fetched
-    /// [`ToolSpec`], and a shared [`PluginProcess`].
-    pub fn new(name: String, schema: ToolSpec, process: Arc<PluginProcess>) -> Self {
+    /// [`ToolSpec`], the plugin's declared [`Capability`] list, and a
+    /// shared [`PluginProcess`].
+    ///
+    /// `capabilities` is populated during plugin loading via the
+    /// `tool.describe_capabilities` wire method. The kernel's capability
+    /// filter at `run.rs:272` enforces this against the calling agent's
+    /// package grants.
+    pub fn new(
+        name: String,
+        schema: ToolSpec,
+        capabilities: Vec<tau_domain::Capability>,
+        process: Arc<PluginProcess>,
+    ) -> Self {
         Self {
             name,
             schema,
-            capabilities: Vec::new(),
+            capabilities,
             process,
         }
     }
@@ -113,6 +128,60 @@ impl IpcTool {
             }),
         }
     }
+
+    /// Issue a `tool.describe_capabilities` RPC and decode the
+    /// `Vec<Capability>` response. Used by
+    /// [`crate::plugin_host::load_tool`] during loading so the returned
+    /// `IpcTool` has its declared capabilities cached and the kernel's
+    /// capability check at `run.rs:272` enforces them.
+    pub async fn fetch_capabilities(
+        process: &PluginProcess,
+    ) -> Result<Vec<tau_domain::Capability>, ToolError> {
+        let id = process.next_msgid.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel::<RpcResult>();
+        {
+            let mut map = process.in_flight_responses.lock().await;
+            map.insert(id, tx);
+        }
+        // Wire shape: params is a 0-element array, per the SDK side at
+        // `tau_plugin_sdk::runners::tool::dispatch_tool`.
+        let params_bytes =
+            rmp_serde::to_vec::<Vec<()>>(&Vec::new()).map_err(|e| ToolError::Internal {
+                message: format!("rmp encode tool.describe_capabilities params: {e}"),
+            })?;
+        let frame = Frame::Request {
+            id,
+            method: TOOL_DESCRIBE_CAPABILITIES_METHOD.to_string(),
+            params: params_bytes,
+        };
+        let frame_bytes = frame.encode().map_err(|e| ToolError::Internal {
+            message: format!("frame encode: {e}"),
+        })?;
+        process
+            .send_frame(&frame_bytes)
+            .await
+            .map_err(|e| ToolError::Internal {
+                message: format!("write frame: {e}"),
+            })?;
+        let result = rx.await.map_err(|_| ToolError::Internal {
+            message: "in-flight response sender dropped (plugin crashed?)".to_string(),
+        })?;
+        match result {
+            Ok(bytes) => {
+                rmp_serde::from_slice::<Vec<tau_domain::Capability>>(&bytes).map_err(|e| {
+                    ToolError::Internal {
+                        message: format!("rmp decode Vec<Capability>: {e}"),
+                    }
+                })
+            }
+            Err(envelope) => Err(ToolError::Internal {
+                message: format!(
+                    "plugin error code {} message {}",
+                    envelope.code, envelope.message
+                ),
+            }),
+        }
+    }
 }
 
 impl DynTool for IpcTool {
@@ -141,10 +210,13 @@ impl DynTool for IpcTool {
 
     fn invoke<'a>(
         &'a self,
+        ctx: &'a SessionContext,
         _session: &'a mut (),
         args: Value,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<ToolResult, ToolError>> + 'a>> {
         let process = self.process.clone();
+        // Clone ctx so the async block can own it across the await.
+        let ctx_owned = ctx.clone();
         Box::pin(async move {
             let id = process.next_msgid.fetch_add(1, Ordering::Relaxed);
             let (tx, rx) = oneshot::channel::<RpcResult>();
@@ -152,19 +224,11 @@ impl DynTool for IpcTool {
                 let mut map = process.in_flight_responses.lock().await;
                 map.insert(id, tx);
             }
-            // Wire shape: params is `(SessionContext, Value)`. The
-            // host-side `invoke` doesn't have access to the kernel's
-            // SessionContext (the v0.1 `DynTool` shape passes `&mut ()`
-            // not the context), so we synthesize a fresh one here. The
-            // plugin side uses it for tracing fields only — the actual
-            // session lifetime is collapsed inside the SDK runner.
-            let ctx = SessionContext::new(
-                tau_domain::AgentInstanceId::new(),
-                uuid::Uuid::new_v4(),
-                None,
-            );
+            // Wire shape: params is (SessionContext, Value). Use the ctx
+            // passed by the kernel (carries agent_instance_id +
+            // granted_capabilities); no longer synthesize a fresh one.
             let params_bytes =
-                rmp_serde::to_vec(&(ctx, &args)).map_err(|e| ToolError::Internal {
+                rmp_serde::to_vec(&(ctx_owned, &args)).map_err(|e| ToolError::Internal {
                     message: format!("rmp encode tool.call params: {e}"),
                 })?;
             let frame = Frame::Request {

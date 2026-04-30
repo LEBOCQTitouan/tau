@@ -113,6 +113,7 @@ pub trait DynTool: Send + Sync {
     /// Boxed-future wrapper for [`Tool::invoke`].
     fn invoke<'a>(
         &'a self,
+        ctx: &'a SessionContext,
         session: &'a mut (),
         args: tau_domain::Value,
     ) -> BoxFuture<'a, Result<ToolResult, ToolError>>;
@@ -140,9 +141,15 @@ impl<T: Tool<Session = ()> + 'static> DynTool for T {
 
     fn invoke<'a>(
         &'a self,
+        _ctx: &'a SessionContext,
         session: &'a mut (),
         args: tau_domain::Value,
     ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+        // The in-process Tool trait's invoke takes (&mut Session, args).
+        // The session is what was returned from init(ctx); plugins that
+        // need ctx at invoke time stash it in their Session. This blanket
+        // impl ignores the new ctx parameter — out-of-process plugins
+        // reach the SessionContext via the IPC frame's encoded ctx.
         Box::pin(Tool::invoke(self, session, args))
     }
 

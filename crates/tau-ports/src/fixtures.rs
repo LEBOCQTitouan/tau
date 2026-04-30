@@ -107,17 +107,18 @@ pub fn make_tool_result(content: Vec<ToolContent>, is_error: bool) -> ToolResult
     ToolResult { content, is_error }
 }
 
-/// Build a [`SessionContext`] without struct-literal syntax.
+/// Build a [`SessionContext`] without struct-literal syntax. Provided
+/// for tests in tau-runtime and elsewhere; tau-ports callers should
+/// use [`SessionContext::new`] in production code.
+///
+/// `granted_capabilities` defaults to empty. To set a grant, use the
+/// builder: `make_session_context(...).with_granted_capabilities(caps)`.
 pub fn make_session_context(
     agent_instance_id: AgentInstanceId,
     session_id: Uuid,
     deadline: Option<SystemTime>,
 ) -> SessionContext {
-    SessionContext {
-        agent_instance_id,
-        session_id,
-        deadline,
-    }
+    SessionContext::new(agent_instance_id, session_id, deadline)
 }
 
 // ---------------------------------------------------------------------------

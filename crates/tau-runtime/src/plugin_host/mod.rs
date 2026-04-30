@@ -429,7 +429,29 @@ pub async fn load_tool(
             detail: format!("tool.describe failed: {e}"),
         })?;
 
-    Ok(Arc::new(ipc_tool::IpcTool::new(plugin_name, schema, process)) as Arc<dyn DynTool>)
+    // Fetch declared capabilities. Tolerant — older plugins that
+    // don't implement `tool.describe_capabilities` get an empty list
+    // (which makes them unrestricted by the kernel's capability check
+    // at `run.rs:272`, matching pre-Task-6 behavior).
+    let capabilities = match ipc_tool::IpcTool::fetch_capabilities(&process).await {
+        Ok(caps) => caps,
+        Err(e) => {
+            tracing::warn!(
+                target: "tau_runtime::plugin_host",
+                plugin = %plugin_name,
+                error = %e,
+                "tool.describe_capabilities failed; defaulting to empty list (plugin will be admitted unrestricted)",
+            );
+            Vec::new()
+        }
+    };
+
+    Ok(Arc::new(ipc_tool::IpcTool::new(
+        plugin_name,
+        schema,
+        capabilities,
+        process,
+    )) as Arc<dyn DynTool>)
 }
 
 /// Load a plugin that provides the `Storage` port and return a
