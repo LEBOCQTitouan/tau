@@ -25,6 +25,7 @@ pub mod options;
 pub mod outcome;
 pub mod plugin_host;
 mod run;
+pub(crate) mod tool_args;
 
 pub use builder::{Runtime, RuntimeBuilder};
 pub use capability_override::{CapabilityOverride, EffectiveCapability, OverrideExpandError};
