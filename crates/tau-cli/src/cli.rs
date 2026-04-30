@@ -214,6 +214,11 @@ pub struct ChatArgs {
     /// Validate setup without entering the REPL.
     #[arg(long)]
     pub dry_run: bool,
+    /// Skip auto-install of missing requires.tools dependencies. If
+    /// anything would need fetching, exit 2 with copy-pasteable
+    /// `tau install <url>` hints instead.
+    #[arg(long)]
+    pub no_install: bool,
 }
 
 /// Resource kinds accepted by `tau list`.

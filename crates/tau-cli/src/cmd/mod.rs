@@ -11,4 +11,5 @@ pub mod install;
 pub mod list;
 pub mod plugin;
 pub(crate) mod plugin_loader;
+pub(crate) mod resolve_helpers;
 pub mod run;

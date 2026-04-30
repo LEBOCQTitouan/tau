@@ -22,10 +22,9 @@
 
 use std::io::Read;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use anyhow::Context;
-use tau_domain::{Address, AgentId, AgentInstanceId, Message, MessagePayload};
+use tau_domain::{Address, AgentInstanceId, Message, MessagePayload};
 use tau_plugin_protocol::handshake::TraceContext;
 use tau_runtime::{RunOptions, RunOutcome};
 
@@ -73,81 +72,12 @@ pub async fn run(
 
     let scope = tau_pkg::Scope::resolve(&cwd).context("resolving package scope")?;
 
-    // Resolve + install requires.tools BEFORE invoking the LLM. The
-    // agent_def builder no longer checks requires.tools (Task 4 of
-    // Tier 2 priority 5); installing here makes the lockfile authoritative
-    // by the time build_agent_definition runs.
-    let requires: Vec<(tau_domain::AgentId, tau_pkg::RequiredTool)> = entry
-        .requires
-        .tools
-        .iter()
-        .map(|t| {
-            (
-                AgentId::from_str(&entry.id).expect("AgentId from validated entry"),
-                t.clone(),
-            )
-        })
-        .collect();
-    let plan = tau_pkg::resolve_requires_tools(&requires, &scope)
-        .with_context(|| format!("resolving requires.tools for agent {:?}", args.agent_id))?;
-
-    output.status(format!(
-        "[resolve] {} required tools — {} already installed, {} to fetch",
-        plan.installs.len() + plan.reuses.len(),
-        plan.reuses.len(),
-        plan.installs.len(),
-    ))?;
-    output.json(&serde_json::json!({
-        "event": "resolve_start",
-        "required": plan.installs.len() + plan.reuses.len(),
-        "installed": plan.reuses.len(),
-        "to_fetch": plan.installs.len(),
-    }))?;
-
-    if args.no_install && !plan.installs.is_empty() {
-        emit_no_install_hints(&plan, output)?;
-        anyhow::bail!("--no-install set; {} tool(s) missing", plan.installs.len());
-    }
-
-    let resolve_start = std::time::Instant::now();
-    for install in &plan.installs {
-        output.status(format!(
-            "[install] {} {} from {}",
-            install.name, install.version, install.source
-        ))?;
-        output.json(&serde_json::json!({
-            "event": "install_start",
-            "name": install.name.as_str(),
-            "version": install.version.to_string(),
-            "source": install.source.to_string(),
-        }))?;
-        let started = std::time::Instant::now();
-        let _installed = tau_pkg::install_with_options(
-            &install.source,
-            &scope,
-            tau_pkg::InstallOptions::default(),
-        )
-        .with_context(|| format!("installing {}", install.name))?;
-        let elapsed = started.elapsed().as_millis();
-        output.status(format!(
-            "[install] {} {} ({}ms)",
-            install.name, install.version, elapsed
-        ))?;
-        output.json(&serde_json::json!({
-            "event": "install_complete",
-            "name": install.name.as_str(),
-            "version": install.version.to_string(),
-            "duration_ms": elapsed as u64,
-        }))?;
-    }
-    let total_ms = resolve_start.elapsed().as_millis();
-    if !plan.installs.is_empty() {
-        output.status(format!("[resolve] done in {}ms", total_ms))?;
-        output.json(&serde_json::json!({
-            "event": "resolve_complete",
-            "duration_ms": total_ms as u64,
-        }))?;
-    }
+    crate::cmd::resolve_helpers::resolve_and_install_for_agent(
+        entry,
+        &scope,
+        args.no_install,
+        output,
+    )?;
 
     let (agent_def, manifest) = crate::config::build_agent_definition(entry, &cwd, &scope)
         .with_context(|| format!("resolving agent {:?}", args.agent_id))?;
@@ -348,20 +278,6 @@ fn emit_dry_run(
         trimmed, suffix
     ))?;
     output.dry_run("no LLM call made.")?;
-    Ok(())
-}
-
-fn emit_no_install_hints(
-    plan: &tau_pkg::ResolutionPlan,
-    output: &mut crate::output::Output,
-) -> anyhow::Result<()> {
-    output.warn(format!(
-        "tau: {} tool(s) missing; --no-install set. To install:",
-        plan.installs.len(),
-    ))?;
-    for install in &plan.installs {
-        output.warn(format!("  tau install {}", install.source))?;
-    }
     Ok(())
 }
 
