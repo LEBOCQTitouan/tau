@@ -18,10 +18,11 @@ Phase 1 unblocks everything else.
 shell) shipped 2026-04-30. Tier 1 fully complete: plugin loading
 mechanism (priority 1), three real LLM-backend plugins (priority 2),
 and two real Tool plugins (priority 3) with end-to-end capability
-enforcement. Tier 2 (Phase 0 deferrals — capability override
-implementation, transitive dependency resolution, schema validation,
-tau update/verify/uninstall, streaming LLM responses) is the natural
-next phase of work.
+enforcement. Tier 2 priority 4 (capability override implementation)
+shipped 2026-04-30, closing the ADR-0007 §4 reservation. Remaining
+Tier 2 deferrals — transitive dependency resolution, schema
+validation, tau update/verify/uninstall, streaming LLM responses —
+are the natural next phase of work.
 
 | # | Sub-project | Produces | Merged |
 |---|---|---|---|
@@ -30,6 +31,7 @@ next phase of work.
 | 2b | Ollama LLM-backend plugin ✅ | Second real LLM-backend plugin: Ollama (local LLM runner) at `crates/tau-plugins/ollama/`; native `/api/chat` over NDJSON streaming (~50 LOC hand-rolled, no eventsource-stream); optional bearer-token auth; cassette-replay test harness duplicated from Anthropic; in-plugin retry honoring 503-on-model-load case; 404 errors include `ollama pull` remediation hint | 2026-04-29 |
 | 2c | OpenAI plugin + supporting infrastructure ✅ | Third real LLM-backend plugin: OpenAI Chat Completions client at `crates/tau-plugins/openai/`; SSE streaming, real `tool_call_id` round-trip, full `tool_choice` round-trip. Plus `crates/tau-plugin-test-support/` (rule-of-three refactor of cassette replayer) and `crates/tau-plugin-conformance/` (parameterized behavioral test suite, deferred from ADR-0008 §17). All 3 plugins migrated to typed `LlmError` variants. ADR-0009 Accepted. | 2026-04-29 |
 | 3 | First real Tool plugins (fs-read + shell) ✅ | Two minimal Tool plugins demonstrating the kernel's capability check end-to-end. `fs-read` enforces `FsCapability::Read.paths` globs; `shell` enforces `ProcessCapability::Spawn.commands` allow-list (wall-clock timeout, 1 MiB output cap, kill+drain on timeout, no env inheritance, no stdin). Closed two infrastructure gaps in the same sub-project: `tool.describe_capabilities` wire method (Gap 1: plugin-declared capabilities now surface to the kernel for IPC tools); `SessionContext.granted_capabilities` (Gap 2: agent grants flow to plugin processes for finer-grained scope checks). Trust model: unsandboxed v0.1; sandboxing deferred to Tier 3 priority 12. | 2026-04-30 |
+| 4 | Capability override implementation ✅ | Tier 2 priority 4 — realizes ADR-0007 §4 reservation. Project tau.toml `[[agents.<id>.capabilities]]` narrows but never expands package manifest grants. `tau-runtime::capability_override` module (semantic glob-subset analyzer + `compute_effective`); `RunOptions.project_override` flows from tau-cli through `Runtime::run`; `SessionContext.deny_entries` channel; `DenyEntry` type; fs-read + shell plugins honor deny-after-allow (deny wins per spec §9). Validation at parse time AND every runtime load (fail-closed both places). New `tau list agents --capabilities` audit surface. New typed errors `ProjectConfigError::CapabilityOverrideExpands` and `RuntimeError::CapabilityOverrideExpands`. Telemetry event `runtime.capability_override_rejected`. No new CI jobs (23 required checks unchanged). | 2026-04-30 |
 
 ## Phase 0 (complete) — bootstrap + foundational sub-projects
 
@@ -95,9 +97,13 @@ Tier ordering reflects criticality, not strict implementation order
 
 ### Tier 2 — completes Phase 0 deferrals
 
-4. **Capability override implementation** (project tau.toml
-   `[agents.<id>.capabilities]` with intersect-only semantics, per
-   ADR-0007 §4 reservation).
+4. **Capability override implementation** ✅ Shipped 2026-04-30 — see
+   [spec](docs/superpowers/specs/2026-04-30-capability-override-design.md).
+   Realizes ADR-0007 §4 reservation. Project tau.toml
+   `[[agents.<id>.capabilities]]` narrows package grants via
+   semantic glob-subset on `allow_*` plus `deny_*` carve-outs (deny
+   wins). Validation at parse time + every runtime load (fail-closed
+   both places). Audit surface: `tau list agents --capabilities`.
 5. **Transitive dependency resolution** (`requires.tools` auto-install,
    per ADR-0004 §10 deferral).
 6. **Schema validation for tool args** (activates
