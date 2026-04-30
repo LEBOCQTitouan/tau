@@ -628,6 +628,7 @@ version = "0.0.0"
 dependencies = [
  "base64",
  "globset",
+ "rmp-serde",
  "serde",
  "serde_json",
  "tau-domain",
@@ -638,6 +639,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2068,6 +2070,7 @@ dependencies = [
 name = "shell"
 version = "0.0.0"
 dependencies = [
+ "rmp-serde",
  "serde",
  "serde_json",
  "tau-domain",
@@ -2078,6 +2081,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2356,6 +2360,7 @@ name = "tau-runtime"
 version = "0.0.0"
 dependencies = [
  "base64",
+ "fs-read",
  "futures-core",
  "futures-util",
  "proptest",
@@ -2365,6 +2370,7 @@ dependencies = [
  "tau-domain",
  "tau-pkg",
  "tau-plugin-protocol",
+ "tau-plugin-sdk",
  "tau-ports",
  "tempfile",
  "thiserror 2.0.18",
