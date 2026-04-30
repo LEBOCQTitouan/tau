@@ -141,10 +141,13 @@ impl DynTool for IpcTool {
 
     fn invoke<'a>(
         &'a self,
+        ctx: &'a SessionContext,
         _session: &'a mut (),
         args: Value,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<ToolResult, ToolError>> + 'a>> {
         let process = self.process.clone();
+        // Clone ctx so the async block can own it across the await.
+        let ctx_owned = ctx.clone();
         Box::pin(async move {
             let id = process.next_msgid.fetch_add(1, Ordering::Relaxed);
             let (tx, rx) = oneshot::channel::<RpcResult>();
@@ -152,19 +155,11 @@ impl DynTool for IpcTool {
                 let mut map = process.in_flight_responses.lock().await;
                 map.insert(id, tx);
             }
-            // Wire shape: params is `(SessionContext, Value)`. The
-            // host-side `invoke` doesn't have access to the kernel's
-            // SessionContext (the v0.1 `DynTool` shape passes `&mut ()`
-            // not the context), so we synthesize a fresh one here. The
-            // plugin side uses it for tracing fields only — the actual
-            // session lifetime is collapsed inside the SDK runner.
-            let ctx = SessionContext::new(
-                tau_domain::AgentInstanceId::new(),
-                uuid::Uuid::new_v4(),
-                None,
-            );
+            // Wire shape: params is (SessionContext, Value). Use the ctx
+            // passed by the kernel (carries agent_instance_id +
+            // granted_capabilities); no longer synthesize a fresh one.
             let params_bytes =
-                rmp_serde::to_vec(&(ctx, &args)).map_err(|e| ToolError::Internal {
+                rmp_serde::to_vec(&(ctx_owned, &args)).map_err(|e| ToolError::Internal {
                     message: format!("rmp encode tool.call params: {e}"),
                 })?;
             let frame = Frame::Request {
