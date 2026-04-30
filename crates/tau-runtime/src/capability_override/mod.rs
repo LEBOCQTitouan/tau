@@ -132,8 +132,19 @@ pub fn compute_effective(
     // applied (if any).
     let mut effective: Vec<EffectiveCapability> = Vec::with_capacity(package_caps.len());
     for cap in package_caps {
-        let kind = cap_kind(cap);
-        let ov = project_override.iter().find(|o| o.kind == kind);
+        // Match override entries to package caps using the same identity
+        // function as `find_package_cap` (Custom by `name`, others by
+        // `cap_kind`). Keeps the validation pass and the build pass in
+        // logical sync — without this, a future maintainer adding a new
+        // identity rule has to remember to update two call sites.
+        let ov = project_override.iter().find(|o| match cap {
+            Capability::Custom { name, .. } => &o.kind == name,
+            _ => o.kind == cap_kind(cap),
+        });
+        let kind = match cap {
+            Capability::Custom { name, .. } => name.as_str(),
+            _ => cap_kind(cap),
+        };
         let entry = match ov {
             None => EffectiveCapability {
                 source: cap.clone(),
@@ -390,5 +401,20 @@ mod tests {
         let over = vec![ov("fs.read", Some(vec![]), vec![], None)];
         let eff = compute_effective(&pkg, &over).unwrap();
         assert_eq!(eff[0].allow_override.as_deref().unwrap(), &[] as &[String]);
+    }
+
+    #[test]
+    fn agent_spawn_allow_narrowing_rejected() {
+        // agent.spawn cannot be narrowed via this override layer at v0.1.
+        // The fall-through arm in validate_allow_subset returns
+        // "allow narrowing not supported for this capability kind".
+        let pkg = vec![cap(r#"{"kind":"agent.spawn","allowed_kinds":["worker"]}"#)];
+        let over = vec![ov("agent.spawn", Some(vec!["worker".into()]), vec![], None)];
+        let err = compute_effective(&pkg, &over).unwrap_err();
+        assert!(
+            err.reason.contains("allow narrowing not supported"),
+            "got: {}",
+            err.reason
+        );
     }
 }
