@@ -70,6 +70,7 @@ async fn dispatch(cli: cli::Cli) -> anyhow::Result<()> {
         cli::Command::List(args) => cmd::list::run(&args, &mut output).await,
         cli::Command::Run(args) => cmd::run::run(&args, record_protocol, &mut output).await,
         cli::Command::Chat(args) => cmd::chat::run(&args, record_protocol, &mut output).await,
+        cli::Command::Resolve(args) => cmd::resolve::run(&args, &mut output).await,
         cli::Command::Plugin { action } => {
             cmd::plugin::dispatch(action, record_protocol, &mut output).await
         }

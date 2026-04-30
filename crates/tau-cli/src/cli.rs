@@ -63,6 +63,10 @@ pub enum Command {
     Run(RunArgs),
     /// Open a REPL chat session with an agent.
     Chat(ChatArgs),
+    /// Install missing requires.tools dependencies for all agents in
+    /// the project tau.toml. Project-wide form of the lazy resolve
+    /// that `tau run` and `tau chat` perform per-agent.
+    Resolve(ResolveArgs),
     /// Plugin debugging utilities (spec §9 debug tier).
     Plugin {
         /// Sub-action within the plugin group.
@@ -180,6 +184,18 @@ pub struct ListArgs {
     pub capabilities: bool,
     /// Rejected explicitly: `tau list` is read-only.
     #[arg(long, hide = true)]
+    pub dry_run: bool,
+}
+
+/// Arguments for `tau resolve`.
+#[derive(Args, Debug)]
+pub struct ResolveArgs {
+    /// Skip install; print missing-deps hints and exit non-zero if
+    /// anything would need fetching.
+    #[arg(long)]
+    pub no_install: bool,
+    /// Print the resolution plan without fetching anything.
+    #[arg(long)]
     pub dry_run: bool,
 }
 
