@@ -12,3 +12,4 @@
 
 pub mod config;
 pub(crate) mod path_check;
+pub mod plugin;

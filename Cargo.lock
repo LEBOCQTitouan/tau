@@ -626,6 +626,7 @@ dependencies = [
 name = "fs-read"
 version = "0.0.0"
 dependencies = [
+ "base64",
  "globset",
  "serde",
  "serde_json",

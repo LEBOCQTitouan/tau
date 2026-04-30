@@ -27,6 +27,7 @@ thiserror           = { workspace = true }
 tokio               = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "fs"] }
 tracing             = { workspace = true }
 globset             = "0.4"
+base64              = { workspace = true }
 
 [dev-dependencies]
 tempfile            = { workspace = true }

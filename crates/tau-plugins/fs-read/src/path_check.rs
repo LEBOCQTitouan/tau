@@ -3,8 +3,6 @@
 //! See `docs/superpowers/specs/2026-04-29-tool-plugins-design.md`
 //! §4.3, §7.
 
-#![allow(dead_code)] // consumed by Task 9 (plugin.rs invoke).
-
 /// Reasons a path is rejected at validation time.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum BadArgs {
