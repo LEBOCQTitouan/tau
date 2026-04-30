@@ -31,4 +31,6 @@ pub use llm::{
 };
 pub use sandbox::{ResourceLimits, Sandbox, SandboxPlan, WorkingContext};
 pub use storage::{Key, Namespace, Storage};
-pub use tool::{SessionContext, StatelessAdapter, StatelessTool, Tool, ToolContent, ToolResult};
+pub use tool::{
+    DenyEntry, SessionContext, StatelessAdapter, StatelessTool, Tool, ToolContent, ToolResult,
+};
