@@ -25,6 +25,7 @@ pub mod lockfile;
 pub mod manifest;
 pub mod registry;
 pub mod scope;
+pub mod source_list;
 
 pub use error::{
     GitError, InstallError, ManifestReadError, RegistryError, ScopeError, UninstallError,
@@ -36,3 +37,4 @@ pub use lockfile::{LockFile, LockedPackage, LockedPlugin, LockedVersion};
 pub use manifest::read_manifest;
 pub use registry::{get, list};
 pub use scope::{Scope, ScopeConfig, ScopeKind};
+pub use source_list::{list_versions_at_source, SourceListError};
