@@ -27,6 +27,15 @@ pub(crate) fn admit(command: &str, allow_list: &[String]) -> bool {
     allow_list.iter().any(|allowed| allowed == command)
 }
 
+/// Check `command` is admitted by the allow-list AND not denied. Deny
+/// wins per spec §9. Commands are exact-match strings (no globbing).
+pub(crate) fn admit_with_deny(command: &str, allow: &[String], deny: &[String]) -> bool {
+    if !admit(command, allow) {
+        return false;
+    }
+    !deny.iter().any(|d| d == command)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +99,26 @@ mod tests {
     fn admit_empty_list_returns_false() {
         let allow: Vec<String> = vec![];
         assert!(!admit("echo", &allow));
+    }
+
+    #[test]
+    fn admit_with_deny_denies_when_deny_matches() {
+        let allow = vec!["echo".to_string(), "ls".to_string()];
+        let deny = vec!["echo".to_string()];
+        assert!(!admit_with_deny("echo", &allow, &deny));
+    }
+
+    #[test]
+    fn admit_with_deny_admits_when_no_deny_matches() {
+        let allow = vec!["echo".to_string(), "ls".to_string()];
+        let deny = vec!["rm".to_string()];
+        assert!(admit_with_deny("echo", &allow, &deny));
+    }
+
+    #[test]
+    fn admit_with_deny_denies_when_allow_misses() {
+        let allow = vec!["echo".to_string()];
+        let deny: Vec<String> = vec![];
+        assert!(!admit_with_deny("rm", &allow, &deny));
     }
 }

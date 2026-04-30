@@ -299,3 +299,44 @@ async fn integration_large_stdout_truncated_and_flagged() {
     drop(peer);
     let _ = runner.await;
 }
+
+#[tokio::test]
+async fn integration_deny_overrides_allow_for_shell() {
+    // Allow includes "echo"; deny lists "echo" → expect rejection.
+    let (mut peer, mut sut_reader, mut sut_writer) = FakeStdioPeer::new();
+    let plugin = ShellPlugin::from_config(Default::default()).unwrap();
+
+    let runner = tokio::spawn(async move {
+        run_tool_with_io(&mut sut_reader, &mut sut_writer, plugin, "shell", "0.1.0").await
+    });
+
+    do_handshake(&mut peer).await;
+    let ctx = SessionContext::new(
+        AgentInstanceId::new(),
+        Uuid::now_v7(),
+        Some(SystemTime::UNIX_EPOCH),
+    )
+    .with_granted_capabilities(vec![process_spawn_cap(&["echo"])])
+    .with_deny_entries(vec![tau_ports::DenyEntry::new(
+        "process.spawn".into(),
+        vec!["echo".into()],
+    )]);
+    send_tool_call(
+        &mut peer,
+        2,
+        &ctx,
+        serde_json::json!({ "command": "echo", "args": ["hi"] }),
+    )
+    .await;
+    let err = recv_tool_response(&mut peer)
+        .await
+        .expect_err("expected scope-rejection RPC error");
+    assert!(
+        err.contains("not in capability scope"),
+        "expected scope-violation error; got: {err}"
+    );
+
+    shutdown(&mut peer).await;
+    drop(peer);
+    let _ = runner.await;
+}
