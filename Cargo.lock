@@ -2363,6 +2363,7 @@ dependencies = [
  "fs-read",
  "futures-core",
  "futures-util",
+ "globset",
  "proptest",
  "rmp-serde",
  "serde",
