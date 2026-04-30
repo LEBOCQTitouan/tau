@@ -14,12 +14,14 @@ loading mechanism, first real LLM-backend + tool plugins, capability
 override, transitive dependency resolution. The first sub-project of
 Phase 1 unblocks everything else.
 
-**Status:** Phase 1 sub-project 2c (OpenAI plugin + supporting
-infrastructure) shipped 2026-04-29; Tier 1 priority 2 (first real
-LLM-backend plugins) is fully complete with all three plugins —
-Anthropic + Ollama + OpenAI — running typed LlmError variants and
-integrated with the parameterized conformance suite. Tier 1
-priority 3 (first real Tool plugin) is the natural next sub-project.
+**Status:** Phase 1 priority 3 (first real Tool plugins: fs-read +
+shell) shipped 2026-04-30. Tier 1 fully complete: plugin loading
+mechanism (priority 1), three real LLM-backend plugins (priority 2),
+and two real Tool plugins (priority 3) with end-to-end capability
+enforcement. Tier 2 (Phase 0 deferrals — capability override
+implementation, transitive dependency resolution, schema validation,
+tau update/verify/uninstall, streaming LLM responses) is the natural
+next phase of work.
 
 | # | Sub-project | Produces | Merged |
 |---|---|---|---|
@@ -27,6 +29,7 @@ priority 3 (first real Tool plugin) is the natural next sub-project.
 | 2a | Anthropic LLM-backend plugin ✅ | First real LLM-backend plugin: Anthropic Claude Messages API client at `crates/tau-plugins/anthropic/`; day-1 streaming + tool-use; cassette-replay test harness + env-gated live smoke; in-plugin retry honoring Retry-After; ConfigError::InvalidEnvVar SDK amendment | 2026-04-29 |
 | 2b | Ollama LLM-backend plugin ✅ | Second real LLM-backend plugin: Ollama (local LLM runner) at `crates/tau-plugins/ollama/`; native `/api/chat` over NDJSON streaming (~50 LOC hand-rolled, no eventsource-stream); optional bearer-token auth; cassette-replay test harness duplicated from Anthropic; in-plugin retry honoring 503-on-model-load case; 404 errors include `ollama pull` remediation hint | 2026-04-29 |
 | 2c | OpenAI plugin + supporting infrastructure ✅ | Third real LLM-backend plugin: OpenAI Chat Completions client at `crates/tau-plugins/openai/`; SSE streaming, real `tool_call_id` round-trip, full `tool_choice` round-trip. Plus `crates/tau-plugin-test-support/` (rule-of-three refactor of cassette replayer) and `crates/tau-plugin-conformance/` (parameterized behavioral test suite, deferred from ADR-0008 §17). All 3 plugins migrated to typed `LlmError` variants. ADR-0009 Accepted. | 2026-04-29 |
+| 3 | First real Tool plugins (fs-read + shell) ✅ | Two minimal Tool plugins demonstrating the kernel's capability check end-to-end. `fs-read` enforces `FsCapability::Read.paths` globs; `shell` enforces `ProcessCapability::Spawn.commands` allow-list (wall-clock timeout, 1 MiB output cap, kill+drain on timeout, no env inheritance, no stdin). Closed two infrastructure gaps in the same sub-project: `tool.describe_capabilities` wire method (Gap 1: plugin-declared capabilities now surface to the kernel for IPC tools); `SessionContext.granted_capabilities` (Gap 2: agent grants flow to plugin processes for finer-grained scope checks). Trust model: unsandboxed v0.1; sandboxing deferred to Tier 3 priority 12. | 2026-04-30 |
 
 ## Phase 0 (complete) — bootstrap + foundational sub-projects
 
@@ -81,8 +84,14 @@ Tier ordering reflects criticality, not strict implementation order
    typed `LlmError` variants. ADR-0009 (typed-error migration policy
    + conformance suite charter) Accepted. 21 required CI checks
    gating `main` (was 17).
-3. **First real Tool plugin.** `fs-read` + `shell` initial set;
-   exercises capability checks at runtime.
+3. **First real Tool plugins.** ✅ `fs-read` + `shell` shipped
+   2026-04-30 as priority 3 — exercises capability checks at runtime
+   end-to-end. Closed two IPC infrastructure gaps in the same sub-
+   project: kernel-side capability enforcement for IPC tools (Gap 1
+   via new `tool.describe_capabilities` wire method) and agent-grant
+   flow to plugin processes (Gap 2 via additive
+   `SessionContext.granted_capabilities`). 23 required CI checks
+   gating `main` (was 21).
 
 ### Tier 2 — completes Phase 0 deferrals
 
