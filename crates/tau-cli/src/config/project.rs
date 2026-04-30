@@ -75,7 +75,18 @@ pub struct UncheckedPrompt {
 }
 
 /// Single `[[agents.<id>.capabilities]]` array-of-tables entry.
+///
+/// Note: spec §4.2 defines `allow_methods` / `deny_methods` for
+/// `net.http` capability narrowing, but the runtime does not yet
+/// enforce method subsets. To prevent silent data loss, this struct
+/// uses `#[serde(deny_unknown_fields)]` — a TOML containing
+/// `allow_methods` will fail parsing with a clear error pointing at
+/// the known fields. When an HTTP tool plugin lands and method
+/// enforcement is wired through `compute_effective`, those fields
+/// can be added without breaking existing configs.
+#[non_exhaustive]
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct UncheckedCapabilityOverride {
     /// Capability kind discriminator (`fs.read`, `fs.write`, `fs.exec`,
     /// `net.http`, `process.spawn`).
@@ -480,6 +491,40 @@ mod tests {
         assert_eq!(id, "r");
         assert_eq!(kind, "fs.read");
         assert!(reason.contains("duplicate"));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_capability_override_field() {
+        // Defends against silent discard of spec-defined-but-not-yet-
+        // implemented fields like net.http's allow_methods. The
+        // #[serde(deny_unknown_fields)] turns any unknown key into a
+        // clear TOML parse error.
+        let toml_str = r#"
+            [project]
+            name = "x"
+
+            [agents.r]
+            display_name = "R"
+            package      = "p@^0.1"
+            llm_backend  = "anthropic"
+
+            [[agents.r.capabilities]]
+            kind          = "net.http"
+            allow_hosts   = ["api.example.com"]
+            allow_methods = ["GET"]
+        "#;
+        // Use the lower-level toml::from_str rather than parse() so we
+        // can observe the deserialization error directly. parse() would
+        // wrap it in toml::de::Error.
+        let result: Result<UncheckedProjectConfig, _> = toml::from_str(toml_str);
+        let Err(err) = result else {
+            panic!("expected unknown-field error: {result:?}")
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("allow_methods") || msg.contains("unknown field"),
+            "expected error mentioning allow_methods or unknown field; got: {msg}"
+        );
     }
 
     #[test]
