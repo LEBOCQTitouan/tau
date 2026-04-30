@@ -17,6 +17,9 @@ Options:
       --dry-run
           Validate setup without entering the REPL
 
+      --no-install
+          Skip auto-install of missing requires.tools dependencies. If anything would need fetching, exit 2 with copy-pasteable `tau install <url>` hints instead
+
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
 

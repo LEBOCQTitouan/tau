@@ -17,7 +17,11 @@ fn plugin_describe_prints_handshake_metadata_for_echo_llm() {
     // echo-tool is included so the lockfile carries it too — keeps the
     // fixture realistic (most real projects have both an LLM backend
     // and at least one tool installed).
-    let dir = common::setup_echo_project("echo", "canned_text = \"unused\"\n", &["echo-tool"]);
+    let dir = common::setup_echo_project(
+        "echo",
+        "canned_text = \"unused\"\n",
+        &[("echo-tool", "https://example.com/echo-tool.git", None)],
+    );
 
     AssertCmd::cargo_bin("tau")
         .unwrap()
@@ -35,7 +39,11 @@ fn plugin_describe_prints_handshake_metadata_for_echo_llm() {
 
 #[test]
 fn plugin_describe_prints_handshake_metadata_for_echo_tool() {
-    let dir = common::setup_echo_project("echo", "canned_text = \"unused\"\n", &["echo-tool"]);
+    let dir = common::setup_echo_project(
+        "echo",
+        "canned_text = \"unused\"\n",
+        &[("echo-tool", "https://example.com/echo-tool.git", None)],
+    );
 
     AssertCmd::cargo_bin("tau")
         .unwrap()
@@ -51,7 +59,11 @@ fn plugin_describe_prints_handshake_metadata_for_echo_tool() {
 
 #[test]
 fn plugin_describe_json_emits_structured_payload() {
-    let dir = common::setup_echo_project("echo", "canned_text = \"unused\"\n", &["echo-tool"]);
+    let dir = common::setup_echo_project(
+        "echo",
+        "canned_text = \"unused\"\n",
+        &[("echo-tool", "https://example.com/echo-tool.git", None)],
+    );
 
     let output = AssertCmd::cargo_bin("tau")
         .unwrap()

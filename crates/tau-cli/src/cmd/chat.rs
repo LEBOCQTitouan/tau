@@ -127,6 +127,14 @@ pub async fn run(
     })?;
 
     let scope = tau_pkg::Scope::resolve(&cwd).context("resolving package scope")?;
+
+    crate::cmd::resolve_helpers::resolve_and_install_for_agent(
+        entry,
+        &scope,
+        args.no_install,
+        output,
+    )?;
+
     let (agent_def, manifest) = crate::config::build_agent_definition(entry, &cwd, &scope)
         .with_context(|| format!("resolving agent {:?}", args.agent_id))?;
 

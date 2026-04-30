@@ -54,6 +54,46 @@ fn chat_missing_agent_id_exits_two() {
         .stderr(predicate::str::contains("nonexistent"));
 }
 
+// ---- --no-install tests ----------------------------------------------------
+
+#[test]
+fn chat_with_no_install_fails_when_deps_missing() {
+    // Mirror of run_with_no_install_emits_install_hints_and_fails: agent
+    // declares a requires.tools entry pointing at a non-existent file://
+    // URL. With --no-install, tau chat --dry-run should fail without
+    // attempting to fetch.
+    let dir = tempfile::tempdir().unwrap();
+    let toml_str = r#"
+[project]
+name = "demo"
+
+[agents.reviewer]
+display_name = "Reviewer"
+package      = "demo@^0.1"
+llm_backend  = "anthropic"
+
+[[agents.reviewer.requires.tools]]
+name = "missing-tool"
+source = "file:///tmp/tau-nonexistent-fixture-DO-NOT-CREATE/missing.git"
+"#;
+    std::fs::write(dir.path().join("tau.toml"), toml_str).unwrap();
+
+    let output = assert_cmd::Command::cargo_bin("tau")
+        .unwrap()
+        .args(["chat", "reviewer", "--no-install", "--dry-run"])
+        .current_dir(dir.path())
+        .env("TAU_HOME", dir.path())
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "chat should fail when requires.tools is missing and --no-install is set; \
+         stderr was: {stderr}"
+    );
+}
+
 // ---- REPL-driven tests (real echo-llm spawn) -------------------------------
 
 #[test]

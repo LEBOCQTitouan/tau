@@ -117,18 +117,27 @@ Trigger to revisit: per-tool overrides (narrower than per-agent),
 hostname-glob narrowing, or `Capability::Custom` parameter narrowing
 — each deferred to a future sub-project.
 
-### 5. Per-agent `requires.tools` advisory check
+### 5. Per-agent `requires.tools` auto-install (Phase 1+ active)
 
-Each `[agents.<id>.requires.tools]` is a list of tool package names (or
-`name@semver`) the agent expects to be installed. `tau run` and
-`tau chat` check each entry against the local registry; any missing
-entry yields a clear error and exit code 2 (kernel/CLI broke — see
-decision 7). At v0.1 this is advisory only: tau-cli does NOT auto-
-install missing dependencies. Phase 1+ activates auto-install via
-tau-pkg's transitive-resolution work.
+Each `[[agents.<id>.requires.tools]]` array entry is a typed package
+declaration with `name`, `source` (typed `PackageSource`), and
+optional `version` (semver req, defaults to `"*"`). At `tau run` /
+`tau chat` time (or on-demand via `tau resolve`), missing entries are
+fetched + installed automatically; already-installed compatible
+versions are reused via the existing per-scope lockfile.
 
-Trigger to revisit: Phase 1's transitive-resolution work, at which
-point this hook becomes the auto-install entry point.
+Realized by the transitive-dependency-resolution sub-project (Tier 2
+priority 5): see [`docs/superpowers/specs/2026-04-30-transitive-deps-design.md`](../superpowers/specs/2026-04-30-transitive-deps-design.md)
+for the full design.
+
+The original v0.1 reservation (when this section was titled "Per-agent
+`requires.tools` advisory check") committed the auto-install path as
+the Phase 1+ trigger so the v0.1 advisory error would convert into the
+auto-install hook without breaking existing call sites.
+
+Trigger to revisit: recursive package-level `dependencies` resolution
+(ADR-0004 §10 deferral) — at which point the resolver gains a second
+input axis; the project-level half (this section) stays unchanged.
 
 ### 6. One-shot `tau run` + separate `tau chat` REPL
 

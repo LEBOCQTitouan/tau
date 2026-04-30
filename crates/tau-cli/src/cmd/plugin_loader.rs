@@ -156,9 +156,10 @@ pub(crate) async fn load_plugins(
     let mut builder = tau_runtime::Runtime::builder().with_dyn_llm_backend(llm_backend);
 
     // ---- Tools ----
-    for tool_name in &entry.requires.tools {
+    for tool in &entry.requires.tools {
+        let tool_name = tool.name.as_str();
         let tool_plugin = resolve_plugin(&lockfile, tool_name, PortKind::Tool, "tool")?;
-        let tool = plugin_host::load_tool(
+        let loaded_tool = plugin_host::load_tool(
             tool_plugin,
             // Per-tool config not addressable from project tau.toml at
             // v0.1; pass `null`. Future schema may grow a
@@ -169,7 +170,7 @@ pub(crate) async fn load_plugins(
         )
         .await
         .with_context(|| format!("loading tool plugin {tool_name:?}"))?;
-        builder = builder.with_dyn_tool(tool);
+        builder = builder.with_dyn_tool(loaded_tool);
     }
 
     Ok(LoadedPlugins {

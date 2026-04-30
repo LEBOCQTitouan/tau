@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
@@ -55,12 +56,34 @@ pub struct UncheckedAgent {
 /// `[agents.<id>.requires]` sub-table.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UncheckedRequires {
-    /// Tool package names this agent advises requiring (advisory at v0.1).
+    /// Required tool packages with explicit source declarations.
+    /// Replaces the v0.1 advisory-only `Vec<String>` schema (Tier 2
+    /// priority 5).
     #[serde(default)]
-    pub tools: Vec<String>,
+    pub tools: Vec<UncheckedRequiredTool>,
     /// Phase 1+; ignored at v0.1.
     #[serde(default)]
     pub packages: Vec<String>,
+}
+
+/// One `[[agents.<id>.requires.tools]]` array entry.
+///
+/// Replaces the v0.1 bare-string form. Each entry must declare a
+/// `source` (typed `PackageSource` — string serde format like
+/// `"https://example.com/x.git"` or `"<location>#<rev>"`); `version`
+/// is optional and defaults to `"*"`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct UncheckedRequiredTool {
+    /// Package name.
+    pub name: String,
+    /// Source to fetch from. Reuses `PackageSource::FromStr` serde:
+    /// `"<location>"` or `"<location>#<rev>"`.
+    pub source: tau_domain::PackageSource,
+    /// Optional semver requirement; defaults to `"*"` when absent.
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 /// `[agents.<id>.prompt]` sub-table.
@@ -160,8 +183,10 @@ pub struct AgentEntry {
 #[non_exhaustive]
 #[derive(Debug, Clone, Default)]
 pub struct RequiresEntry {
-    /// Tool package names (advisory at v0.1).
-    pub tools: Vec<String>,
+    /// Required tool packages with explicit source + optional version
+    /// constraint. Resolved + installed at `tau run`/`tau chat`/`tau resolve`
+    /// time via `tau_pkg::resolve_requires_tools`.
+    pub tools: Vec<tau_pkg::RequiredTool>,
 }
 
 /// Validated prompt selection. `system` and `system_file` are mutually
@@ -238,6 +263,24 @@ pub enum ProjectConfigError {
     PromptAmbiguous {
         /// Agent id whose prompt block was ambiguous.
         id: String,
+    },
+
+    /// Bare-string entry in `[agents.<id>.requires.tools]` is no longer
+    /// supported. Each entry must use the struct form with a `source`
+    /// declaration. Tier 2 priority 5 closed the v0.1 advisory-only
+    /// behavior. Reserved for future custom-deserializer use; at v0.1
+    /// the bare-string rejection happens via serde's natural type-mismatch
+    /// error on `UncheckedRequiredTool` deserialization.
+    #[error(
+        "agent {agent_id:?}: requires.tools[{index}]: bare-string {value:?} no longer supported; use struct form with `source` per spec docs/superpowers/specs/2026-04-30-transitive-deps-design.md §4"
+    )]
+    RequiresToolsBareStringRejected {
+        /// Agent id whose entry was rejected.
+        agent_id: String,
+        /// Index in the tools array of the offending entry.
+        index: usize,
+        /// The bare string value as it appeared in the TOML.
+        value: String,
     },
 }
 
@@ -318,12 +361,41 @@ fn validate_agent(id: String, raw: UncheckedAgent) -> Result<AgentEntry, Project
         },
     };
 
-    let requires = raw
-        .requires
-        .map_or(RequiresEntry::default(), |r| RequiresEntry {
-            tools: r.tools,
-            // r.packages ignored at v0.1
-        });
+    let requires = match raw.requires {
+        None => RequiresEntry::default(),
+        Some(r) => {
+            let mut tools: Vec<tau_pkg::RequiredTool> = Vec::with_capacity(r.tools.len());
+            for raw_tool in r.tools {
+                let name = tau_domain::PackageName::from_str(&raw_tool.name).map_err(|e| {
+                    ProjectConfigError::AgentValidation {
+                        id: id.clone(),
+                        message: format!(
+                            "requires.tools entry {:?}: invalid name: {e}",
+                            raw_tool.name
+                        ),
+                    }
+                })?;
+                let version_req = match raw_tool.version.as_deref() {
+                    None | Some("") => semver::VersionReq::STAR,
+                    Some(s) => semver::VersionReq::parse(s).map_err(|e| {
+                        ProjectConfigError::AgentValidation {
+                            id: id.clone(),
+                            message: format!(
+                                "requires.tools entry {:?}: invalid version {s:?}: {e}",
+                                raw_tool.name
+                            ),
+                        }
+                    })?,
+                };
+                tools.push(tau_pkg::RequiredTool::new(
+                    name,
+                    raw_tool.source,
+                    version_req,
+                ));
+            }
+            RequiresEntry { tools }
+        }
+    };
 
     let config = raw
         .config
@@ -412,8 +484,9 @@ mod tests {
             package      = "code-reviewer@^0.1"
             llm_backend  = "anthropic"
 
-            [agents.reviewer.requires]
-            tools = ["fs-read"]
+            [[agents.reviewer.requires.tools]]
+            name = "fs-read"
+            source = "https://example.com/fs-read.git"
 
             [agents.reviewer.config]
             model = "claude"
@@ -425,7 +498,8 @@ mod tests {
         assert_eq!(cfg.agents.len(), 1);
         let agent = cfg.agents.get("reviewer").unwrap();
         assert_eq!(agent.display_name, "Code Reviewer");
-        assert_eq!(agent.requires.tools, vec!["fs-read".to_string()]);
+        assert_eq!(agent.requires.tools.len(), 1);
+        assert_eq!(agent.requires.tools[0].name.as_str(), "fs-read");
         assert!(
             matches!(&agent.prompt, PromptEntry::Inline(s) if s == "You are a careful reviewer.")
         );
@@ -674,6 +748,71 @@ mod tests {
             panic!()
         };
         assert!(message.contains("llm_backend"));
+    }
+
+    #[test]
+    fn validate_rejects_bare_string_tools_entry() {
+        let toml_str = r#"
+            [project]
+            name = "x"
+
+            [agents.r]
+            display_name = "R"
+            package      = "p@^0.1"
+            llm_backend  = "anthropic"
+
+            [agents.r.requires]
+            tools = ["fs-read"]
+        "#;
+        // serde rejects the bare string — toml::de error surfaces as Parse.
+        let result: Result<UncheckedProjectConfig, _> = toml::from_str(toml_str);
+        assert!(
+            result.is_err(),
+            "bare-string tools entry must fail to deserialize"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_struct_tools_entry() {
+        let toml_str = r#"
+            [project]
+            name = "x"
+
+            [agents.r]
+            display_name = "R"
+            package      = "p@^0.1"
+            llm_backend  = "anthropic"
+
+            [[agents.r.requires.tools]]
+            name = "fs-read"
+            source = "https://example.com/fs-read.git"
+            version = "^0.1"
+        "#;
+        let cfg = parse(toml_str).unwrap();
+        let agent = cfg.agents.get("r").unwrap();
+        assert_eq!(agent.requires.tools.len(), 1);
+        assert_eq!(agent.requires.tools[0].name.as_str(), "fs-read");
+        assert_eq!(agent.requires.tools[0].version_req.to_string(), "^0.1");
+    }
+
+    #[test]
+    fn validate_default_version_is_star() {
+        let toml_str = r#"
+            [project]
+            name = "x"
+
+            [agents.r]
+            display_name = "R"
+            package      = "p@^0.1"
+            llm_backend  = "anthropic"
+
+            [[agents.r.requires.tools]]
+            name = "fs-read"
+            source = "https://example.com/fs-read.git"
+        "#;
+        let cfg = parse(toml_str).unwrap();
+        let agent = cfg.agents.get("r").unwrap();
+        assert_eq!(agent.requires.tools[0].version_req.to_string(), "*");
     }
 
     #[test]
