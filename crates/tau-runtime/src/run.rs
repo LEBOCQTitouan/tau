@@ -329,8 +329,12 @@ impl Runtime {
 
                 // ----- Open a session ----------------------------------------
                 // ctx is declared here so it remains in scope for the invoke call below.
-                // (Task 7 will populate granted_capabilities here. For Task 3, leave empty.)
-                let ctx = SessionContext::new(agent_instance_id, uuid::Uuid::new_v4(), None);
+                // granted_capabilities flows the agent's package grants to the
+                // plugin process so plugins can perform finer-grained scope
+                // checks (path globs, command allowlists) beyond the kernel's
+                // structural capability check at run.rs:272.
+                let ctx = SessionContext::new(agent_instance_id, uuid::Uuid::new_v4(), None)
+                    .with_granted_capabilities(granted.to_vec());
                 {
                     let session_open_span =
                         info_span!("tool.session_open", tool_name = %tool_use.name);
