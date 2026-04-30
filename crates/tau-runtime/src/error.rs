@@ -75,6 +75,18 @@ pub enum BuildError {
         name: String,
     },
 
+    /// A registered tool's declared `input_schema` is not a valid
+    /// Draft 7 JSON Schema. Surfaced at `RuntimeBuilder::build()`
+    /// via `crate::tool_args::ToolArgsValidator::compile`. Realizes
+    /// ADR-0010 (Tier 2 priority 6).
+    #[error("tool {tool_name:?}: input_schema is not a valid Draft 7 schema: {detail}")]
+    ToolSchemaInvalid {
+        /// The tool name whose schema failed to compile.
+        tool_name: String,
+        /// Diagnostic from the schema compiler.
+        detail: String,
+    },
+
     /// Catch-all for invariant violations during build.
     /// See: [escape-hatches.md#builderror-internal](../docs/explanation/escape-hatches.md#builderror-internal).
     #[error("internal: {message}")]
@@ -377,6 +389,19 @@ mod tests {
         assert!(s.contains("ghost"), "got: {s}");
         assert!(s.contains("echo"), "got: {s}");
         assert!(s.contains("file_read"), "got: {s}");
+    }
+
+    #[test]
+    fn build_error_tool_schema_invalid_display() {
+        let err = BuildError::ToolSchemaInvalid {
+            tool_name: "shell".into(),
+            detail: "type 'objectt' is not valid".into(),
+        };
+        let s = format!("{err}");
+        assert!(s.contains("shell"), "got: {s}");
+        assert!(s.contains("input_schema"), "got: {s}");
+        assert!(s.contains("Draft 7"), "got: {s}");
+        assert!(s.contains("'objectt'"), "got: {s}");
     }
 
     #[test]
