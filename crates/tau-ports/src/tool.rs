@@ -14,30 +14,28 @@ use uuid::Uuid;
 use crate::error::ToolError;
 use crate::llm::ToolSpec;
 
-/// Per-session context handed to a tool plugin when the runtime opens
-/// a new session (i.e. at [`Tool::init`]).
+/// Per-session context handed to a tool's `init`.
 ///
 /// `SessionContext` is `#[non_exhaustive]`: external callers cannot
-/// construct it via struct-literal syntax. Construction is performed
-/// by tau-runtime; fields are `pub` so plugin authors and in-tree code
-/// can pattern-match on the context.
+/// construct it via struct-literal syntax. Use [`SessionContext::new`]
+/// for the basic case and chain
+/// [`SessionContext::with_granted_capabilities`] when the agent's
+/// grant needs to flow to the plugin.
 ///
 /// # Example
 ///
 /// ```ignore
-/// // Struct-literal construction is forbidden externally because
 /// // `SessionContext` is `#[non_exhaustive]`. The example here is
-/// // illustrative; tau-runtime constructs values of this type.
-/// use std::time::{Duration, SystemTime};
+/// // illustrative only.
 /// use tau_domain::AgentInstanceId;
 /// use tau_ports::tool::SessionContext;
 /// use uuid::Uuid;
 ///
-/// let ctx = SessionContext {
-///     agent_instance_id: AgentInstanceId::new(),
-///     session_id: Uuid::new_v4(),
-///     deadline: Some(SystemTime::now() + Duration::from_secs(30)),
-/// };
+/// let ctx = SessionContext::new(
+///     AgentInstanceId::new(),
+///     Uuid::new_v4(),
+///     None,
+/// );
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -52,13 +50,26 @@ pub struct SessionContext {
     /// Optional wall-clock deadline by which the session should
     /// complete. `None` defers to runtime defaults.
     pub deadline: Option<SystemTime>,
+    /// Capabilities the calling agent has been granted by its package
+    /// manifest. Plugins use this to perform finer-grained scope
+    /// checks beyond the kernel's structural capability check at
+    /// `tau-runtime::run.rs:272`.
+    ///
+    /// Populated by tau-runtime at dispatch. Defaults to empty when
+    /// constructed via [`SessionContext::new`] — call
+    /// [`SessionContext::with_granted_capabilities`] to set.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub granted_capabilities: Vec<tau_domain::Capability>,
 }
 
 impl SessionContext {
-    /// Construct a [`SessionContext`]. Provided so external callers —
-    /// notably tau-runtime, which mints one per tool dispatch in
-    /// `Runtime::run` — can build one without struct-literal syntax
-    /// (the type is `#[non_exhaustive]`).
+    /// Construct a [`SessionContext`] with no granted capabilities.
+    /// Use [`Self::with_granted_capabilities`] to chain in the
+    /// agent's grant when known.
+    ///
+    /// Provided so external callers — notably tau-runtime, which
+    /// mints one per tool dispatch in `Runtime::run` — can build one
+    /// without struct-literal syntax (the type is `#[non_exhaustive]`).
     pub fn new(
         agent_instance_id: AgentInstanceId,
         session_id: Uuid,
@@ -68,7 +79,17 @@ impl SessionContext {
             agent_instance_id,
             session_id,
             deadline,
+            granted_capabilities: Vec::new(),
         }
+    }
+
+    /// Replace the `granted_capabilities` list. Builder-pattern method.
+    pub fn with_granted_capabilities(
+        mut self,
+        granted_capabilities: Vec<tau_domain::Capability>,
+    ) -> Self {
+        self.granted_capabilities = granted_capabilities;
+        self
     }
 }
 
@@ -306,11 +327,11 @@ mod tests {
         assert_eq!(Tool::name(&tool), "echo");
 
         let mut session = tool
-            .init(SessionContext {
-                agent_instance_id: tau_domain::AgentInstanceId::new(),
-                session_id: uuid::Uuid::now_v7(),
-                deadline: None,
-            })
+            .init(SessionContext::new(
+                tau_domain::AgentInstanceId::new(),
+                uuid::Uuid::now_v7(),
+                None,
+            ))
             .await
             .unwrap();
 
