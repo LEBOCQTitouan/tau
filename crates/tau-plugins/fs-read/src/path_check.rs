@@ -81,16 +81,28 @@ mod tests {
         assert_eq!(validate_path("foo/bar"), Err(BadArgs::NotAbsolute));
     }
 
+    // The following tests use Unix-style absolute paths (`/tmp/...`).
+    // On Windows these are NOT absolute (Windows requires `C:\...`),
+    // so `validate_path` would correctly reject them at the
+    // `NotAbsolute` check before reaching the traversal logic.
+    // Gated `#[cfg(unix)]` to test the traversal + happy-path logic
+    // explicitly. Windows path-validation behavior is exercised via
+    // the integration tests in `tests/invoke.rs`, which use
+    // `tempfile::NamedTempFile`-produced OS-correct paths.
+
+    #[cfg(unix)]
     #[test]
     fn validate_path_traversal_rejected_dotdot_segment() {
         assert_eq!(validate_path("/../etc/passwd"), Err(BadArgs::Traversal));
     }
 
+    #[cfg(unix)]
     #[test]
     fn validate_path_traversal_rejected_in_middle() {
         assert_eq!(validate_path("/tmp/../etc/passwd"), Err(BadArgs::Traversal));
     }
 
+    #[cfg(unix)]
     #[test]
     fn validate_path_happy_path_returns_path() {
         assert_eq!(validate_path("/tmp/foo.txt"), Ok("/tmp/foo.txt"));
