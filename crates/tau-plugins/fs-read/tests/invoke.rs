@@ -208,6 +208,12 @@ async fn integration_read_outside_glob_scope_bad_args() {
     let _ = runner.await;
 }
 
+// Uses Unix-style path "/tmp/../etc/passwd" to drive the traversal
+// rejection. On Windows that path is not absolute, so validate_path
+// short-circuits at NotAbsolute before reaching the traversal check —
+// the test would assert wrong error wording. The traversal logic
+// itself is OS-agnostic; this test documents Unix-fixture behavior.
+#[cfg(unix)]
 #[tokio::test]
 async fn integration_traversal_rejected() {
     let (mut peer, mut sut_reader, mut sut_writer) = FakeStdioPeer::new();
