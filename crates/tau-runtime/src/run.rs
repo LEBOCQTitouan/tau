@@ -39,6 +39,7 @@ use tracing::{debug, debug_span, info, info_span, instrument, trace, warn, Instr
 
 use crate::builder::Runtime;
 use crate::capability::check_capabilities;
+use crate::capability_override::EffectiveCapability;
 use crate::error::{CapabilityDenial, RuntimeError};
 use crate::options::{RunOptions, TokenUsage};
 use crate::outcome::RunOutcome;
@@ -117,10 +118,29 @@ impl Runtime {
     ) -> Result<RunOutcome, RuntimeError> {
         info!(name = "runtime.run_started");
 
-        let granted: &[Capability] = package_manifest.capabilities();
+        // Apply the project tau.toml capability override (if any) at runtime
+        // — defense-in-depth, matching tau-cli's parse-time check. The kernel
+        // continues to use the package's structural grants
+        // (`granted_for_kernel`) for tool filtering and per-call cap checks
+        // because narrowing the allow-list doesn't change the capability
+        // *kind*; the narrowing is enforced plugin-side via
+        // SessionContext.granted_capabilities (post-narrow view) and
+        // SessionContext.deny_entries.
+        let effective = crate::capability_override::compute_effective(
+            package_manifest.capabilities(),
+            &options.project_override,
+        )
+        .map_err(|e| RuntimeError::CapabilityOverrideExpands {
+            kind: e.kind,
+            reason: e.reason,
+        })?;
+        let granted_for_kernel: Vec<Capability> =
+            effective.iter().map(|e| e.source.clone()).collect();
+        let granted: &[Capability] = &granted_for_kernel;
         debug!(
             name = "runtime.capability_set_loaded",
-            count = granted.len()
+            count = granted.len(),
+            overrides_applied = options.project_override.len(),
         );
 
         // The instance-id is generated once per `run()` call and used
@@ -333,8 +353,38 @@ impl Runtime {
                 // plugin process so plugins can perform finer-grained scope
                 // checks (path globs, command allowlists) beyond the kernel's
                 // structural capability check at run.rs:272.
+                let granted_for_session: Vec<Capability> = effective
+                    .iter()
+                    .map(narrowed_capability_for_session)
+                    .collect();
+                let deny_entries: Vec<tau_ports::DenyEntry> = effective
+                    .iter()
+                    .filter(|e| !e.deny.is_empty())
+                    .map(|e| {
+                        let kind = match &e.source {
+                            Capability::Filesystem(tau_domain::FsCapability::Read { .. }) => {
+                                "fs.read"
+                            }
+                            Capability::Filesystem(tau_domain::FsCapability::Write { .. }) => {
+                                "fs.write"
+                            }
+                            Capability::Filesystem(tau_domain::FsCapability::Exec { .. }) => {
+                                "fs.exec"
+                            }
+                            Capability::Network(tau_domain::NetCapability::Http { .. }) => {
+                                "net.http"
+                            }
+                            Capability::Process(tau_domain::ProcessCapability::Spawn {
+                                ..
+                            }) => "process.spawn",
+                            _ => "unknown",
+                        };
+                        tau_ports::DenyEntry::new(kind.to_string(), e.deny.clone())
+                    })
+                    .collect();
                 let ctx = SessionContext::new(agent_instance_id, uuid::Uuid::new_v4(), None)
-                    .with_granted_capabilities(granted.to_vec());
+                    .with_granted_capabilities(granted_for_session)
+                    .with_deny_entries(deny_entries);
                 {
                     let session_open_span =
                         info_span!("tool.session_open", tool_name = %tool_use.name);
@@ -744,6 +794,36 @@ fn value_to_preview_string(v: &Value) -> String {
         // generic Debug-format string rather than mis-classifying.
         _ => format!("{v:?}"),
     }
+}
+
+/// Build the post-narrow `Capability` view that flows to plugins via
+/// `SessionContext.granted_capabilities`. Capability inner variants are
+/// `#[non_exhaustive]` and can't be constructed cross-crate; we serialize
+/// the source, splice in the narrowed allow-list / max_bytes, and
+/// deserialize back.
+fn narrowed_capability_for_session(eff: &EffectiveCapability) -> Capability {
+    use serde_json::{json, Value as Jv};
+
+    let source_json = serde_json::to_value(&eff.source).expect("Capability serializes");
+    let mut obj = source_json
+        .as_object()
+        .expect("Capability serializes to map")
+        .clone();
+    if let Some(allow) = &eff.allow_override {
+        // Replace the kind-appropriate field. For unknown kinds (e.g. Custom),
+        // bail and return source unchanged — narrowing is unsupported.
+        let field = match obj.get("kind").and_then(Jv::as_str) {
+            Some("fs.read") | Some("fs.write") | Some("fs.exec") => "paths",
+            Some("net.http") => "hosts",
+            Some("process.spawn") => "commands",
+            _ => return eff.source.clone(),
+        };
+        obj.insert(field.to_string(), json!(allow));
+    }
+    if let Some(mb) = eff.max_bytes_override {
+        obj.insert("max_bytes".to_string(), json!(mb));
+    }
+    serde_json::from_value(Jv::Object(obj)).expect("narrowed capability deserializes")
 }
 
 /// Top-level capability kind string used in

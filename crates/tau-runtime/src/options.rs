@@ -56,6 +56,12 @@ pub struct RunOptions {
     /// Optional caller-supplied label included in tracing spans for
     /// log correlation (e.g. session UUID from a TUI).
     pub trace_label: Option<String>,
+
+    /// Project tau.toml capability override; default empty. Validated
+    /// at runtime via `compute_effective` (defense-in-depth — tau-cli
+    /// also validates at parse time). When non-empty, narrows the
+    /// agent's effective grant from its package manifest.
+    pub project_override: Vec<crate::capability_override::CapabilityOverride>,
 }
 
 impl Default for RunOptions {
@@ -63,6 +69,7 @@ impl Default for RunOptions {
         Self {
             max_turns: 16,
             trace_label: None,
+            project_override: Vec::new(),
         }
     }
 }
@@ -89,6 +96,12 @@ mod tests {
         opts.trace_label = Some("session-abc".into());
         assert_eq!(opts.max_turns, 100);
         assert_eq!(opts.trace_label.as_deref(), Some("session-abc"));
+    }
+
+    #[test]
+    fn run_options_default_project_override_is_empty() {
+        let opts = RunOptions::default();
+        assert!(opts.project_override.is_empty());
     }
 
     #[test]
