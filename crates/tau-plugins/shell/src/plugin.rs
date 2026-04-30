@@ -15,7 +15,7 @@ use tau_ports::{
     SessionContext, Tool, ToolContent, ToolError, ToolResult, ToolSpec,
 };
 
-use crate::command_check::{admit, extract_allowed_commands};
+use crate::command_check::{admit_with_deny, extract_allowed_commands};
 use crate::config::{validate, ShellConfig};
 use crate::runner::run_subprocess;
 
@@ -24,6 +24,10 @@ pub struct ShellSession {
     /// Command names extracted from the active
     /// `ProcessCapability::Spawn.commands` entries.
     allowed_commands: Vec<String>,
+    /// Command names to subtract from `allowed_commands`, populated from
+    /// the `process.spawn` entry in `SessionContext.deny_entries`. Deny
+    /// wins — see spec §9.
+    denied_commands: Vec<String>,
 }
 
 /// shell Tool plugin.
@@ -105,7 +109,16 @@ impl Tool for ShellPlugin {
 
     async fn init(&self, ctx: SessionContext) -> Result<Self::Session, ToolError> {
         let allowed_commands = extract_allowed_commands(&ctx.granted_capabilities);
-        Ok(ShellSession { allowed_commands })
+        let denied_commands = ctx
+            .deny_entries
+            .iter()
+            .find(|e| e.kind == "process.spawn")
+            .map(|e| e.deny.clone())
+            .unwrap_or_default();
+        Ok(ShellSession {
+            allowed_commands,
+            denied_commands,
+        })
     }
 
     async fn invoke(
@@ -116,7 +129,11 @@ impl Tool for ShellPlugin {
         let parsed = parse_args(&args)?;
 
         // Admit the command against the agent's grant.
-        if !admit(&parsed.command, &session.allowed_commands) {
+        if !admit_with_deny(
+            &parsed.command,
+            &session.allowed_commands,
+            &session.denied_commands,
+        ) {
             return Err(ToolError::BadArgs {
                 reason: format!("shell: command not in capability scope: {}", parsed.command),
             });

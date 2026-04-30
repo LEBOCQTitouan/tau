@@ -92,22 +92,30 @@ Trigger to revisit: confusion between project and package files in
 real user reports — at which point the file extension or name should
 be split.
 
-### 4. Capability override is a Phase 1+ requirement
+### 4. Capability override (intersect-only) lands in Phase 1
 
-The `[agents.<id>.capabilities]` table is reserved at v0.1: the schema
-slot is parsed; presence triggers
-`ProjectConfigError::CapabilityOverrideUnsupported` pointing at the
-Phase 1+ roadmap. Intersect-only semantics are committed now: a Phase 1
-override can narrow but never expand the capabilities granted by the
-package manifest. Documenting the semantic at v0.1 locks Phase 1 into
-the safe direction — without this, Phase 1 could quietly choose
-expand-and-narrow (which would let a project widen what an installed
-package was authorized to do, breaking the install-time security
-contract).
+The `[[agents.<id>.capabilities]]` array-of-tables in project tau.toml
+narrows — but never expands — the capabilities granted by an agent's
+package manifest. Each entry's `kind` discriminator must match a
+package-side capability; `allow_*` fields must be a glob-subset (or
+exact-match for hosts/commands) of the package's grant; `deny_*`
+fields are pure subtractions with deny-wins precedence. Validation
+runs at parse time AND at every runtime load, both fail-closed.
 
-Trigger to revisit: Phase 1+ when a real user case demands per-project
-capability narrowing — at which point the implementation lands behind
-the same schema slot already reserved.
+Realized by the capability-override sub-project (Tier 2 priority 4):
+see [`docs/superpowers/specs/2026-04-30-capability-override-design.md`](../superpowers/specs/2026-04-30-capability-override-design.md)
+for the full design.
+
+The original v0.1 reservation (when this section was titled
+"Capability override is a Phase 1+ requirement") set the
+intersect-only invariant up-front so Phase 1 could not quietly
+choose expand-and-narrow — which would have let a project widen what
+an installed package was authorized to do, breaking the install-time
+security contract.
+
+Trigger to revisit: per-tool overrides (narrower than per-agent),
+hostname-glob narrowing, or `Capability::Custom` parameter narrowing
+— each deferred to a future sub-project.
 
 ### 5. Per-agent `requires.tools` advisory check
 

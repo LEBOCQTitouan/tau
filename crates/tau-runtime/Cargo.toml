@@ -37,6 +37,9 @@ futures-core        = { workspace = true }
 # base64-encodes raw MessagePack frame bytes into the JSONL log so the
 # binary frame survives the JSON envelope losslessly.
 base64              = { workspace = true }
+# Used by capability_override::glob_subset for glob-subset analysis when
+# a project tau.toml narrows fs.* paths under a package manifest's grant.
+globset             = { workspace = true }
 
 [features]
 default = []

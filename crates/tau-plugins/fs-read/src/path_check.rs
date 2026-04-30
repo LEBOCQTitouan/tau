@@ -61,6 +61,16 @@ pub(crate) fn admit(path: &str, allowed_globs: &[String]) -> bool {
     })
 }
 
+/// Check `path` is admitted by the allow-list AND not denied. Deny
+/// wins per spec §9. Reuses [`admit`] for both checks (the deny list
+/// has the same glob shape as the allow list).
+pub(crate) fn admit_with_deny(path: &str, allow: &[String], deny: &[String]) -> bool {
+    if !admit(path, allow) {
+        return false;
+    }
+    !admit(path, deny)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +148,33 @@ mod tests {
     fn admit_multiple_globs_first_match_wins() {
         let globs = vec!["/var/**".to_string(), "/tmp/**".to_string()];
         assert!(admit("/tmp/foo", &globs));
+    }
+
+    #[test]
+    fn admit_with_deny_denies_when_deny_matches() {
+        let allow = vec!["/proj/**".to_string()];
+        let deny = vec!["/proj/secrets/**".to_string()];
+        assert!(!admit_with_deny("/proj/secrets/api.key", &allow, &deny));
+    }
+
+    #[test]
+    fn admit_with_deny_admits_when_no_deny_matches() {
+        let allow = vec!["/proj/**".to_string()];
+        let deny = vec!["/proj/secrets/**".to_string()];
+        assert!(admit_with_deny("/proj/src/main.rs", &allow, &deny));
+    }
+
+    #[test]
+    fn admit_with_deny_denies_when_allow_misses() {
+        let allow = vec!["/proj/**".to_string()];
+        let deny: Vec<String> = vec![];
+        assert!(!admit_with_deny("/etc/passwd", &allow, &deny));
+    }
+
+    #[test]
+    fn admit_with_deny_empty_deny_falls_through_to_allow() {
+        let allow = vec!["/proj/**".to_string()];
+        let deny: Vec<String> = vec![];
+        assert!(admit_with_deny("/proj/foo", &allow, &deny));
     }
 }

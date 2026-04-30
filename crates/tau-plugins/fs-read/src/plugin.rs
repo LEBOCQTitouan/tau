@@ -17,7 +17,7 @@ use tau_ports::{
 };
 
 use crate::config::FsReadConfig;
-use crate::path_check::{admit, validate_path, BadArgs};
+use crate::path_check::{admit_with_deny, validate_path, BadArgs};
 
 /// Per-session state derived from the agent's granted capabilities.
 ///
@@ -30,6 +30,10 @@ pub struct FsReadSession {
     /// entries. Empty iff the agent has no fs.read grant (which means
     /// the kernel should have already denied the call).
     allowed_globs: Vec<String>,
+    /// Path globs to subtract from `allowed_globs`, populated from the
+    /// `fs.read` entry in `SessionContext.deny_entries`. Deny wins —
+    /// see spec §9.
+    denied_globs: Vec<String>,
 }
 
 /// fs-read Tool plugin.
@@ -95,7 +99,16 @@ impl Tool for FsReadPlugin {
 
     async fn init(&self, ctx: SessionContext) -> Result<Self::Session, ToolError> {
         let allowed_globs = extract_fs_read_paths(&ctx.granted_capabilities);
-        Ok(FsReadSession { allowed_globs })
+        let denied_globs = ctx
+            .deny_entries
+            .iter()
+            .find(|e| e.kind == "fs.read")
+            .map(|e| e.deny.clone())
+            .unwrap_or_default();
+        Ok(FsReadSession {
+            allowed_globs,
+            denied_globs,
+        })
     }
 
     async fn invoke(
@@ -106,7 +119,7 @@ impl Tool for FsReadPlugin {
         let path_str = parse_path_arg(&args)?;
         let path =
             validate_path(path_str).map_err(|e| ToolError::BadArgs { reason: e.reason() })?;
-        if !admit(path, &session.allowed_globs) {
+        if !admit_with_deny(path, &session.allowed_globs, &session.denied_globs) {
             return Err(ToolError::BadArgs {
                 reason: BadArgs::NotInScope.reason(),
             });

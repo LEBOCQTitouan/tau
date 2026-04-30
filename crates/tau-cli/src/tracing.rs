@@ -63,6 +63,7 @@ mod tests {
                 resource: ListResource::Packages,
                 global: false,
                 all: false,
+                capabilities: false,
                 dry_run: false,
             }),
             verbose,

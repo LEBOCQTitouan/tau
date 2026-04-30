@@ -47,6 +47,7 @@ serde           = { version = "1", features = ["derive"] }
 base64          = "0.22"
 proptest        = "1"
 walkdir         = "2"
+globset         = "0.4"
 futures-core    = "0.3"
 toml            = "0.8"
 fs4             = "0.8"

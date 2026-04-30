@@ -60,6 +60,15 @@ pub struct SessionContext {
     /// [`SessionContext::with_granted_capabilities`] to set.
     #[cfg_attr(feature = "serde", serde(default))]
     pub granted_capabilities: Vec<tau_domain::Capability>,
+    /// Per-capability deny carve-outs from the project tau.toml
+    /// override. Plugins consult the matching entry (by `kind`)
+    /// after their allow check passes — deny wins per spec §9.
+    ///
+    /// Populated by tau-runtime at dispatch. Defaults to empty when
+    /// constructed via [`SessionContext::new`] — call
+    /// [`SessionContext::with_deny_entries`] to set.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub deny_entries: Vec<DenyEntry>,
 }
 
 impl SessionContext {
@@ -80,6 +89,7 @@ impl SessionContext {
             session_id,
             deadline,
             granted_capabilities: Vec::new(),
+            deny_entries: Vec::new(),
         }
     }
 
@@ -90,6 +100,56 @@ impl SessionContext {
     ) -> Self {
         self.granted_capabilities = granted_capabilities;
         self
+    }
+
+    /// Replace the `deny_entries` list. Builder-pattern method.
+    pub fn with_deny_entries(mut self, deny_entries: Vec<DenyEntry>) -> Self {
+        self.deny_entries = deny_entries;
+        self
+    }
+}
+
+/// Per-capability deny carve-out flowing from a project tau.toml
+/// `[[agents.<id>.capabilities]]` override into the plugin's
+/// [`Tool::init`]. After the plugin's allow check passes, the plugin
+/// consults the matching `DenyEntry` (by `kind`) and rejects any path
+/// / host / command appearing in `deny`. Deny wins precedence per
+/// spec §9.
+///
+/// `DenyEntry` is `#[non_exhaustive]`: external callers cannot construct
+/// it via struct-literal syntax. Use [`DenyEntry::new`].
+///
+/// # Example
+///
+/// ```ignore
+/// // `DenyEntry` is `#[non_exhaustive]`. The example here is illustrative
+/// // only — external callers must use `DenyEntry::new`.
+/// use tau_ports::tool::DenyEntry;
+///
+/// let entry = DenyEntry::new(
+///     "fs.read".to_string(),
+///     vec!["${PROJECT}/.env".to_string()],
+/// );
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DenyEntry {
+    /// Capability kind this entry's deny list applies to. Matches the
+    /// wire `kind` field on `Capability` (`fs.read`, `fs.write`,
+    /// `fs.exec`, `net.http`, `process.spawn`).
+    pub kind: String,
+    /// Strings to subtract from the matching allow-list. For path-shaped
+    /// capabilities these are globs; for `net.http` host names; for
+    /// `process.spawn` command names.
+    pub deny: Vec<String>,
+}
+
+impl DenyEntry {
+    /// Construct a [`DenyEntry`]. `#[non_exhaustive]` blocks struct-literal
+    /// construction outside this crate.
+    pub fn new(kind: String, deny: Vec<String>) -> Self {
+        Self { kind, deny }
     }
 }
 
@@ -343,5 +403,56 @@ mod tests {
         assert_eq!(result.content.len(), 1);
 
         tool.teardown(session).await.unwrap();
+    }
+
+    #[test]
+    fn session_context_default_deny_entries_is_empty() {
+        let ctx = SessionContext::new(
+            tau_domain::AgentInstanceId::new(),
+            uuid::Uuid::now_v7(),
+            None,
+        );
+        assert!(ctx.deny_entries.is_empty());
+    }
+
+    #[test]
+    fn session_context_with_deny_entries_replaces_field() {
+        let entry = DenyEntry::new("fs.read".to_string(), vec!["/etc/secret".to_string()]);
+        let ctx = SessionContext::new(
+            tau_domain::AgentInstanceId::new(),
+            uuid::Uuid::now_v7(),
+            None,
+        )
+        .with_deny_entries(vec![entry]);
+        assert_eq!(ctx.deny_entries.len(), 1);
+        assert_eq!(ctx.deny_entries[0].kind, "fs.read");
+        assert_eq!(ctx.deny_entries[0].deny, vec!["/etc/secret".to_string()]);
+    }
+
+    #[test]
+    fn deny_entry_new_round_trips_kind_and_deny() {
+        let entry = DenyEntry::new(
+            "process.spawn".to_string(),
+            vec!["rm".to_string(), "shutdown".to_string()],
+        );
+        assert_eq!(entry.kind, "process.spawn");
+        assert_eq!(entry.deny, vec!["rm".to_string(), "shutdown".to_string()]);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn session_context_deny_entries_defaults_on_missing_key() {
+        // Defends the #[serde(default)] gate: a payload from an older
+        // plugin/runtime that doesn't include `deny_entries` must
+        // deserialize successfully with the field defaulted to empty.
+        let json = serde_json::json!({
+            "agent_instance_id": tau_domain::AgentInstanceId::new(),
+            "session_id": uuid::Uuid::now_v7(),
+            "deadline": null,
+            "granted_capabilities": []
+        });
+        let ctx: SessionContext =
+            serde_json::from_value(json).expect("SessionContext deserializes without deny_entries");
+        assert!(ctx.deny_entries.is_empty());
     }
 }

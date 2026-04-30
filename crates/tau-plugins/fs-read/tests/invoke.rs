@@ -16,7 +16,7 @@ use tau_plugin_protocol::{
     Frame, PROTOCOL_VERSION,
 };
 use tau_plugin_sdk::{run_tool_with_io, Configure};
-use tau_ports::SessionContext;
+use tau_ports::{DenyEntry, SessionContext};
 use uuid::Uuid;
 
 // ---- helpers ----
@@ -239,6 +239,47 @@ async fn integration_traversal_rejected() {
     assert!(
         err.contains("contains a `..` segment") || err.contains("traversal"),
         "expected traversal error; got: {err}"
+    );
+
+    shutdown(&mut peer).await;
+    drop(peer);
+    let _ = runner.await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn integration_deny_overrides_allow() {
+    let tmpfile = tempfile::NamedTempFile::new().unwrap();
+    let path = tmpfile.path().to_str().unwrap().to_string();
+    std::fs::write(tmpfile.path(), b"secret").unwrap();
+
+    // Allow covers the file's parent dir; deny lists the exact file.
+    let parent = tmpfile.path().parent().unwrap().to_str().unwrap();
+    let allow_glob = format!("{parent}/**");
+
+    let (mut peer, mut sut_reader, mut sut_writer) = FakeStdioPeer::new();
+    let plugin = FsReadPlugin::from_config(Default::default()).unwrap();
+
+    let runner = tokio::spawn(async move {
+        run_tool_with_io(&mut sut_reader, &mut sut_writer, plugin, "fs-read", "0.1.0").await
+    });
+
+    do_handshake(&mut peer).await;
+    // Allow covers the file; deny lists the exact file → expect rejection.
+    let ctx = SessionContext::new(
+        AgentInstanceId::new(),
+        Uuid::now_v7(),
+        Some(SystemTime::UNIX_EPOCH),
+    )
+    .with_granted_capabilities(vec![fs_read_cap(&[&allow_glob])])
+    .with_deny_entries(vec![DenyEntry::new("fs.read".into(), vec![path.clone()])]);
+    send_tool_call(&mut peer, 2, &ctx, serde_json::json!({ "path": path })).await;
+    let err = recv_tool_response(&mut peer)
+        .await
+        .expect_err("expected scope-rejection RPC error");
+    assert!(
+        err.contains("not in capability scope"),
+        "expected scope-violation error; got: {err}"
     );
 
     shutdown(&mut peer).await;

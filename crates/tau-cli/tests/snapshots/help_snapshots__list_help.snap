@@ -23,6 +23,9 @@ Options:
       --all
           List both project and global entries side-by-side. (Ignored when `resource` is `agents`; agents are always project-scoped.)
 
+      --capabilities
+          When listing agents, also print the effective capability set (allow + deny per agent, computed against the package manifest). Ignored when `resource` is `packages`
+
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
 

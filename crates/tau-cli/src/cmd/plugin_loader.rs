@@ -269,6 +269,7 @@ mod tests {
             requires: RequiresEntry::default(),
             config,
             prompt: PromptEntry::None,
+            capability_overrides: Vec::new(),
         }
     }
 
