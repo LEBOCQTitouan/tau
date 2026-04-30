@@ -18,6 +18,8 @@ members = [
     "crates/tau-plugins/anthropic",
     "crates/tau-plugins/ollama",
     "crates/tau-plugins/openai",
+    "crates/tau-plugins/fs-read",
+    "crates/tau-plugins/shell",
 ]
 
 [workspace.package]

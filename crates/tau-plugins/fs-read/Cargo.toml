@@ -1,0 +1,32 @@
+[package]
+name = "fs-read"
+description = "fs-read tool plugin: reads bytes from a single absolute path under fs.read capability scope."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+
+[[bin]]
+name = "fs-read-plugin"
+path = "src/main.rs"
+
+[lib]
+name = "fs_read_plugin_lib"
+path = "src/lib.rs"
+
+[dependencies]
+tau-domain          = { workspace = true, features = ["serde"] }
+tau-ports           = { workspace = true, features = ["serde", "test-fixtures"] }
+tau-plugin-protocol = { workspace = true }
+tau-plugin-sdk      = { workspace = true }
+serde               = { workspace = true }
+serde_json          = "1"
+thiserror           = { workspace = true }
+tokio               = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "fs"] }
+tracing             = { workspace = true }
+globset             = "0.4"
+
+[dev-dependencies]
+tempfile            = { workspace = true }
