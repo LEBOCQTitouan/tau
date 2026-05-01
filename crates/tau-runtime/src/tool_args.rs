@@ -16,6 +16,8 @@
 //! See `docs/superpowers/specs/2026-04-30-tool-args-schema-design.md`
 //! and ADR-0010.
 
+use std::sync::Arc;
+
 use jsonschema::{Draft, ValidationOptions, Validator};
 use tau_domain::Value;
 use tau_ports::ToolError;
@@ -25,12 +27,24 @@ use tau_ports::ToolError;
 /// Built once at `RuntimeBuilder::build()` per registered tool.
 /// `compile()` rejects malformed schemas; `validate()` rejects
 /// non-conforming runtime args with a self-instructive error string.
+///
+/// # Cloneability
+///
+/// `ToolArgsValidator` is `Clone`: the compiled `jsonschema::Validator`
+/// is wrapped in `Arc` so cloning is a reference-count bump rather than
+/// a schema recompile. This is required by `Runtime::run_streaming_with_history`,
+/// which snapshots the `tool_validators` registry into an owned HashMap
+/// for the `'static` stream.
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ToolArgsValidator {
     /// Compiled jsonschema instance. `None` = tool opted out (empty
     /// schema or `Value::Null`); validation is a no-op.
-    compiled: Option<Validator>,
+    ///
+    /// Wrapped in `Arc` so that `ToolArgsValidator` can be `Clone`
+    /// without recompiling the schema — clone is an Arc reference-count
+    /// bump.
+    compiled: Option<Arc<Validator>>,
     /// The original input_schema as declared, kept for inclusion in
     /// BadArgs error messages (the MANDATORY rule).
     declared_schema_json: String,
@@ -71,7 +85,7 @@ impl ToolArgsValidator {
                 schema_excerpt: declared_schema_json.chars().take(200).collect(),
             })?;
         Ok(Self {
-            compiled: Some(compiled),
+            compiled: Some(Arc::new(compiled)),
             declared_schema_json,
         })
     }

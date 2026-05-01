@@ -833,7 +833,7 @@ fn value_to_preview_string(v: &Value) -> String {
 /// The kernel's structural cap check still applies — narrowing is best-effort
 /// at this layer; panicking on a security-enforcement path would be the
 /// wrong failure mode.
-fn narrowed_capability_for_session(eff: &EffectiveCapability) -> Capability {
+pub(crate) fn narrowed_capability_for_session(eff: &EffectiveCapability) -> Capability {
     use serde_json::{json, Value as Jv};
 
     let source_json = match serde_json::to_value(&eff.source) {
