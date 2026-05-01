@@ -71,6 +71,8 @@ pub enum Command {
     Uninstall(UninstallArgs),
     /// Verify installed packages against the lockfile (spec §3).
     Verify(VerifyArgs),
+    /// Update an installed package to a newer or specific version (spec §2).
+    Update(UpdateArgs),
     /// Plugin debugging utilities (spec §9 debug tier).
     Plugin {
         /// Sub-action within the plugin group.
@@ -224,6 +226,22 @@ pub struct VerifyArgs {
     /// Specific version.
     #[arg(long)]
     pub version: Option<String>,
+    /// Use global scope.
+    #[arg(long)]
+    pub global: bool,
+}
+
+/// Arguments for `tau update`.
+#[derive(Args, Debug)]
+pub struct UpdateArgs {
+    /// Package name to update.
+    pub package: String,
+    /// Specific version (default: latest tag).
+    #[arg(long)]
+    pub version: Option<String>,
+    /// Remove the old active version after the new install succeeds.
+    #[arg(long)]
+    pub prune: bool,
     /// Use global scope.
     #[arg(long)]
     pub global: bool,
