@@ -160,7 +160,9 @@ pub struct SessionArgs {
 pub enum SessionAction {
     /// List sessions in the current scope.
     List(SessionListArgs),
-    // Show, Delete, Export added in Tasks 8-10.
+    /// Print transcript of a session.
+    Show(SessionShowArgs),
+    // Delete, Export added in Tasks 9-10.
 }
 
 /// Arguments for `tau session list`.
@@ -177,6 +179,16 @@ pub struct SessionListArgs {
     /// Disable the limit; show all sessions.
     #[arg(long)]
     pub all: bool,
+}
+
+/// Arguments for `tau session show`.
+#[derive(Args, Debug)]
+pub struct SessionShowArgs {
+    /// Session id (or 8+ char prefix).
+    pub id: String,
+    /// Use global scope.
+    #[arg(long)]
+    pub global: bool,
 }
 
 /// Arguments for `tau init`.

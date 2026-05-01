@@ -121,3 +121,8 @@ fn snapshot_session_help() {
 fn snapshot_session_list_help() {
     insta::assert_snapshot!(capture_help(&["session", "list", "--help"]));
 }
+
+#[test]
+fn snapshot_session_show_help() {
+    insta::assert_snapshot!(capture_help(&["session", "show", "--help"]));
+}
