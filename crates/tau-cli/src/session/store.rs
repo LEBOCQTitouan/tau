@@ -393,6 +393,96 @@ fn file_stem(path: &Path) -> String {
         .to_string()
 }
 
+/// Lightweight session summary used by `tau session list`.
+///
+/// Built from the file's header line + a count of subsequent
+/// non-header lines. Reads the whole file (cheap for typical
+/// session sizes < 10MB).
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct SessionMetadata {
+    /// Full session id.
+    pub id: String,
+    /// 8-char id prefix.
+    pub short: String,
+    /// Agent named entry from project tau.toml.
+    pub agent_id: String,
+    /// Created-at timestamp (SystemTime; same as in SessionHeader).
+    pub created_at: std::time::SystemTime,
+    /// Number of `message` + `turn_summary` lines (best-effort; on
+    /// read errors falls back to `0`).
+    pub turn_count: u32,
+    /// Optional title (always None at v0.1).
+    pub title: Option<String>,
+    /// Path to the session file.
+    pub path: PathBuf,
+}
+
+/// List session metadata for every `*.jsonl` in `<sessions_dir>`.
+///
+/// Sort is descending by `created_at`. `agent_filter` filters by
+/// `header.agent_id` if `Some(name)`. Files that fail to parse the
+/// header line are silently skipped (logged at `warn`).
+pub fn list_sessions(
+    sessions_dir: &Path,
+    agent_filter: Option<&str>,
+) -> Result<Vec<SessionMetadata>, SessionError> {
+    if !sessions_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let entries = std::fs::read_dir(sessions_dir).map_err(|e| SessionError::Io {
+        path: sessions_dir.to_path_buf(),
+        message: format!("listing sessions dir: {e}"),
+    })?;
+
+    let mut out = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| SessionError::Io {
+            path: sessions_dir.to_path_buf(),
+            message: format!("reading dir entry: {e}"),
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+            continue;
+        }
+
+        let (header, count) = match SessionReader::read(&path) {
+            Ok((h, entries)) => (h, entries.len() as u32),
+            Err(e) => {
+                tracing::warn!(
+                    name = "session.list_skipped",
+                    path = %path.display(),
+                    error = %e,
+                    "skipping malformed session file"
+                );
+                continue;
+            }
+        };
+
+        if let Some(filter) = agent_filter {
+            if header.agent_id != filter {
+                continue;
+            }
+        }
+
+        let short = header.id[..super::id::MIN_PREFIX_LEN].to_string();
+        out.push(SessionMetadata {
+            id: header.id,
+            short,
+            agent_id: header.agent_id,
+            created_at: header.created_at,
+            turn_count: count,
+            title: header.title,
+            path,
+        });
+    }
+
+    // Descending by created_at — newest first.
+    out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,5 +613,62 @@ mod tests {
         let (_, entries) = SessionReader::read(&path).unwrap();
         // First message survives; trailing malformed line skipped.
         assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn list_sessions_empty_dir_returns_empty() {
+        let td = TempDir::new().unwrap();
+        let result = list_sessions(td.path(), None).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn list_sessions_returns_descending_by_created_at() {
+        let td = TempDir::new().unwrap();
+        let id_a = crate::session::id::mint();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let id_b = crate::session::id::mint();
+        let header_a = fixture_header(&id_a);
+        let header_b = fixture_header(&id_b);
+
+        SessionWriter::create(td.path(), &id_a, &header_a)
+            .unwrap()
+            .close()
+            .unwrap();
+        SessionWriter::create(td.path(), &id_b, &header_b)
+            .unwrap()
+            .close()
+            .unwrap();
+
+        let result = list_sessions(td.path(), None).unwrap();
+        assert_eq!(result.len(), 2);
+        // b is newer, so it comes first (descending).
+        assert_eq!(result[0].id, id_b.as_str());
+        assert_eq!(result[1].id, id_a.as_str());
+    }
+
+    #[test]
+    fn list_sessions_filters_by_agent() {
+        let td = TempDir::new().unwrap();
+        let id_a = crate::session::id::mint();
+        let id_b = crate::session::id::mint();
+
+        let mut header_a = fixture_header(&id_a);
+        header_a.agent_id = "coder".into();
+        let mut header_b = fixture_header(&id_b);
+        header_b.agent_id = "notes".into();
+
+        SessionWriter::create(td.path(), &id_a, &header_a)
+            .unwrap()
+            .close()
+            .unwrap();
+        SessionWriter::create(td.path(), &id_b, &header_b)
+            .unwrap()
+            .close()
+            .unwrap();
+
+        let result = list_sessions(td.path(), Some("coder")).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].agent_id, "coder");
     }
 }

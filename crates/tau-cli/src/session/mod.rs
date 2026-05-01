@@ -21,7 +21,8 @@ pub mod store;
 
 pub use id::{mint, resolve_id_prefix, SessionId};
 pub use store::{
-    SessionEntry, SessionHeader, SessionPackage, SessionReader, SessionWriter, SCHEMA_VERSION,
+    list_sessions, SessionEntry, SessionHeader, SessionMetadata, SessionPackage, SessionReader,
+    SessionWriter, SCHEMA_VERSION,
 };
 
 /// Errors returned by the session storage layer.
