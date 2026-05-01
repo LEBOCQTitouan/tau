@@ -2804,10 +2804,12 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "tau-domain",
  "tempfile",
  "thiserror 2.0.18",
  "toml",
+ "walkdir",
 ]
 
 [[package]]
