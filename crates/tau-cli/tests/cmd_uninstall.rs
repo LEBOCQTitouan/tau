@@ -190,6 +190,12 @@ capabilities = []
         },
         "sanity check",
     );
+
+    // Verify active_version was promoted to 1.1.0 after uninstalling 1.0.0.
+    assert!(
+        lockfile_content.contains(r#"active_version = "1.1.0""#),
+        "lockfile should have active_version promoted to 1.1.0 after uninstalling the old active version",
+    );
 }
 
 /// Test 3: attempting to uninstall a package that was never installed
