@@ -26,6 +26,12 @@ Options:
       --ephemeral
           Don't persist this session to disk; in-memory only
 
+      --resume <RESUME>
+          Resume an existing session (id or 8+ char prefix)
+
+      --force
+          Override drift detection on resume
+
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
 

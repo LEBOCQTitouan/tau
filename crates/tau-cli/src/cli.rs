@@ -296,6 +296,12 @@ pub struct ChatArgs {
     /// Don't persist this session to disk; in-memory only.
     #[arg(long, default_value_t = false)]
     pub ephemeral: bool,
+    /// Resume an existing session (id or 8+ char prefix).
+    #[arg(long)]
+    pub resume: Option<String>,
+    /// Override drift detection on resume.
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
 }
 
 /// Resource kinds accepted by `tau list`.

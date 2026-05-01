@@ -182,18 +182,101 @@ pub async fn run(
         .build()
         .context("failed to build runtime from spawned plugins")?;
 
-    let result = run_repl(
-        entry,
-        &agent_def,
-        &manifest,
-        &options,
-        args.no_stream,
-        args.ephemeral,
-        &scope,
-        &runtime,
-        output,
-    )
-    .await;
+    // ---- Resume vs fresh-session branch ------------------------------------
+    let result = if let Some(id_or_prefix) = args.resume.as_deref() {
+        let sessions_dir = scope.state_path().join("sessions");
+        let id = crate::session::resolve_id_prefix(&sessions_dir, id_or_prefix)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let path = sessions_dir.join(format!("{}.jsonl", id.as_str()));
+        let (header, entries) =
+            crate::session::SessionReader::read(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        // Drift validation (skipped if --force).
+        if !args.force {
+            check_session_drift(&id, &header, &agent_def, &manifest)?;
+        } else {
+            warn_drift_if_any(&header, &agent_def, &manifest, output);
+        }
+
+        // Seed history from entries.
+        let history: Vec<Message> = entries
+            .iter()
+            .filter_map(|e| match e {
+                crate::session::SessionEntry::Message(m) => Some(m.clone()),
+                _ => None,
+            })
+            .collect();
+
+        // Count turns from TurnSummary entries.
+        let turn_count = entries
+            .iter()
+            .filter(|e| matches!(e, crate::session::SessionEntry::TurnSummary { .. }))
+            .count();
+
+        // Reopen the file in append mode.
+        let writer = crate::session::SessionWriter::open_append(&path)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        // Print the resume banner.
+        output.status(format!(
+            "Resumed session {} ({} turns)",
+            id.short(),
+            turn_count
+        ))?;
+
+        run_repl(
+            entry,
+            &agent_def,
+            &manifest,
+            &options,
+            args.no_stream,
+            id,
+            Some(writer),
+            history,
+            turn_count as u32,
+            &runtime,
+            output,
+        )
+        .await
+    } else {
+        // Fresh session: mint an id and create the writer now (before
+        // entering the REPL) so the call site mirrors the resume path.
+        let fresh_id = crate::session::mint();
+        let fresh_writer: Option<crate::session::SessionWriter> = if args.ephemeral {
+            output.status("Ephemeral session — not saved to disk")?;
+            None
+        } else {
+            let sessions_dir = scope.state_path().join("sessions");
+            let header = crate::session::SessionHeader::new(
+                &fresh_id,
+                entry.id.clone(),
+                crate::session::SessionPackage {
+                    name: manifest.name().to_string(),
+                    version: manifest.version().to_string(),
+                    resolved_commit: String::new(),
+                },
+                agent_def.llm_backend.to_string(),
+            );
+            let writer = crate::session::SessionWriter::create(&sessions_dir, &fresh_id, &header)?;
+            output.status(format!("Session: {} (will be saved)", fresh_id.short()))?;
+            Some(writer)
+        };
+
+        run_repl(
+            entry,
+            &agent_def,
+            &manifest,
+            &options,
+            args.no_stream,
+            fresh_id,
+            fresh_writer,
+            Vec::new(),
+            0,
+            &runtime,
+            output,
+        )
+        .await
+    };
 
     // Drop the runtime before flushing recorders so every plugin
     // process is reaped and the host-side write task is quiescent.
@@ -207,6 +290,14 @@ pub async fn run(
 /// with `--record-protocol` flush coordination after the runtime is
 /// dropped. Borrows the runtime so the chat session and the recording
 /// flush share a single ownership chain in `run`.
+///
+/// `session_id` is either freshly-minted (new session) or the resolved
+/// id from `--resume`. `session_writer` is `Some(writer)` when the
+/// session should be persisted (pre-created or opened-for-append by the
+/// caller) and `None` for ephemeral sessions. `initial_history` is empty
+/// for fresh sessions and pre-populated on resume. `initial_turn_counter`
+/// is 0 for fresh sessions and the turn count read from the session file
+/// on resume.
 #[allow(clippy::too_many_arguments)]
 async fn run_repl(
     entry: &crate::config::AgentEntry,
@@ -214,46 +305,41 @@ async fn run_repl(
     manifest: &tau_domain::PackageManifest,
     options: &RunOptions,
     no_stream: bool,
-    ephemeral: bool,
-    scope: &tau_pkg::Scope,
+    session_id: crate::session::SessionId,
+    session_writer_arg: Option<crate::session::SessionWriter>,
+    initial_history: Vec<Message>,
+    initial_turn_counter: u32,
     runtime: &tau_runtime::Runtime,
     output: &mut Output,
 ) -> anyhow::Result<()> {
-    // Welcome banner.
-    output.status(format!(
-        "Welcome to tau chat with agent '{}' ({}@{}). Type /help for commands, /exit or Ctrl-D to quit.",
-        entry.id,
-        manifest.name(),
-        manifest.version()
-    ))?;
+    let is_resumed = !initial_history.is_empty();
 
-    // ---- Session writer setup -----------------------------------------------
-    let session_id = crate::session::mint();
-    let mut session_writer: Option<crate::session::SessionWriter> = if !ephemeral {
-        let sessions_dir = scope.state_path().join("sessions");
-        let header = crate::session::SessionHeader::new(
-            &session_id,
-            entry.id.clone(),
-            crate::session::SessionPackage {
-                name: manifest.name().to_string(),
-                version: manifest.version().to_string(),
-                resolved_commit: String::new(),
-            },
-            agent_def.llm_backend.to_string(),
-        );
-        let writer = crate::session::SessionWriter::create(&sessions_dir, &session_id, &header)?;
-        output.status(format!("Session: {} (will be saved)", session_id.short()))?;
-        Some(writer)
+    // Welcome banner.
+    if is_resumed {
+        output.status(format!(
+            "Welcome back to tau chat with agent '{}' ({}@{}). Type /help for commands, /exit or Ctrl-D to quit.",
+            entry.id,
+            manifest.name(),
+            manifest.version()
+        ))?;
     } else {
-        output.status("Ephemeral session — not saved to disk")?;
-        None
-    };
+        output.status(format!(
+            "Welcome to tau chat with agent '{}' ({}@{}). Type /help for commands, /exit or Ctrl-D to quit.",
+            entry.id,
+            manifest.name(),
+            manifest.version()
+        ))?;
+    }
+
+    // The caller is responsible for writer creation/opening and
+    // printing the appropriate status message (Session: ... or Ephemeral).
+    let mut session_writer: Option<crate::session::SessionWriter> = session_writer_arg;
 
     let session_started_at = std::time::SystemTime::now();
-    let mut turn_counter: u32 = 0;
+    let mut turn_counter: u32 = initial_turn_counter;
 
     let mut editor = DefaultEditor::new().context("initialising rustyline editor")?;
-    let mut history: Vec<Message> = Vec::new();
+    let mut history: Vec<Message> = initial_history;
     let mut total_tokens = TokenUsage::default();
 
     loop {
@@ -726,6 +812,88 @@ fn emit_dry_run_preview(
     output.dry_run("REPL would start with the above setup.")?;
     output.dry_run("no session opened.")?;
     Ok(())
+}
+
+/// Validate that the session header's recorded metadata still matches the
+/// current project state. Returns `Err` describing the first mismatch found.
+/// Called on `--resume` when `--force` is not set.
+fn check_session_drift(
+    session_id: &crate::session::SessionId,
+    header: &crate::session::SessionHeader,
+    agent_def: &tau_domain::AgentDefinition,
+    manifest: &tau_domain::PackageManifest,
+) -> anyhow::Result<()> {
+    let current_agent_id = agent_def.id.to_string();
+    let current_pkg_name = manifest.name().to_string();
+    let current_pkg_version = manifest.version().to_string();
+    let current_llm = agent_def.llm_backend.to_string();
+
+    if header.agent_id != current_agent_id {
+        return Err(anyhow::anyhow!(
+            "session {} drift: agent_id was {:?}, now {:?}. Use --force to resume anyway.",
+            session_id.short(),
+            header.agent_id,
+            current_agent_id
+        ));
+    }
+    if header.package.name != current_pkg_name {
+        return Err(anyhow::anyhow!(
+            "session {} drift: package.name was {:?}, now {:?}. Use --force to resume anyway.",
+            session_id.short(),
+            header.package.name,
+            current_pkg_name
+        ));
+    }
+    if header.package.version != current_pkg_version {
+        return Err(anyhow::anyhow!(
+            "session {} drift: package.version was {:?}, now {:?}. Use --force to resume anyway.",
+            session_id.short(),
+            header.package.version,
+            current_pkg_version
+        ));
+    }
+    if header.llm_backend != current_llm {
+        return Err(anyhow::anyhow!(
+            "session {} drift: llm_backend was {:?}, now {:?}. Use --force to resume anyway.",
+            session_id.short(),
+            header.llm_backend,
+            current_llm
+        ));
+    }
+    Ok(())
+}
+
+/// Emit warnings for any drift detected but do not abort. Called on
+/// `--resume --force`.
+fn warn_drift_if_any(
+    header: &crate::session::SessionHeader,
+    agent_def: &tau_domain::AgentDefinition,
+    manifest: &tau_domain::PackageManifest,
+    output: &mut Output,
+) {
+    let current_pkg_name = manifest.name().to_string();
+    let current_pkg_version = manifest.version().to_string();
+    let current_llm = agent_def.llm_backend.to_string();
+    let current_agent = agent_def.id.to_string();
+
+    if header.package.version != current_pkg_version || header.package.name != current_pkg_name {
+        let _ = output.status(format!(
+            "warning: resuming with {}@{} (session was {}@{})",
+            current_pkg_name, current_pkg_version, header.package.name, header.package.version
+        ));
+    }
+    if header.llm_backend != current_llm {
+        let _ = output.status(format!(
+            "warning: resuming with llm_backend {} (session was {})",
+            current_llm, header.llm_backend
+        ));
+    }
+    if header.agent_id != current_agent {
+        let _ = output.status(format!(
+            "warning: resuming with agent_id {} (session was {})",
+            current_agent, header.agent_id
+        ));
+    }
 }
 
 #[cfg(test)]
