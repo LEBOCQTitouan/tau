@@ -137,8 +137,9 @@ impl LlmBackend for RepeatLlm {
         ))
     }
 
-    async fn stream(&self, _req: CompletionRequest) -> Result<CompletionStream, LlmError> {
-        unimplemented!("RepeatLlm only supports complete()")
+    async fn stream(&self, req: CompletionRequest) -> Result<CompletionStream, LlmError> {
+        let resp = self.complete(req).await?;
+        Ok(tau_ports::batch_to_stream(resp))
     }
 }
 
@@ -192,8 +193,9 @@ impl LlmBackend for ScriptedLlm {
             })
     }
 
-    async fn stream(&self, _req: CompletionRequest) -> Result<CompletionStream, LlmError> {
-        unimplemented!("ScriptedLlm only supports complete()")
+    async fn stream(&self, req: CompletionRequest) -> Result<CompletionStream, LlmError> {
+        let resp = self.complete(req).await?;
+        Ok(tau_ports::batch_to_stream(resp))
     }
 }
 

@@ -27,26 +27,20 @@
 
 use std::collections::BTreeMap;
 
+#[cfg(test)]
+use tau_domain::AgentInstanceId;
 use tau_domain::{
-    AgentDefinition, AgentInstanceId, AgentStatus, Capability, FailureKind, Message,
-    MessagePayload, PackageManifest, Value,
+    AgentDefinition, AgentStatus, Capability, FailureKind, Message, MessagePayload,
+    PackageManifest, Value,
 };
-use tau_ports::{
-    CompletionRequest, ContentBlock, LlmProviderMessage, SessionContext, ToolContent, ToolError,
-    ToolResult, ToolSpec, ToolUse,
-};
-use tracing::{debug, debug_span, info, info_span, instrument, trace, warn, Instrument};
+use tau_ports::{ContentBlock, LlmProviderMessage, ToolContent, ToolUse};
+use tracing::instrument;
 
 use crate::builder::Runtime;
-use crate::capability::check_capabilities;
 use crate::capability_override::EffectiveCapability;
 use crate::error::{CapabilityDenial, RuntimeError};
 use crate::options::{RunOptions, TokenUsage};
 use crate::outcome::RunOutcome;
-
-/// Maximum length of a logged preview for free-form arguments and text
-/// at DEBUG level. See module-level "sensitive-data discipline" docs.
-const PREVIEW_CHARS: usize = 256;
 
 impl Runtime {
     /// Run an agent with a pre-existing conversation history.
@@ -116,432 +110,70 @@ impl Runtime {
         initial_message: Message,
         options: RunOptions,
     ) -> Result<RunOutcome, RuntimeError> {
-        info!(name = "runtime.run_started");
+        use crate::stream::RunEvent;
+        use futures_core::Stream as _;
+        use tau_ports::{LlmError, ToolError};
 
-        // Apply the project tau.toml capability override (if any) at runtime
-        // — defense-in-depth, matching tau-cli's parse-time check. The kernel
-        // continues to use the package's structural grants
-        // (`granted_for_kernel`) for tool filtering and per-call cap checks
-        // because narrowing the allow-list doesn't change the capability
-        // *kind*; the narrowing is enforced plugin-side via
-        // SessionContext.granted_capabilities (post-narrow view) and
-        // SessionContext.deny_entries.
-        let effective = crate::capability_override::compute_effective(
-            package_manifest.capabilities(),
-            &options.project_override,
-        )
-        .map_err(|e| {
-            warn!(
-                name = "runtime.capability_override_rejected",
-                agent_id = %agent_def.id,
-                package_id = %agent_def.package.name,
-                kind = %e.kind,
-                reason = %e.reason,
-            );
-            RuntimeError::CapabilityOverrideExpands {
-                kind: e.kind,
-                reason: e.reason,
+        // Delegate all agent-loop logic to run_streaming_with_history.
+        // This function is now a thin stream-drainer: it consumes the
+        // stream and returns the terminal RunCompleted.outcome.
+        // The streaming pump (stream.rs::run_streaming_inner) is the
+        // single source of truth for the agent loop.
+        let stream = self
+            .run_streaming_with_history(
+                agent_def,
+                package_manifest,
+                history,
+                initial_message,
+                options,
+            )
+            .await?;
+        let mut stream = Box::pin(stream);
+        loop {
+            let next = std::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await;
+            match next {
+                Some(RunEvent::RunCompleted { outcome }) => return Ok(outcome),
+                Some(RunEvent::FatalError {
+                    kind,
+                    detail,
+                    context_json,
+                }) => {
+                    // ADR-0006 error/failure dichotomy: the streaming pump
+                    // emits FatalError for plugin/dispatch failures that
+                    // must propagate as Err(RuntimeError) in the batch path.
+                    return Err(match kind.as_str() {
+                        "ToolNotRegistered" => {
+                            // Parse context_json to extract tool_name and
+                            // registered list (emitted by make_tool_not_registered_error).
+                            let (tool_name, registered) = context_json
+                                .as_deref()
+                                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                                .and_then(|v| {
+                                    let tn = v["tool_name"].as_str()?.to_owned();
+                                    let reg: Vec<String> = v["registered"]
+                                        .as_array()?
+                                        .iter()
+                                        .filter_map(|x| x.as_str().map(String::from))
+                                        .collect();
+                                    Some((tn, reg))
+                                })
+                                .unwrap_or_else(|| (detail.clone(), vec![]));
+                            RuntimeError::ToolNotRegistered {
+                                tool_name,
+                                registered,
+                            }
+                        }
+                        "Llm" => RuntimeError::Llm(LlmError::Internal { message: detail }),
+                        "Tool" => RuntimeError::Tool(ToolError::Internal { message: detail }),
+                        _ => RuntimeError::Internal { message: detail },
+                    });
+                }
+                Some(_) => continue,
+                None => unreachable!(
+                    "run_streaming_inner must yield exactly one RunCompleted before stream end"
+                ),
             }
-        })?;
-        let granted_for_kernel: Vec<Capability> =
-            effective.iter().map(|e| e.source.clone()).collect();
-        let granted: &[Capability] = &granted_for_kernel;
-        debug!(
-            name = "runtime.capability_set_loaded",
-            count = granted.len(),
-            overrides_applied = options.project_override.len(),
-        );
-
-        // Precompute the session-scoped views of the effective capability set
-        // once per run. `effective` is immutable from this point forward, so
-        // these values are identical for every tool call in every turn — there
-        // is no need to recompute them inside the per-tool-call loop.
-        let granted_for_session: Vec<Capability> = effective
-            .iter()
-            .map(narrowed_capability_for_session)
-            .collect();
-        let deny_entries: Vec<tau_ports::DenyEntry> = effective
-            .iter()
-            .filter(|e| !e.deny.is_empty())
-            .map(|e| {
-                let kind = match &e.source {
-                    Capability::Filesystem(tau_domain::FsCapability::Read { .. }) => "fs.read",
-                    Capability::Filesystem(tau_domain::FsCapability::Write { .. }) => "fs.write",
-                    Capability::Filesystem(tau_domain::FsCapability::Exec { .. }) => "fs.exec",
-                    Capability::Network(tau_domain::NetCapability::Http { .. }) => "net.http",
-                    Capability::Process(tau_domain::ProcessCapability::Spawn { .. }) => {
-                        "process.spawn"
-                    }
-                    _ => "unknown",
-                };
-                tau_ports::DenyEntry::new(kind.to_string(), e.deny.clone())
-            })
-            .collect();
-
-        // The instance-id is generated once per `run()` call and used
-        // for every assistant-authored `Message` and every
-        // `SessionContext`. `AgentId` (compile-time agent identity) is
-        // not interchangeable with `AgentInstanceId` (per-run UUID v7).
-        let agent_instance_id = AgentInstanceId::new();
-
-        let backend = self
-            .resolve_llm_backend(agent_def.id.as_str(), agent_def.llm_backend.as_str())?
-            .clone();
-
-        // Pre-load `history` into the messages buffer so the very first
-        // `CompletionRequest.messages` carries the prior conversation
-        // before the new `initial_message`. With `history = vec![]` this
-        // collapses to the original `vec![initial_message]` behavior.
-        let mut messages: Vec<Message> = Vec::with_capacity(history.len() + 1);
-        messages.extend(history);
-        messages.push(initial_message);
-        let mut total_turns: u32 = 0;
-        let mut aggregated_tokens = TokenUsage::default();
-
-        // Capability-filter the tools exposed to the LLM (spec §3.10).
-        //
-        // Each registered tool's `Tool::capabilities()` is checked against
-        // the agent package's grants; tools with at least one unsatisfied
-        // requirement are dropped from `CompletionRequest.tools` before
-        // the loop starts. This shrinks the LLM prompt and prevents
-        // spurious tool_uses that would otherwise be denied at invoke
-        // time. The capability check inside the dispatch loop stays as
-        // defense-in-depth — it catches bugs in the filter and any
-        // future tools whose required capabilities depend on per-call
-        // arguments.
-        let mut tool_specs: Vec<ToolSpec> = Vec::with_capacity(self.tools().len());
-        let mut filtered_count: usize = 0;
-        for (name, tool) in self.tools().iter() {
-            let required = tool.capabilities();
-            if let Some(missing) = check_capabilities(granted, required) {
-                let kind = capability_kind_str(missing);
-                warn!(
-                    name = "runtime.tool_filtered",
-                    tool_name = name.as_str(),
-                    missing_kind = %kind,
-                    "tool filtered out: missing capability",
-                );
-                filtered_count += 1;
-                continue;
-            }
-            tool_specs.push(tool.schema());
         }
-        debug!(
-            name = "runtime.tools_filtered",
-            granted_count = granted.len(),
-            total_tools = self.tools().len(),
-            exposed_tools = tool_specs.len(),
-            filtered_count = filtered_count,
-        );
-
-        while total_turns < options.max_turns {
-            total_turns += 1;
-            let _turn_span = debug_span!("runtime.turn", turn = total_turns).entered();
-            debug!(name = "runtime.turn_started", turn = total_turns);
-
-            // ----- LLM call ---------------------------------------------------
-            let mut request = CompletionRequest::new(agent_def.llm_backend.as_str().into());
-            request.system = agent_def.system_prompt.clone();
-            request.messages = agent_messages_to_provider_messages(&messages);
-            request.tools = tool_specs.clone();
-            debug!(
-                name = "llm.request_built",
-                messages = request.messages.len(),
-                tools = request.tools.len(),
-            );
-
-            let response = {
-                let llm_span = info_span!("llm.complete");
-                backend.complete(request).instrument(llm_span).await?
-            };
-
-            debug!(
-                name = "llm.response_received",
-                text_len = response.text.len(),
-                tool_uses = response.tool_uses.len(),
-                stop_reason = ?response.stop_reason,
-            );
-            trace!(
-                name = "llm.stop_reason",
-                reason = ?response.stop_reason,
-            );
-
-            if let Some(usage) = response.usage {
-                let input = u64::from(usage.input_tokens);
-                let output = u64::from(usage.output_tokens);
-                aggregated_tokens.input_tokens =
-                    aggregated_tokens.input_tokens.saturating_add(input);
-                aggregated_tokens.output_tokens =
-                    aggregated_tokens.output_tokens.saturating_add(output);
-                debug!(
-                    name = "llm.token_usage",
-                    input_tokens = input,
-                    output_tokens = output,
-                );
-            }
-
-            // ----- Append assistant turn -------------------------------------
-            append_assistant_response(
-                &mut messages,
-                &response.text,
-                &response.tool_uses,
-                &agent_instance_id,
-            );
-
-            // ----- No tool_uses → terminate ----------------------------------
-            if response.tool_uses.is_empty() {
-                debug!(name = "runtime.loop_terminated", reason = "end_turn");
-                let final_message = messages
-                    .last()
-                    .cloned()
-                    .expect("messages contains at least the initial user message");
-                info!(
-                    name = "runtime.run_completed",
-                    total_turns,
-                    all_messages = messages.len(),
-                );
-                return Ok(RunOutcome::Completed {
-                    final_message,
-                    all_messages: messages,
-                    total_turns,
-                    token_usage: aggregated_tokens,
-                });
-            }
-
-            // ----- Per-tool dispatch -----------------------------------------
-            for tool_use in &response.tool_uses {
-                debug!(
-                    name = "llm.tool_use_emitted",
-                    id = %tool_use.id,
-                    tool_name = %tool_use.name,
-                );
-
-                let tool = {
-                    let _dispatch_span =
-                        debug_span!("dispatch.tool", tool_name = %tool_use.name).entered();
-                    let tool = self.resolve_tool(&tool_use.name)?.clone();
-                    debug!(name = "dispatch.tool_resolved", tool_name = %tool_use.name);
-                    tool
-                };
-
-                // ----- Capability check --------------------------------------
-                let cap_decision: Option<CapabilityDenial> = {
-                    let _cap_span =
-                        debug_span!("capability.check", tool_name = %tool_use.name).entered();
-                    let required: &[Capability] = tool.capabilities();
-                    trace!(name = "capability.required_loaded", count = required.len());
-                    trace!(name = "capability.granted_loaded", count = granted.len());
-                    let missing = check_capabilities(granted, required);
-                    trace!(
-                        name = "capability.satisfies_check",
-                        satisfied = missing.is_none()
-                    );
-                    match missing {
-                        None => {
-                            trace!(name = "capability.allow", tool_name = %tool_use.name);
-                            None
-                        }
-                        Some(cap) => {
-                            let kind = capability_kind_str(cap);
-                            warn!(
-                                name = "capability.deny",
-                                tool_name = %tool_use.name,
-                                missing_kind = %kind,
-                            );
-                            Some(CapabilityDenial {
-                                agent_id: agent_def.id.to_string(),
-                                package_id: agent_def.package.name.to_string(),
-                                tool_name: tool_use.name.clone(),
-                                required_kind: kind,
-                                required_detail: format!("{cap:?}"),
-                            })
-                        }
-                    }
-                };
-
-                if let Some(denial) = cap_decision {
-                    let outcome = build_policy_denied_outcome(
-                        denial,
-                        messages,
-                        total_turns,
-                        aggregated_tokens,
-                    );
-                    info!(name = "runtime.run_failed", kind = "policy_denied");
-                    return Ok(outcome);
-                }
-
-                // ----- Append the tool-call message --------------------------
-                let agent_addr = tau_domain::Address::Agent(agent_instance_id);
-                let tool_addr = tau_domain::Address::Tool(tool_use.name.clone());
-                messages.push(Message::new(
-                    agent_addr.clone(),
-                    tool_addr.clone(),
-                    MessagePayload::ToolCall {
-                        args: tool_use.input.clone(),
-                    },
-                ));
-                trace!(name = "message.added", kind = "tool_call");
-
-                // ----- Open a session ----------------------------------------
-                // ctx is declared here so it remains in scope for the invoke call below.
-                // granted_capabilities flows the agent's package grants to the
-                // plugin process so plugins can perform finer-grained scope
-                // checks (path globs, command allowlists) beyond the kernel's
-                // structural capability check at run.rs:272.
-                let ctx = SessionContext::new(agent_instance_id, uuid::Uuid::new_v4(), None)
-                    .with_granted_capabilities(granted_for_session.clone())
-                    .with_deny_entries(deny_entries.clone());
-                {
-                    let session_open_span =
-                        info_span!("tool.session_open", tool_name = %tool_use.name);
-                    if let Err(err) = tool.init(ctx.clone()).instrument(session_open_span).await {
-                        warn!(
-                            name = "tool.session_open_failed",
-                            tool_name = %tool_use.name,
-                        );
-                        return Err(RuntimeError::from(err));
-                    }
-                }
-
-                // ----- Invoke -----------------------------------------------
-                let tool_result: ToolResult = {
-                    let invoke_span = info_span!("tool.invoke", tool_name = %tool_use.name);
-                    let preview = preview_value(&tool_use.input, PREVIEW_CHARS);
-                    debug!(
-                        name = "tool.args_received",
-                        tool_name = %tool_use.name,
-                        args_preview = %preview,
-                    );
-                    // Validate the LLM's args against the tool's declared
-                    // input_schema (ADR-0010). Validation failure is
-                    // recoverable: write a structured ToolError into the
-                    // conversation and continue to the next tool_use so
-                    // the LLM gets to self-correct on the next turn. We
-                    // do NOT propagate via `?` (which would terminate the
-                    // run via RuntimeError::Tool).
-                    let validator = self.tool_validators().get(tool_use.name.as_str()).expect(
-                        "tool_validators is in 1:1 correspondence with tools \
-                             (Task 3 invariant). If this fires, the registration \
-                             pipeline is broken.",
-                    );
-                    if let Err(reason) = crate::tool_args::validate_tool_args(
-                        &tool_use.input,
-                        &tool_use.name,
-                        validator,
-                    ) {
-                        let ToolError::BadArgs { reason } = reason else {
-                            // validate_tool_args only emits BadArgs in v0.1 — defensive.
-                            // Reach here only if the validator's contract changes.
-                            let _ = tool.teardown(()).await;
-                            return Err(RuntimeError::from(reason));
-                        };
-                        warn!(
-                            name = "tool.args_validation_failed",
-                            tool_name = %tool_use.name,
-                        );
-                        // Best-effort teardown so the plugin gets a chance
-                        // to clean up, mirroring the existing Err(invoke_err)
-                        // arm at line 444-445. Errors here are swallowed.
-                        let _ = tool.teardown(()).await;
-                        // Write the validation error into the conversation
-                        // as a MessagePayload::ToolError so the LLM sees it
-                        // next turn and self-corrects.
-                        messages.push(Message::new(
-                            tool_addr.clone(),
-                            agent_addr.clone(),
-                            MessagePayload::ToolError {
-                                kind: "tool_args_validation".into(),
-                                message: reason,
-                                details: None,
-                            },
-                        ));
-                        trace!(name = "message.added", kind = "tool_error");
-                        continue; // advance to next tool_use; the loop survives
-                    }
-                    let outcome = tool
-                        .invoke(&ctx, &mut (), tool_use.input.clone())
-                        .instrument(invoke_span)
-                        .await;
-                    match outcome {
-                        Ok(r) => {
-                            debug!(
-                                name = "tool.result_received",
-                                tool_name = %tool_use.name,
-                                is_error = r.is_error,
-                                content_blocks = r.content.len(),
-                            );
-                            r
-                        }
-                        Err(err) => {
-                            warn!(
-                                name = "tool.invoke_failed",
-                                tool_name = %tool_use.name,
-                            );
-                            // Best-effort teardown so the plugin gets a
-                            // chance to clean up before we abort. Errors
-                            // here are swallowed: the original `err`
-                            // is the more useful diagnostic.
-                            let _ = tool.teardown(()).await;
-                            return Err(RuntimeError::from(err));
-                        }
-                    }
-                };
-
-                // ----- Close the session ------------------------------------
-                {
-                    let session_close_span =
-                        info_span!("tool.session_close", tool_name = %tool_use.name);
-                    if let Err(err) = tool.teardown(()).instrument(session_close_span).await {
-                        warn!(
-                            name = "tool.session_close_failed",
-                            tool_name = %tool_use.name,
-                        );
-                        return Err(RuntimeError::from(err));
-                    }
-                }
-
-                // ----- Append the tool-result message -----------------------
-                let result_payload = if tool_result.is_error {
-                    MessagePayload::ToolError {
-                        kind: "tool_runtime_error".into(),
-                        message: flatten_content_to_string(&tool_result.content),
-                        details: None,
-                    }
-                } else {
-                    MessagePayload::ToolResult {
-                        body: content_to_value(&tool_result.content),
-                    }
-                };
-                messages.push(Message::new(tool_addr, agent_addr, result_payload));
-                trace!(
-                    name = "message.added",
-                    kind = if tool_result.is_error {
-                        "tool_error"
-                    } else {
-                        "tool_result"
-                    },
-                );
-            }
-
-            debug!(name = "runtime.turn_completed", turn = total_turns);
-        }
-
-        // ----- max_turns reached -------------------------------------------
-        warn!(
-            name = "runtime.max_turns_reached",
-            max_turns = options.max_turns
-        );
-        let outcome = RunOutcome::Failed {
-            status: AgentStatus::failed(
-                FailureKind::OutOfResources,
-                Some(format!("max_turns ({}) reached", options.max_turns)),
-            ),
-            all_messages: messages,
-            total_turns,
-            token_usage: aggregated_tokens,
-        };
-        info!(name = "runtime.run_failed", kind = "out_of_resources");
-        Ok(outcome)
     }
 
     /// Run an agent through one solo-path multi-turn iteration with no
@@ -697,6 +329,9 @@ pub(crate) fn agent_messages_to_provider_messages(history: &[Message]) -> Vec<Ll
 ///   one per `tool_use`. This keeps the history's cause-effect order
 ///   consistent: text before any tool call, then the tool call paired
 ///   immediately with its result.
+///
+/// Now only called from unit tests (the agent loop moved to stream.rs).
+#[cfg(test)]
 pub(crate) fn append_assistant_response(
     history: &mut Vec<Message>,
     text: &str,
@@ -735,25 +370,11 @@ pub(crate) fn append_assistant_response(
 /// Truncate `s` to at most `n` characters (Unicode scalar values),
 /// preserving UTF-8 boundaries. Returns an owned `String`. Used for
 /// DEBUG-level previews.
+///
+/// Now only called from unit tests (the agent loop moved to stream.rs).
+#[cfg(test)]
 fn truncate_to_chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
-}
-
-/// Format a [`Value`] into a single short string preview for logging.
-fn preview_value(v: &Value, n: usize) -> String {
-    let raw = match v {
-        Value::Null => "null".to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Integer(i) => i.to_string(),
-        Value::Float(f) => f.to_string(),
-        Value::String(s) => format!("\"{s}\""),
-        Value::Bytes(b) => format!("<{} bytes>", b.len()),
-        Value::Array(_) | Value::Object(_) => format!("{v:?}"),
-        // `Value` is `#[non_exhaustive]`; future variants degrade to a
-        // generic Debug-format preview rather than mis-classifying.
-        _ => format!("{v:?}"),
-    };
-    truncate_to_chars(&raw, n)
 }
 
 /// Flatten a tool's content blocks into a single human-readable string,

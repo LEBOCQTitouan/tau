@@ -47,10 +47,12 @@ impl LlmBackend for RecordingLlm {
         Ok(self.response.clone())
     }
 
-    async fn stream(&self, _req: CompletionRequest) -> Result<CompletionStream, LlmError> {
-        // Not exercised by the run loop's batch path; leave unimplemented
-        // so accidental use during a refactor surfaces immediately.
-        unimplemented!("RecordingLlm::stream is not used by Runtime::run_with_history")
+    async fn stream(&self, req: CompletionRequest) -> Result<CompletionStream, LlmError> {
+        // run_with_history now delegates to run_streaming_with_history,
+        // so stream() is the live path. Record the request (same as
+        // complete()) and return the canned response as a batch stream.
+        let resp = self.complete(req).await?;
+        Ok(tau_ports::batch_to_stream(resp))
     }
 }
 

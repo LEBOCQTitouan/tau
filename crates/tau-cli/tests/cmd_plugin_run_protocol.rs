@@ -82,8 +82,11 @@ fn plugin_protocol_decode_emits_human_readable_transcript() {
         .stdout(predicate::str::contains("h2p"))
         .stdout(predicate::str::contains("p2h"))
         // Wire methods that appear on a happy-path turn after the
-        // (un-recorded) handshake completes.
-        .stdout(predicate::str::contains("llm.complete"));
+        // (un-recorded) handshake completes. run_with_history now
+        // delegates to run_streaming_with_history, so the kernel uses
+        // the streaming LLM method (llm.stream) rather than the batch
+        // method (llm.complete) on every run.
+        .stdout(predicate::str::contains("llm.stream"));
 }
 
 #[test]
@@ -137,10 +140,12 @@ fn plugin_protocol_decode_json_emits_structured_lines() {
             serde_json::from_str(line).expect("each --json line must be valid JSON");
         assert!(v.get("plugin").is_some(), "missing `plugin`: {line}");
         assert!(v.get("dir").is_some(), "missing `dir`: {line}");
-        if v["method"] == "llm.complete" {
+        // run_with_history now delegates to run_streaming_with_history,
+        // so the kernel uses llm.stream (not llm.complete) on every run.
+        if v["method"] == "llm.stream" {
             saw_complete = true;
         }
     }
     assert!(line_count > 0, "decoded transcript was empty");
-    assert!(saw_complete, "decoded transcript missing llm.complete");
+    assert!(saw_complete, "decoded transcript missing llm.stream");
 }

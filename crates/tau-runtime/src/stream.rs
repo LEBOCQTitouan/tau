@@ -103,6 +103,24 @@ pub enum RunEvent {
         /// Final outcome — same shape as `Runtime::run` returns.
         outcome: RunOutcome,
     },
+
+    /// Kernel-level fatal error (ADR-0006 § error dichotomy). In the
+    /// batch path (`run_with_history` / `run`), the drainer converts
+    /// this to `Err(RuntimeError)`. Streaming callers should treat
+    /// this as an unrecoverable run abort.
+    ///
+    /// Distinct from `RunCompleted { Failed { BackendError } }` which
+    /// signals an agent-level failure the caller can handle gracefully.
+    FatalError {
+        /// `RuntimeError` variant name for structured dispatch.
+        /// One of: `"ToolNotRegistered"`, `"Llm"`, `"Tool"`, `"Internal"`.
+        kind: String,
+        /// Human-readable detail / primary error message.
+        detail: String,
+        /// Optional extra context (e.g. `tool_name`, `registered` list).
+        /// Encoded as a JSON string for simplicity across crate boundaries.
+        context_json: Option<String>,
+    },
 }
 
 /// Build the stream of `RunEvent`s for a single agent run.
@@ -144,7 +162,7 @@ pub(crate) fn run_streaming_inner(
         let mut total_turns: u32 = 0;
         let mut aggregated_tokens = crate::options::TokenUsage::default();
 
-        info!(name = "runtime.streaming_run_started");
+        info!(name = "runtime.run_started");
 
         // max_turns guard: immediately report out-of-resources if 0.
         if options.max_turns == 0 {
@@ -156,18 +174,23 @@ pub(crate) fn run_streaming_inner(
         // OR max_turns is reached.
         while total_turns < options.max_turns {
             total_turns += 1;
-            debug!(name = "runtime.streaming_turn_started", turn = total_turns);
+            debug!(name = "runtime.turn_started", turn = total_turns);
 
             let mut request = CompletionRequest::new(agent_def.llm_backend.as_str().into());
             request.system = agent_def.system_prompt.clone();
             request.messages = crate::run::agent_messages_to_provider_messages(&messages);
             request.tools = tool_specs.clone();
+            debug!(
+                name = "llm.request_built",
+                messages = request.messages.len(),
+                tools = request.tools.len(),
+            );
 
             let mut llm_stream = match backend.stream(request).await {
                 Ok(s) => s,
                 Err(llm_err) => {
                     warn!(name = "runtime.streaming_llm_open_failed");
-                    yield make_llm_error_outcome(llm_err, messages, total_turns, aggregated_tokens);
+                    yield make_llm_fatal_error(llm_err);
                     return;
                 }
             };
@@ -209,18 +232,20 @@ pub(crate) fn run_streaming_inner(
                     }
                     Some(Err(llm_err)) => {
                         warn!(name = "runtime.streaming_llm_chunk_err");
-                        yield make_llm_error_outcome(
-                            llm_err,
-                            messages,
-                            total_turns,
-                            aggregated_tokens,
-                        );
+                        yield make_llm_fatal_error(llm_err);
                         return;
                     }
                     // CompletionChunk is #[non_exhaustive]; ignore unknown variants.
                     Some(Ok(_)) => {}
                 }
             }
+
+            debug!(
+                name = "llm.response_received",
+                text_len = accumulated_text.len(),
+                tool_uses = pending_tool_uses.len(),
+                stop_reason = ?turn_stop_reason,
+            );
 
             // Append assistant text to history if present.
             if !accumulated_text.is_empty() {
@@ -246,6 +271,7 @@ pub(crate) fn run_streaming_inner(
 
             // No tool uses → end of run.
             if pending_tool_uses.is_empty() {
+                debug!(name = "runtime.loop_terminated", reason = "end_turn");
                 yield RunEvent::TurnCompleted {
                     stop_reason: turn_stop_reason.unwrap_or(StopReason::EndTurn),
                     usage: turn_usage,
@@ -256,6 +282,11 @@ pub(crate) fn run_streaming_inner(
                     .last()
                     .cloned()
                     .expect("messages contains at least the initial user message");
+                info!(
+                    name = "runtime.run_completed",
+                    total_turns,
+                    all_messages = messages.len(),
+                );
                 yield RunEvent::RunCompleted {
                     outcome: RunOutcome::Completed {
                         final_message,
@@ -279,20 +310,18 @@ pub(crate) fn run_streaming_inner(
                 let tool = match tools.get(tool_use.name.as_str()) {
                     Some(t) => t.clone(),
                     None => {
-                        // Tool not in the snapshot — terminate the run as a
-                        // backend error (unexpected LLM behavior).
+                        // Tool not in the snapshot — fatal kernel error
+                        // (unexpected LLM behavior). The batch drainer
+                        // will convert this to RuntimeError::ToolNotRegistered.
                         warn!(
                             name = "runtime.streaming_tool_not_found",
                             tool_name = %tool_use.name,
                         );
-                        let err = tau_ports::ToolError::Internal {
-                            message: format!("tool `{}` not registered", tool_use.name),
-                        };
-                        yield make_backend_error_outcome(
-                            err,
-                            messages,
-                            total_turns,
-                            aggregated_tokens,
+                        let registered: Vec<String> =
+                            tools.keys().cloned().collect();
+                        yield make_tool_not_registered_error(
+                            &tool_use.name,
+                            &registered,
                         );
                         return;
                     }
@@ -346,7 +375,7 @@ pub(crate) fn run_streaming_inner(
                         name = "tool.session_open_failed",
                         tool_name = %tool_use.name,
                     );
-                    yield make_backend_error_outcome(err, messages, total_turns, aggregated_tokens);
+                    yield make_tool_fatal_error(err);
                     return;
                 }
 
@@ -391,12 +420,7 @@ pub(crate) fn run_streaming_inner(
                         // Defensive: validate_tool_args only emits BadArgs
                         // in v0.1 — reach here only if the contract changes.
                         let _ = tool.teardown(()).await;
-                        yield make_backend_error_outcome(
-                            other,
-                            messages,
-                            total_turns,
-                            aggregated_tokens,
-                        );
+                        yield make_tool_fatal_error(other);
                         return;
                     }
                     Ok(_) => {} // proceed to invoke
@@ -412,12 +436,7 @@ pub(crate) fn run_streaming_inner(
                             tool_name = %tool_use.name,
                         );
                         let _ = tool.teardown(()).await; // best-effort
-                        yield make_backend_error_outcome(
-                            err,
-                            messages,
-                            total_turns,
-                            aggregated_tokens,
-                        );
+                        yield make_tool_fatal_error(err);
                         return;
                     }
                 };
@@ -428,7 +447,7 @@ pub(crate) fn run_streaming_inner(
                         name = "tool.session_close_failed",
                         tool_name = %tool_use.name,
                     );
-                    yield make_backend_error_outcome(err, messages, total_turns, aggregated_tokens);
+                    yield make_tool_fatal_error(err);
                     return;
                 }
 
@@ -480,40 +499,42 @@ pub(crate) fn run_streaming_inner(
 // Outcome helpers
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)] // wired up by Task 4
-fn make_llm_error_outcome(
-    llm_err: LlmError,
-    messages: Vec<Message>,
-    total_turns: u32,
-    token_usage: crate::options::TokenUsage,
-) -> RunEvent {
-    use tau_domain::{AgentStatus, FailureKind};
-    let detail = format!("{llm_err}");
-    RunEvent::RunCompleted {
-        outcome: RunOutcome::Failed {
-            status: AgentStatus::failed(FailureKind::BackendError, Some(detail)),
-            all_messages: messages,
-            total_turns,
-            token_usage,
-        },
+// FatalError helpers: emit RunEvent::FatalError so the batch-path
+// drainer (run_with_history) can convert them back to Err(RuntimeError),
+// preserving the ADR-0006 error/failure dichotomy. Streaming callers
+// (run_streaming_with_history) should treat FatalError as a run abort.
+
+/// LLM-side fatal error (backend.stream / chunk error).
+/// Drainer converts to Err(RuntimeError::Llm(_)) or Internal.
+fn make_llm_fatal_error(llm_err: LlmError) -> RunEvent {
+    RunEvent::FatalError {
+        kind: "Llm".to_string(),
+        detail: format!("{llm_err}"),
+        context_json: None,
     }
 }
 
-fn make_backend_error_outcome(
-    err: impl std::fmt::Display,
-    messages: Vec<Message>,
-    total_turns: u32,
-    token_usage: crate::options::TokenUsage,
-) -> RunEvent {
-    use tau_domain::{AgentStatus, FailureKind};
-    let detail = format!("{err}");
-    RunEvent::RunCompleted {
-        outcome: RunOutcome::Failed {
-            status: AgentStatus::failed(FailureKind::BackendError, Some(detail)),
-            all_messages: messages,
-            total_turns,
-            token_usage,
-        },
+/// Tool-side fatal error (init / invoke / teardown failure).
+/// Drainer converts to Err(RuntimeError::Tool(_)) or Internal.
+fn make_tool_fatal_error(err: impl std::fmt::Display) -> RunEvent {
+    RunEvent::FatalError {
+        kind: "Tool".to_string(),
+        detail: format!("{err}"),
+        context_json: None,
+    }
+}
+
+/// Tool-not-registered fatal error.
+/// Drainer converts to Err(RuntimeError::ToolNotRegistered { .. }).
+fn make_tool_not_registered_error(tool_name: &str, registered: &[String]) -> RunEvent {
+    let context = serde_json::json!({
+        "tool_name": tool_name,
+        "registered": registered,
+    });
+    RunEvent::FatalError {
+        kind: "ToolNotRegistered".to_string(),
+        detail: format!("tool `{tool_name}` not registered; registered: {registered:?}"),
+        context_json: Some(context.to_string()),
     }
 }
 
@@ -817,10 +838,11 @@ mod tests {
         let events = collect_events(Box::pin(stream)).await;
 
         assert_eq!(events.len(), 2, "got events: {events:#?}");
-        let RunEvent::RunCompleted { outcome } = &events[1] else {
-            panic!("expected RunCompleted, got {:?}", events[1])
+        // events[0] = TextDelta("Hello"), events[1] = FatalError{kind="Llm"}
+        let RunEvent::FatalError { kind, .. } = &events[1] else {
+            panic!("expected FatalError, got {:?}", events[1])
         };
-        assert!(matches!(outcome, RunOutcome::Failed { .. }));
+        assert_eq!(kind, "Llm", "expected Llm fatal error kind");
     }
 
     #[tokio::test]
@@ -862,7 +884,11 @@ mod tests {
         let events = collect_events(Box::pin(stream)).await;
 
         assert_eq!(events.len(), 1, "got events: {events:#?}");
-        assert!(matches!(events[0], RunEvent::RunCompleted { .. }));
+        // LLM open failure → FatalError{kind="Llm"} (batch drainer converts to Err(RuntimeError::Llm)).
+        let RunEvent::FatalError { kind, .. } = &events[0] else {
+            panic!("expected FatalError, got {:?}", events[0])
+        };
+        assert_eq!(kind, "Llm", "expected Llm fatal error kind");
     }
 
     // ---- Task 4 tests: tool-dispatch flow ----
@@ -1271,22 +1297,19 @@ paths = ["/etc/**"]
         );
         let events = collect_events(Box::pin(stream)).await;
 
-        // Expected: ToolCallStarted then RunCompleted{Failed}
-        // (no ToolCallCompleted — plugin crash terminates the run)
+        // Expected: ToolCallStarted then FatalError{kind="Tool"}
+        // (no ToolCallCompleted — plugin crash terminates the run;
+        // the batch drainer converts FatalError to Err(RuntimeError::Tool))
         assert_eq!(events.len(), 2, "got events: {events:#?}");
         assert!(
             matches!(&events[0], RunEvent::ToolCallStarted { name, .. } if name == "crashing-tool"),
             "expected ToolCallStarted, got {:?}",
             events[0]
         );
-        let RunEvent::RunCompleted { outcome } = &events[1] else {
-            panic!("expected RunCompleted, got {:?}", events[1])
+        let RunEvent::FatalError { kind, .. } = &events[1] else {
+            panic!("expected FatalError, got {:?}", events[1])
         };
-        assert!(
-            matches!(outcome, RunOutcome::Failed { .. }),
-            "expected Failed outcome, got {:?}",
-            outcome
-        );
+        assert_eq!(kind, "Tool", "expected Tool fatal error kind");
     }
 
     #[tokio::test]
@@ -1550,8 +1573,9 @@ paths = ["/etc/**"]
         //   ToolCallStarted(id_1)  — during chunk drain
         //   ToolCallStarted(id_2)  — during chunk drain
         //   ToolCallCompleted(id_1, Ok)  — first dispatch succeeds
-        //   RunCompleted{Failed{BackendError}}  — second dispatch crashes
+        //   FatalError{kind="Tool"}  — second dispatch crashes
         // No ToolCallCompleted for id_2 — terminal failure replaces it.
+        // The batch drainer converts FatalError → Err(RuntimeError::Tool).
         assert_eq!(events.len(), 4, "got events: {events:#?}");
         assert!(
             matches!(&events[0], RunEvent::ToolCallStarted { id, .. } if id == "id_1"),
@@ -1568,14 +1592,10 @@ paths = ["/etc/**"]
             "expected ToolCallCompleted(id_1) Ok, got {:?}",
             events[2]
         );
-        let RunEvent::RunCompleted { outcome } = &events[3] else {
-            panic!("expected RunCompleted, got {:?}", events[3])
+        let RunEvent::FatalError { kind, .. } = &events[3] else {
+            panic!("expected FatalError, got {:?}", events[3])
         };
-        assert!(
-            matches!(outcome, RunOutcome::Failed { .. }),
-            "expected Failed outcome, got {:?}",
-            outcome
-        );
+        assert_eq!(kind, "Tool", "expected Tool fatal error kind");
     }
 
     #[tokio::test]

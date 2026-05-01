@@ -57,7 +57,16 @@ impl LlmBackend for ScriptedLlm {
     }
 
     async fn stream(&self, _req: CompletionRequest) -> Result<CompletionStream, LlmError> {
-        unimplemented!("ScriptedLlm only supports complete()")
+        self.invocations.fetch_add(1, Ordering::SeqCst);
+        let resp = self
+            .responses
+            .lock()
+            .expect("responses mutex poisoned")
+            .pop_front()
+            .ok_or_else(|| LlmError::Internal {
+                message: "ScriptedLlm: no more scripted responses".into(),
+            })?;
+        Ok(tau_ports::batch_to_stream(resp))
     }
 }
 

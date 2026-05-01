@@ -141,8 +141,9 @@ impl LlmBackend for OneShotFsReadLlm {
         ))
     }
 
-    async fn stream(&self, _req: CompletionRequest) -> Result<CompletionStream, LlmError> {
-        unimplemented!("OneShotFsReadLlm only supports complete()")
+    async fn stream(&self, req: CompletionRequest) -> Result<CompletionStream, LlmError> {
+        let resp = self.complete(req).await?;
+        Ok(tau_ports::batch_to_stream(resp))
     }
 }
 
@@ -194,8 +195,9 @@ impl LlmBackend for ScriptedFsReadLlm {
             })
     }
 
-    async fn stream(&self, _req: CompletionRequest) -> Result<CompletionStream, LlmError> {
-        unimplemented!("ScriptedFsReadLlm only supports complete()")
+    async fn stream(&self, req: CompletionRequest) -> Result<CompletionStream, LlmError> {
+        let resp = self.complete(req).await?;
+        Ok(tau_ports::batch_to_stream(resp))
     }
 }
 
