@@ -28,6 +28,7 @@ pub mod resolve;
 pub mod scope;
 pub mod source_list;
 pub mod tree_hash;
+pub mod update;
 pub mod verify;
 
 pub use error::{
@@ -46,4 +47,5 @@ pub use resolve::{
 pub use scope::{Scope, ScopeConfig, ScopeKind};
 pub use source_list::{list_versions_at_source, SourceListError};
 pub use tree_hash::{sha256_of_file, tree_hash, FileHash, TreeHashError};
+pub use update::{update_package, UpdateError, UpdateResult};
 pub use verify::{verify, verify_all, VerifyError, VerifyReport, VerifyStatus};
