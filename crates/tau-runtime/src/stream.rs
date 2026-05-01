@@ -22,7 +22,7 @@ use tau_ports::{
     CompletionChunk, CompletionRequest, DenyEntry, LlmError, SessionContext, StopReason,
     TokenUsage, ToolError, ToolResult, ToolSpec,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info, info_span, warn, Instrument as _};
 
 use crate::builder::{DynLlmBackend, DynTool};
 use crate::options::RunOptions;
@@ -192,7 +192,10 @@ pub(crate) fn run_streaming_inner(
                 tools = request.tools.len(),
             );
 
-            let mut llm_stream = match backend.stream(request).await {
+            let llm_stream_result = async { backend.stream(request).await }
+                .instrument(info_span!("llm.complete"))
+                .await;
+            let mut llm_stream = match llm_stream_result {
                 Ok(s) => s,
                 Err(llm_err) => {
                     warn!(name = "runtime.streaming_llm_open_failed");
