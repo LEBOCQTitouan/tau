@@ -1,18 +1,22 @@
 ---
 source: crates/tau-cli/tests/help_snapshots.rs
-expression: "capture_help(&[\"session\", \"--help\"])"
+expression: "capture_help(&[\"session\", \"delete\", \"--help\"])"
 ---
-Session management (list, show, delete, export)
+Delete a session
 
-Usage: tau session [OPTIONS] <COMMAND>
+Usage: tau session delete [OPTIONS] <ID>
 
-Commands:
-  list    List sessions in the current scope
-  show    Print transcript of a session
-  delete  Delete a session
-  help    Print this message or the help of the given subcommand(s)
+Arguments:
+  <ID>
+          Session id (or 8+ char prefix)
 
 Options:
+      --global
+          Use global scope
+
+      --force
+          Skip the confirmation prompt
+
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
 

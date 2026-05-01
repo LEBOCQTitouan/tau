@@ -162,7 +162,9 @@ pub enum SessionAction {
     List(SessionListArgs),
     /// Print transcript of a session.
     Show(SessionShowArgs),
-    // Delete, Export added in Tasks 9-10.
+    /// Delete a session.
+    Delete(SessionDeleteArgs),
+    // Export added in Task 10.
 }
 
 /// Arguments for `tau session list`.
@@ -189,6 +191,19 @@ pub struct SessionShowArgs {
     /// Use global scope.
     #[arg(long)]
     pub global: bool,
+}
+
+/// Arguments for `tau session delete`.
+#[derive(Args, Debug)]
+pub struct SessionDeleteArgs {
+    /// Session id (or 8+ char prefix).
+    pub id: String,
+    /// Use global scope.
+    #[arg(long)]
+    pub global: bool,
+    /// Skip the confirmation prompt.
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
 }
 
 /// Arguments for `tau init`.

@@ -126,3 +126,8 @@ fn snapshot_session_list_help() {
 fn snapshot_session_show_help() {
     insta::assert_snapshot!(capture_help(&["session", "show", "--help"]));
 }
+
+#[test]
+fn snapshot_session_delete_help() {
+    insta::assert_snapshot!(capture_help(&["session", "delete", "--help"]));
+}
