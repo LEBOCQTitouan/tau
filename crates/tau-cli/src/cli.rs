@@ -164,7 +164,8 @@ pub enum SessionAction {
     Show(SessionShowArgs),
     /// Delete a session.
     Delete(SessionDeleteArgs),
-    // Export added in Task 10.
+    /// Export a session in a specific format.
+    Export(SessionExportArgs),
 }
 
 /// Arguments for `tau session list`.
@@ -204,6 +205,30 @@ pub struct SessionDeleteArgs {
     /// Skip the confirmation prompt.
     #[arg(long, default_value_t = false)]
     pub force: bool,
+}
+
+/// Export format for `tau session export`.
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum ExportFormat {
+    /// Raw JSONL passthrough (cat-equivalent).
+    Jsonl,
+    /// Markdown render (same as `tau session show` human mode).
+    Md,
+    /// Single envelope JSON object containing header + messages.
+    Json,
+}
+
+/// Arguments for `tau session export`.
+#[derive(Args, Debug)]
+pub struct SessionExportArgs {
+    /// Session id (or 8+ char prefix).
+    pub id: String,
+    /// Output format.
+    #[arg(long, value_enum, default_value_t = ExportFormat::Jsonl)]
+    pub format: ExportFormat,
+    /// Use global scope.
+    #[arg(long)]
+    pub global: bool,
 }
 
 /// Arguments for `tau init`.

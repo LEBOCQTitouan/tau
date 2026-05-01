@@ -1,19 +1,29 @@
 ---
 source: crates/tau-cli/tests/help_snapshots.rs
-expression: "capture_help(&[\"session\", \"--help\"])"
+expression: "capture_help(&[\"session\", \"export\", \"--help\"])"
 ---
-Session management (list, show, delete, export)
+Export a session in a specific format
 
-Usage: tau session [OPTIONS] <COMMAND>
+Usage: tau session export [OPTIONS] <ID>
 
-Commands:
-  list    List sessions in the current scope
-  show    Print transcript of a session
-  delete  Delete a session
-  export  Export a session in a specific format
-  help    Print this message or the help of the given subcommand(s)
+Arguments:
+  <ID>
+          Session id (or 8+ char prefix)
 
 Options:
+      --format <FORMAT>
+          Output format
+
+          Possible values:
+          - jsonl: Raw JSONL passthrough (cat-equivalent)
+          - md:    Markdown render (same as `tau session show` human mode)
+          - json:  Single envelope JSON object containing header + messages
+          
+          [default: jsonl]
+
+      --global
+          Use global scope
+
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
 
