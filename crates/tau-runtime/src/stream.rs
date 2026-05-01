@@ -10,18 +10,24 @@
 //! See `docs/superpowers/specs/2026-04-30-streaming-design.md` and
 //! ADR-0011 (added in Task 12).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures_core::Stream;
 use tau_domain::{
-    Address, AgentDefinition, AgentInstanceId, Message, MessagePayload, PackageManifest, Value,
+    Address, AgentDefinition, AgentInstanceId, Capability, Message, MessagePayload,
+    PackageManifest, Value,
 };
-use tau_ports::{CompletionChunk, CompletionRequest, LlmError, StopReason, TokenUsage, ToolResult};
+use tau_ports::{
+    CompletionChunk, CompletionRequest, DenyEntry, LlmError, SessionContext, StopReason,
+    TokenUsage, ToolError, ToolResult, ToolSpec,
+};
 use tracing::{debug, info, warn};
 
-use crate::builder::DynLlmBackend;
+use crate::builder::{DynLlmBackend, DynTool};
 use crate::options::RunOptions;
 use crate::outcome::RunOutcome;
+use crate::tool_args::ToolArgsValidator;
 
 /// Streaming event from `Runtime::run_streaming`.
 ///
@@ -99,14 +105,23 @@ pub enum RunEvent {
     },
 }
 
-/// Build the stream of `RunEvent`s for a single agent run. Happy
-/// path: drains the LLM stream, yields `TextDelta` per chunk, then
-/// `TurnCompleted` + `RunCompleted` once `Finish` arrives. No tool
-/// dispatch in this commit (Task 4 adds it).
+/// Build the stream of `RunEvent`s for a single agent run.
+///
+/// Happy path (no tool uses): drains the LLM stream, yields `TextDelta`
+/// per chunk, then `TurnCompleted` + `RunCompleted` once `Finish` arrives.
+///
+/// Tool-dispatch path: for each `ToolUse` chunk, yields
+/// `ToolCallStarted` immediately (per spec Q3-A: display intent). After
+/// `Finish`, dispatches each tool with capability check + schema
+/// validation + session open/invoke/teardown, yielding
+/// `ToolCallCompleted` per tool. Then `TurnCompleted` and loops back
+/// to the next turn. Terminates with `RunCompleted{Completed}` when
+/// the LLM responds with no tool uses.
 ///
 /// Constructed inputs are pre-validated by the caller in Task 6
 /// (`Runtime::run_streaming`); here we trust them.
 #[allow(dead_code)] // wired up by Task 6
+#[allow(clippy::too_many_arguments)] // 12 params intentional: see Task 4 design doc
 pub(crate) fn run_streaming_inner(
     backend: Arc<dyn DynLlmBackend>,
     agent_def: AgentDefinition,
@@ -114,6 +129,12 @@ pub(crate) fn run_streaming_inner(
     history: Vec<Message>,
     initial_message: Message,
     options: RunOptions,
+    tools: HashMap<String, Arc<dyn DynTool>>,
+    tool_validators: HashMap<String, ToolArgsValidator>,
+    granted_capabilities: Vec<Capability>,
+    tool_specs: Vec<ToolSpec>,
+    deny_entries: Vec<DenyEntry>,
+    granted_for_session: Vec<Capability>,
 ) -> impl Stream<Item = RunEvent> + 'static {
     async_stream::stream! {
         let agent_instance_id = AgentInstanceId::new();
@@ -125,108 +146,339 @@ pub(crate) fn run_streaming_inner(
 
         info!(name = "runtime.streaming_run_started");
 
-        // max_turns guard: text-only path runs exactly one turn (Task 4 adds
-        // the tool-dispatch loop that iterates until Finish without ToolUse).
+        // max_turns guard: immediately report out-of-resources if 0.
         if options.max_turns == 0 {
             yield make_max_turns_outcome(messages, total_turns, aggregated_tokens, options.max_turns);
             return;
         }
 
-        total_turns += 1;
-        debug!(name = "runtime.streaming_turn_started", turn = total_turns);
+        // Multi-turn loop: continues until LLM responds with no tool uses
+        // OR max_turns is reached.
+        while total_turns < options.max_turns {
+            total_turns += 1;
+            debug!(name = "runtime.streaming_turn_started", turn = total_turns);
 
-        let mut request = CompletionRequest::new(agent_def.llm_backend.as_str().into());
-        request.system = agent_def.system_prompt.clone();
-        request.messages = crate::run::agent_messages_to_provider_messages(&messages);
-        request.tools = Vec::new();
+            let mut request = CompletionRequest::new(agent_def.llm_backend.as_str().into());
+            request.system = agent_def.system_prompt.clone();
+            request.messages = crate::run::agent_messages_to_provider_messages(&messages);
+            request.tools = tool_specs.clone();
 
-        let mut llm_stream = match backend.stream(request).await {
-            Ok(s) => s,
-            Err(llm_err) => {
-                warn!(name = "runtime.streaming_llm_open_failed");
-                yield make_llm_error_outcome(llm_err, messages, total_turns, aggregated_tokens);
+            let mut llm_stream = match backend.stream(request).await {
+                Ok(s) => s,
+                Err(llm_err) => {
+                    warn!(name = "runtime.streaming_llm_open_failed");
+                    yield make_llm_error_outcome(llm_err, messages, total_turns, aggregated_tokens);
+                    return;
+                }
+            };
+
+            let mut accumulated_text = String::new();
+            let mut turn_stop_reason: Option<StopReason> = None;
+            let mut turn_usage: Option<TokenUsage> = None;
+            let mut pending_tool_uses: Vec<tau_ports::ToolUse> = Vec::new();
+
+            // Drain the LLM stream for this turn.
+            // CompletionStream is Pin<Box<dyn Stream + Send>>; .as_mut() gives Pin<&mut S>.
+            loop {
+                let next = std::future::poll_fn(|cx| llm_stream.as_mut().poll_next(cx)).await;
+                match next {
+                    None => break,
+                    Some(Ok(CompletionChunk::Text { delta })) => {
+                        accumulated_text.push_str(&delta);
+                        yield RunEvent::TextDelta { delta };
+                    }
+                    Some(Ok(CompletionChunk::ToolUse(tool_use))) => {
+                        // Per spec Q3-A: yield ToolCallStarted immediately on
+                        // receipt — display intent BEFORE dispatch.
+                        debug!(
+                            name = "runtime.streaming_tool_use_received",
+                            id = %tool_use.id,
+                            tool_name = %tool_use.name,
+                        );
+                        yield RunEvent::ToolCallStarted {
+                            id: tool_use.id.clone(),
+                            name: tool_use.name.clone(),
+                            args: tool_use.input.clone(),
+                        };
+                        pending_tool_uses.push(tool_use);
+                    }
+                    Some(Ok(CompletionChunk::Finish { stop_reason, usage })) => {
+                        turn_stop_reason = Some(stop_reason);
+                        turn_usage = usage;
+                        break;
+                    }
+                    Some(Err(llm_err)) => {
+                        warn!(name = "runtime.streaming_llm_chunk_err");
+                        yield make_llm_error_outcome(
+                            llm_err,
+                            messages,
+                            total_turns,
+                            aggregated_tokens,
+                        );
+                        return;
+                    }
+                    // CompletionChunk is #[non_exhaustive]; ignore unknown variants.
+                    Some(Ok(_)) => {}
+                }
+            }
+
+            // Append assistant text to history if present.
+            if !accumulated_text.is_empty() {
+                let agent_addr = Address::Agent(agent_instance_id);
+                messages.push(Message::new(
+                    agent_addr,
+                    Address::User,
+                    MessagePayload::Text {
+                        content: accumulated_text.clone(),
+                    },
+                ));
+            }
+
+            // Accumulate token usage.
+            if let Some(usage) = turn_usage {
+                aggregated_tokens.input_tokens = aggregated_tokens
+                    .input_tokens
+                    .saturating_add(u64::from(usage.input_tokens));
+                aggregated_tokens.output_tokens = aggregated_tokens
+                    .output_tokens
+                    .saturating_add(u64::from(usage.output_tokens));
+            }
+
+            // No tool uses → end of run.
+            if pending_tool_uses.is_empty() {
+                yield RunEvent::TurnCompleted {
+                    stop_reason: turn_stop_reason.unwrap_or(StopReason::EndTurn),
+                    usage: turn_usage,
+                    turn: total_turns,
+                };
+
+                let final_message = messages
+                    .last()
+                    .cloned()
+                    .expect("messages contains at least the initial user message");
+                yield RunEvent::RunCompleted {
+                    outcome: RunOutcome::Completed {
+                        final_message,
+                        all_messages: messages,
+                        total_turns,
+                        token_usage: aggregated_tokens,
+                    },
+                };
                 return;
             }
-        };
 
-        let mut accumulated_text = String::new();
-        let mut turn_stop_reason: Option<StopReason> = None;
-        let mut turn_usage: Option<TokenUsage> = None;
+            // ----- Per-tool dispatch ----------------------------------------
+            for tool_use in &pending_tool_uses {
+                debug!(
+                    name = "llm.streaming_tool_use_dispatching",
+                    id = %tool_use.id,
+                    tool_name = %tool_use.name,
+                );
 
-        // CompletionStream is Pin<Box<dyn Stream + Send>>; .as_mut() gives Pin<&mut S>.
-        loop {
-            let next = std::future::poll_fn(|cx| llm_stream.as_mut().poll_next(cx)).await;
-            match next {
-                None => break,
-                Some(Ok(CompletionChunk::Text { delta })) => {
-                    accumulated_text.push_str(&delta);
-                    yield RunEvent::TextDelta { delta };
-                }
-                Some(Ok(CompletionChunk::ToolUse(_))) => {
-                    // Task 4 handles this. Happy-path text-only tests don't trigger it.
-                    warn!(name = "runtime.streaming_tool_use_unhandled_in_task_3");
-                }
-                Some(Ok(CompletionChunk::Finish { stop_reason, usage })) => {
-                    turn_stop_reason = Some(stop_reason);
-                    turn_usage = usage;
-                    break;
-                }
-                Some(Err(llm_err)) => {
-                    warn!(name = "runtime.streaming_llm_chunk_err");
-                    yield make_llm_error_outcome(
-                        llm_err,
+                // Resolve the tool from the registry snapshot.
+                let tool = match tools.get(tool_use.name.as_str()) {
+                    Some(t) => t.clone(),
+                    None => {
+                        // Tool not in the snapshot — terminate the run as a
+                        // backend error (unexpected LLM behavior).
+                        warn!(
+                            name = "runtime.streaming_tool_not_found",
+                            tool_name = %tool_use.name,
+                        );
+                        let err = tau_ports::ToolError::Internal {
+                            message: format!("tool `{}` not registered", tool_use.name),
+                        };
+                        yield make_backend_error_outcome(
+                            err,
+                            messages,
+                            total_turns,
+                            aggregated_tokens,
+                        );
+                        return;
+                    }
+                };
+
+                // ----- Capability check -------------------------------------
+                let required: &[Capability] = tool.capabilities();
+                let missing =
+                    crate::capability::check_capabilities(&granted_capabilities, required);
+                if let Some(cap) = missing {
+                    let kind = crate::run::capability_kind_str(cap);
+                    warn!(
+                        name = "capability.deny",
+                        tool_name = %tool_use.name,
+                        missing_kind = %kind,
+                    );
+                    let denial = crate::error::CapabilityDenial {
+                        agent_id: agent_def.id.to_string(),
+                        package_id: agent_def.package.name.to_string(),
+                        tool_name: tool_use.name.clone(),
+                        required_kind: kind,
+                        required_detail: format!("{cap:?}"),
+                    };
+                    let outcome = crate::run::build_policy_denied_outcome(
+                        denial,
                         messages,
                         total_turns,
                         aggregated_tokens,
                     );
+                    yield RunEvent::RunCompleted { outcome };
                     return;
                 }
-                // CompletionChunk is #[non_exhaustive]; ignore unknown variants.
-                Some(Ok(_)) => {}
+
+                // ----- Append the tool-call message -------------------------
+                let agent_addr = Address::Agent(agent_instance_id);
+                let tool_addr = Address::Tool(tool_use.name.clone());
+                messages.push(Message::new(
+                    agent_addr.clone(),
+                    tool_addr.clone(),
+                    MessagePayload::ToolCall {
+                        args: tool_use.input.clone(),
+                    },
+                ));
+
+                // ----- Open a session ---------------------------------------
+                let ctx = SessionContext::new(agent_instance_id, uuid::Uuid::new_v4(), None)
+                    .with_granted_capabilities(granted_for_session.clone())
+                    .with_deny_entries(deny_entries.clone());
+                if let Err(err) = tool.init(ctx.clone()).await {
+                    warn!(
+                        name = "tool.session_open_failed",
+                        tool_name = %tool_use.name,
+                    );
+                    yield make_backend_error_outcome(err, messages, total_turns, aggregated_tokens);
+                    return;
+                }
+
+                // ----- Schema validation ------------------------------------
+                let validator = tool_validators.get(tool_use.name.as_str()).expect(
+                    "tool_validators is in 1:1 correspondence with tools \
+                     (Task 4 invariant). If this fires, the registration \
+                     pipeline is broken.",
+                );
+                match crate::tool_args::validate_tool_args(
+                    &tool_use.input,
+                    &tool_use.name,
+                    validator,
+                ) {
+                    Err(ToolError::BadArgs { reason }) => {
+                        // Validation failure is recoverable: write a
+                        // ToolError message into the conversation so the
+                        // LLM gets to self-correct, then yield
+                        // ToolCallCompleted with Err and continue.
+                        let _ = tool.teardown(()).await; // best-effort
+                        warn!(
+                            name = "tool.args_validation_failed",
+                            tool_name = %tool_use.name,
+                        );
+                        messages.push(Message::new(
+                            tool_addr.clone(),
+                            agent_addr.clone(),
+                            MessagePayload::ToolError {
+                                kind: "tool_args_validation".into(),
+                                message: reason.clone(),
+                                details: None,
+                            },
+                        ));
+                        yield RunEvent::ToolCallCompleted {
+                            id: tool_use.id.clone(),
+                            name: tool_use.name.clone(),
+                            result: Err(reason),
+                        };
+                        continue; // next tool_use
+                    }
+                    Err(other) => {
+                        // Defensive: validate_tool_args only emits BadArgs
+                        // in v0.1 — reach here only if the contract changes.
+                        let _ = tool.teardown(()).await;
+                        yield make_backend_error_outcome(
+                            other,
+                            messages,
+                            total_turns,
+                            aggregated_tokens,
+                        );
+                        return;
+                    }
+                    Ok(_) => {} // proceed to invoke
+                }
+
+                // ----- Invoke -----------------------------------------------
+                let invoke_outcome = tool.invoke(&ctx, &mut (), tool_use.input.clone()).await;
+                let tool_result: ToolResult = match invoke_outcome {
+                    Ok(r) => r,
+                    Err(err) => {
+                        warn!(
+                            name = "tool.invoke_failed",
+                            tool_name = %tool_use.name,
+                        );
+                        let _ = tool.teardown(()).await; // best-effort
+                        yield make_backend_error_outcome(
+                            err,
+                            messages,
+                            total_turns,
+                            aggregated_tokens,
+                        );
+                        return;
+                    }
+                };
+
+                // ----- Close the session ------------------------------------
+                if let Err(err) = tool.teardown(()).await {
+                    warn!(
+                        name = "tool.session_close_failed",
+                        tool_name = %tool_use.name,
+                    );
+                    yield make_backend_error_outcome(err, messages, total_turns, aggregated_tokens);
+                    return;
+                }
+
+                // ----- Append the tool-result message ----------------------
+                let result_payload = if tool_result.is_error {
+                    MessagePayload::ToolError {
+                        kind: "tool_runtime_error".into(),
+                        message: crate::run::flatten_content_to_string(&tool_result.content),
+                        details: None,
+                    }
+                } else {
+                    MessagePayload::ToolResult {
+                        body: crate::run::content_to_value(&tool_result.content),
+                    }
+                };
+                messages.push(Message::new(
+                    tool_addr,
+                    agent_addr,
+                    result_payload,
+                ));
+
+                yield RunEvent::ToolCallCompleted {
+                    id: tool_use.id.clone(),
+                    name: tool_use.name.clone(),
+                    result: Ok(tool_result),
+                };
             }
+            // End of per-tool dispatch for this turn.
+
+            yield RunEvent::TurnCompleted {
+                stop_reason: turn_stop_reason.unwrap_or(StopReason::ToolUse),
+                usage: turn_usage,
+                turn: total_turns,
+            };
+
+            // Loop back for the next turn (LLM will see tool results).
         }
 
-        if !accumulated_text.is_empty() {
-            let agent_addr = Address::Agent(agent_instance_id);
-            messages.push(Message::new(
-                agent_addr,
-                Address::User,
-                MessagePayload::Text {
-                    content: accumulated_text.clone(),
-                },
-            ));
-        }
-
-        if let Some(usage) = turn_usage {
-            aggregated_tokens.input_tokens = aggregated_tokens
-                .input_tokens
-                .saturating_add(u64::from(usage.input_tokens));
-            aggregated_tokens.output_tokens = aggregated_tokens
-                .output_tokens
-                .saturating_add(u64::from(usage.output_tokens));
-        }
-
-        yield RunEvent::TurnCompleted {
-            stop_reason: turn_stop_reason.unwrap_or(StopReason::EndTurn),
-            usage: turn_usage,
-            turn: total_turns,
-        };
-
-        // No tool dispatch yet (Task 4). End the run after the first Finish.
-        let final_message = messages
-            .last()
-            .cloned()
-            .expect("messages contains at least the initial user message");
-        yield RunEvent::RunCompleted {
-            outcome: RunOutcome::Completed {
-                final_message,
-                all_messages: messages,
-                total_turns,
-                token_usage: aggregated_tokens,
-            },
-        };
+        // ----- max_turns reached -------------------------------------------
+        warn!(
+            name = "runtime.streaming_max_turns_reached",
+            max_turns = options.max_turns
+        );
+        yield make_max_turns_outcome(messages, total_turns, aggregated_tokens, options.max_turns);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Outcome helpers
+// ---------------------------------------------------------------------------
 
 #[allow(dead_code)] // wired up by Task 4
 fn make_llm_error_outcome(
@@ -237,6 +489,24 @@ fn make_llm_error_outcome(
 ) -> RunEvent {
     use tau_domain::{AgentStatus, FailureKind};
     let detail = format!("{llm_err}");
+    RunEvent::RunCompleted {
+        outcome: RunOutcome::Failed {
+            status: AgentStatus::failed(FailureKind::BackendError, Some(detail)),
+            all_messages: messages,
+            total_turns,
+            token_usage,
+        },
+    }
+}
+
+fn make_backend_error_outcome(
+    err: impl std::fmt::Display,
+    messages: Vec<Message>,
+    total_turns: u32,
+    token_usage: crate::options::TokenUsage,
+) -> RunEvent {
+    use tau_domain::{AgentStatus, FailureKind};
+    let detail = format!("{err}");
     RunEvent::RunCompleted {
         outcome: RunOutcome::Failed {
             status: AgentStatus::failed(FailureKind::BackendError, Some(detail)),
@@ -357,21 +627,32 @@ mod tests {
     };
     use tau_ports::{
         CompletionChunk, CompletionRequest, CompletionResponse, CompletionStream, LlmBackend,
-        LlmError, StopReason as PortsStopReason, TokenUsage as PortsTokenUsage,
+        LlmError, StopReason as PortsStopReason, TokenUsage as PortsTokenUsage, ToolSpec,
     };
 
     use crate::builder::DynLlmBackend;
     use crate::options::RunOptions;
 
     /// Scripted LLM that emits a fixed sequence of CompletionChunk via stream().
+    /// Supports multiple turns via a `VecDeque` of chunk sequences.
     struct ScriptedLlm {
-        chunks: std::sync::Mutex<Option<Vec<Result<CompletionChunk, LlmError>>>>,
+        turns: std::sync::Mutex<std::collections::VecDeque<Vec<Result<CompletionChunk, LlmError>>>>,
     }
 
     impl ScriptedLlm {
+        /// Single-turn: only one call to stream() is valid.
         fn new(chunks: Vec<Result<CompletionChunk, LlmError>>) -> Self {
+            let mut deque = std::collections::VecDeque::new();
+            deque.push_back(chunks);
             Self {
-                chunks: std::sync::Mutex::new(Some(chunks)),
+                turns: std::sync::Mutex::new(deque),
+            }
+        }
+
+        /// Multi-turn: each call to stream() pops the next turn's chunks.
+        fn multi_turn(turns: Vec<Vec<Result<CompletionChunk, LlmError>>>) -> Self {
+            Self {
+                turns: std::sync::Mutex::new(turns.into_iter().collect()),
             }
         }
     }
@@ -387,12 +668,12 @@ mod tests {
 
         async fn stream(&self, _req: CompletionRequest) -> Result<CompletionStream, LlmError> {
             let chunks = self
-                .chunks
+                .turns
                 .lock()
                 .expect("lock poisoned")
-                .take()
+                .pop_front()
                 .ok_or_else(|| LlmError::Internal {
-                    message: "ScriptedLlm: stream() called twice".into(),
+                    message: "ScriptedLlm: no more turns configured".into(),
                 })?;
             Ok(Box::pin(async_stream::stream! {
                 for c in chunks {
@@ -457,6 +738,14 @@ mod tests {
         out
     }
 
+    /// Build a ToolArgsValidator that accepts everything (opt-out schema).
+    fn make_passthrough_validator() -> crate::tool_args::ToolArgsValidator {
+        crate::tool_args::ToolArgsValidator::compile(&Value::Null)
+            .expect("null schema must compile")
+    }
+
+    // ---- Task 3 tests (updated to pass empty collections) ----
+
     #[tokio::test]
     async fn happy_path_text_only_yields_text_delta_then_turn_completed_then_run_completed() {
         let llm: Arc<dyn DynLlmBackend> = Arc::new(ScriptedLlm::new(vec![
@@ -479,6 +768,12 @@ mod tests {
             vec![],
             user_msg("hi"),
             RunOptions::default(),
+            HashMap::new(),
+            HashMap::new(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
         );
         let events = collect_events(Box::pin(stream)).await;
 
@@ -513,6 +808,12 @@ mod tests {
             vec![],
             user_msg("hi"),
             RunOptions::default(),
+            HashMap::new(),
+            HashMap::new(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
         );
         let events = collect_events(Box::pin(stream)).await;
 
@@ -552,10 +853,557 @@ mod tests {
             vec![],
             user_msg("hi"),
             RunOptions::default(),
+            HashMap::new(),
+            HashMap::new(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
         );
         let events = collect_events(Box::pin(stream)).await;
 
         assert_eq!(events.len(), 1, "got events: {events:#?}");
         assert!(matches!(events[0], RunEvent::RunCompleted { .. }));
+    }
+
+    // ---- Task 4 tests: tool-dispatch flow ----
+
+    /// Helper to build a tool registry entry with a passthrough validator.
+    #[allow(clippy::type_complexity)]
+    fn make_tool_entry(
+        name: &str,
+        tool: Arc<dyn DynTool>,
+    ) -> (
+        HashMap<String, Arc<dyn DynTool>>,
+        HashMap<String, ToolArgsValidator>,
+        Vec<ToolSpec>,
+    ) {
+        let mut tools = HashMap::new();
+        let mut validators = HashMap::new();
+        let spec = tool.schema();
+        tools.insert(name.to_string(), tool);
+        validators.insert(name.to_string(), make_passthrough_validator());
+        (tools, validators, vec![spec])
+    }
+
+    #[tokio::test]
+    async fn tool_dispatch_happy_path_yields_tool_call_started_then_completed_then_turn_completed()
+    {
+        use tau_ports::fixtures::{make_tool_spec, MockTool};
+
+        let spec = make_tool_spec("echo".into(), "echo tool".into(), Value::Null);
+        let mock_tool = MockTool::new("echo", spec);
+        let tool_arc: Arc<dyn DynTool> = Arc::new(mock_tool);
+        let (tools, validators, tool_specs_list) = make_tool_entry("echo", tool_arc);
+
+        // Turn 1: LLM emits ToolUse; Turn 2: LLM emits text + EndTurn.
+        let llm: Arc<dyn DynLlmBackend> = Arc::new(ScriptedLlm::multi_turn(vec![
+            vec![
+                Ok(CompletionChunk::ToolUse(
+                    tau_ports::fixtures::make_tool_use("call_1".into(), "echo".into(), Value::Null),
+                )),
+                Ok(CompletionChunk::Finish {
+                    stop_reason: PortsStopReason::ToolUse,
+                    usage: Some(PortsTokenUsage::new(10, 5)),
+                }),
+            ],
+            vec![
+                Ok(CompletionChunk::Text {
+                    delta: "Done!".into(),
+                }),
+                Ok(CompletionChunk::Finish {
+                    stop_reason: PortsStopReason::EndTurn,
+                    usage: Some(PortsTokenUsage::new(5, 3)),
+                }),
+            ],
+        ]));
+
+        let stream = run_streaming_inner(
+            llm,
+            agent_def(),
+            manifest_with_no_capabilities(),
+            vec![],
+            user_msg("hi"),
+            RunOptions::default(),
+            tools,
+            validators,
+            vec![],
+            tool_specs_list,
+            vec![],
+            vec![],
+        );
+        let events = collect_events(Box::pin(stream)).await;
+
+        // Expected sequence:
+        // ToolCallStarted, ToolCallCompleted, TurnCompleted (turn 1),
+        // TextDelta, TurnCompleted (turn 2), RunCompleted
+        assert_eq!(events.len(), 6, "got events: {events:#?}");
+        assert!(
+            matches!(&events[0], RunEvent::ToolCallStarted { name, .. } if name == "echo"),
+            "expected ToolCallStarted, got {:?}",
+            events[0]
+        );
+        assert!(
+            matches!(&events[1], RunEvent::ToolCallCompleted { name, result: Ok(_), .. } if name == "echo"),
+            "expected ToolCallCompleted Ok, got {:?}",
+            events[1]
+        );
+        assert!(
+            matches!(&events[2], RunEvent::TurnCompleted { turn: 1, .. }),
+            "expected TurnCompleted turn 1, got {:?}",
+            events[2]
+        );
+        assert!(
+            matches!(&events[3], RunEvent::TextDelta { delta } if delta == "Done!"),
+            "expected TextDelta, got {:?}",
+            events[3]
+        );
+        assert!(
+            matches!(&events[4], RunEvent::TurnCompleted { turn: 2, .. }),
+            "expected TurnCompleted turn 2, got {:?}",
+            events[4]
+        );
+        assert!(
+            matches!(
+                &events[5],
+                RunEvent::RunCompleted {
+                    outcome: RunOutcome::Completed { .. }
+                }
+            ),
+            "expected RunCompleted Completed, got {:?}",
+            events[5]
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_dispatch_capability_denial_yields_run_completed_failed() {
+        use tau_ports::fixtures::{make_tool_spec, MockTool};
+
+        let spec = make_tool_spec("secured-tool".into(), "needs fs cap".into(), Value::Null);
+
+        // Build a custom tool that requires an fs.read capability.
+        struct CapRequiringTool {
+            inner: MockTool,
+            required: Vec<tau_domain::Capability>,
+        }
+
+        impl tau_ports::Tool for CapRequiringTool {
+            type Session = ();
+
+            fn name(&self) -> &str {
+                tau_ports::Tool::name(&self.inner)
+            }
+
+            fn schema(&self) -> tau_ports::ToolSpec {
+                tau_ports::Tool::schema(&self.inner)
+            }
+
+            fn capabilities(&self) -> &[tau_domain::Capability] {
+                &self.required
+            }
+
+            async fn init(
+                &self,
+                ctx: tau_ports::SessionContext,
+            ) -> Result<Self::Session, tau_ports::ToolError> {
+                tau_ports::Tool::init(&self.inner, ctx).await
+            }
+
+            async fn invoke(
+                &self,
+                session: &mut Self::Session,
+                args: tau_domain::Value,
+            ) -> Result<tau_ports::ToolResult, tau_ports::ToolError> {
+                tau_ports::Tool::invoke(&self.inner, session, args).await
+            }
+
+            async fn teardown(&self, session: Self::Session) -> Result<(), tau_ports::ToolError> {
+                tau_ports::Tool::teardown(&self.inner, session).await
+            }
+        }
+
+        // Build the fs.read required capability via TOML.
+        #[derive(serde::Deserialize)]
+        struct CapWrapper {
+            cap: tau_domain::Capability,
+        }
+        let required_cap: tau_domain::Capability = toml::from_str::<CapWrapper>(
+            r#"[cap]
+kind = "fs.read"
+paths = ["/etc/**"]
+"#,
+        )
+        .unwrap()
+        .cap;
+
+        let tool = CapRequiringTool {
+            inner: MockTool::new("secured-tool", spec),
+            required: vec![required_cap],
+        };
+        let tool_arc: Arc<dyn DynTool> = Arc::new(tool);
+        let (tools, validators, tool_specs_list) = make_tool_entry("secured-tool", tool_arc);
+
+        let llm: Arc<dyn DynLlmBackend> = Arc::new(ScriptedLlm::new(vec![
+            Ok(CompletionChunk::ToolUse(
+                tau_ports::fixtures::make_tool_use(
+                    "call_1".into(),
+                    "secured-tool".into(),
+                    Value::Null,
+                ),
+            )),
+            Ok(CompletionChunk::Finish {
+                stop_reason: PortsStopReason::ToolUse,
+                usage: None,
+            }),
+        ]));
+
+        let stream = run_streaming_inner(
+            llm,
+            agent_def(),
+            manifest_with_no_capabilities(),
+            vec![],
+            user_msg("hi"),
+            RunOptions::default(),
+            tools,
+            validators,
+            vec![], // no granted capabilities → denial
+            tool_specs_list,
+            vec![],
+            vec![],
+        );
+        let events = collect_events(Box::pin(stream)).await;
+
+        // Expected: ToolCallStarted then RunCompleted{Failed}
+        assert_eq!(events.len(), 2, "got events: {events:#?}");
+        assert!(
+            matches!(&events[0], RunEvent::ToolCallStarted { name, .. } if name == "secured-tool"),
+            "expected ToolCallStarted, got {:?}",
+            events[0]
+        );
+        let RunEvent::RunCompleted { outcome } = &events[1] else {
+            panic!("expected RunCompleted, got {:?}", events[1])
+        };
+        assert!(
+            matches!(outcome, RunOutcome::Failed { .. }),
+            "expected Failed outcome, got {:?}",
+            outcome
+        );
+        // Verify it's a PolicyDenied failure.
+        if let RunOutcome::Failed { status, .. } = outcome {
+            let s = format!("{status:?}");
+            assert!(s.contains("PolicyDenied"), "expected PolicyDenied in {s}");
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_dispatch_schema_validation_failure_yields_tool_call_completed_with_err() {
+        use tau_ports::fixtures::{make_tool_spec, MockTool};
+
+        // Tool with a strict schema requiring {"x": string}
+        let strict_schema = {
+            use tau_domain::Value;
+            // Build schema via serde_json and deserialize into tau_domain::Value.
+            let j = serde_json::json!({
+                "type": "object",
+                "properties": { "x": { "type": "string" } },
+                "required": ["x"],
+                "additionalProperties": false
+            });
+            let s = serde_json::to_string(&j).unwrap();
+            serde_json::from_str::<Value>(&s).unwrap()
+        };
+
+        let spec = make_tool_spec(
+            "strict-tool".into(),
+            "strict args".into(),
+            strict_schema.clone(),
+        );
+        let mock_tool = MockTool::new("strict-tool", spec);
+        let tool_arc: Arc<dyn DynTool> = Arc::new(mock_tool);
+
+        let mut tools: HashMap<String, Arc<dyn DynTool>> = HashMap::new();
+        let mut validators: HashMap<String, ToolArgsValidator> = HashMap::new();
+        let tool_specs_list = vec![tool_arc.schema()];
+        tools.insert("strict-tool".to_string(), tool_arc);
+        // Compile the strict schema validator.
+        validators.insert(
+            "strict-tool".to_string(),
+            crate::tool_args::ToolArgsValidator::compile(&strict_schema)
+                .expect("strict schema must compile"),
+        );
+
+        // LLM sends invalid args (missing required "x" field):
+        // Turn 1: ToolUse with bad args, then Finish.
+        // Turn 2: Text + EndTurn (LLM self-corrects).
+        let bad_args = {
+            let j = serde_json::json!({ "y": 42 }); // missing "x"
+            let s = serde_json::to_string(&j).unwrap();
+            serde_json::from_str::<Value>(&s).unwrap()
+        };
+
+        let llm: Arc<dyn DynLlmBackend> = Arc::new(ScriptedLlm::multi_turn(vec![
+            vec![
+                Ok(CompletionChunk::ToolUse(
+                    tau_ports::fixtures::make_tool_use(
+                        "call_1".into(),
+                        "strict-tool".into(),
+                        bad_args,
+                    ),
+                )),
+                Ok(CompletionChunk::Finish {
+                    stop_reason: PortsStopReason::ToolUse,
+                    usage: None,
+                }),
+            ],
+            vec![
+                Ok(CompletionChunk::Text {
+                    delta: "Corrected".into(),
+                }),
+                Ok(CompletionChunk::Finish {
+                    stop_reason: PortsStopReason::EndTurn,
+                    usage: None,
+                }),
+            ],
+        ]));
+
+        let stream = run_streaming_inner(
+            llm,
+            agent_def(),
+            manifest_with_no_capabilities(),
+            vec![],
+            user_msg("hi"),
+            RunOptions::default(),
+            tools,
+            validators,
+            vec![],
+            tool_specs_list,
+            vec![],
+            vec![],
+        );
+        let events = collect_events(Box::pin(stream)).await;
+
+        // Expected:
+        // ToolCallStarted, ToolCallCompleted{Err(reason)}, TurnCompleted (turn 1),
+        // TextDelta, TurnCompleted (turn 2), RunCompleted
+        assert_eq!(events.len(), 6, "got events: {events:#?}");
+        assert!(
+            matches!(&events[0], RunEvent::ToolCallStarted { name, .. } if name == "strict-tool"),
+            "expected ToolCallStarted, got {:?}",
+            events[0]
+        );
+        let RunEvent::ToolCallCompleted { result, .. } = &events[1] else {
+            panic!("expected ToolCallCompleted, got {:?}", events[1])
+        };
+        assert!(
+            result.is_err(),
+            "expected Err result for validation failure, got {:?}",
+            result
+        );
+        assert!(
+            matches!(&events[2], RunEvent::TurnCompleted { turn: 1, .. }),
+            "expected TurnCompleted turn 1, got {:?}",
+            events[2]
+        );
+        assert!(
+            matches!(&events[3], RunEvent::TextDelta { .. }),
+            "expected TextDelta turn 2, got {:?}",
+            events[3]
+        );
+        assert!(
+            matches!(&events[4], RunEvent::TurnCompleted { turn: 2, .. }),
+            "expected TurnCompleted turn 2, got {:?}",
+            events[4]
+        );
+        assert!(
+            matches!(
+                &events[5],
+                RunEvent::RunCompleted {
+                    outcome: RunOutcome::Completed { .. }
+                }
+            ),
+            "expected RunCompleted Completed, got {:?}",
+            events[5]
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_dispatch_plugin_crash_yields_run_completed_failed() {
+        use tau_ports::fixtures::{make_tool_spec, MockTool};
+
+        let spec = make_tool_spec(
+            "crashing-tool".into(),
+            "crashes on invoke".into(),
+            Value::Null,
+        );
+        let mock_tool =
+            MockTool::new("crashing-tool", spec).with_error(tau_ports::ToolError::Internal {
+                message: "plugin exploded".into(),
+            });
+        let tool_arc: Arc<dyn DynTool> = Arc::new(mock_tool);
+        let (tools, validators, tool_specs_list) = make_tool_entry("crashing-tool", tool_arc);
+
+        let llm: Arc<dyn DynLlmBackend> = Arc::new(ScriptedLlm::new(vec![
+            Ok(CompletionChunk::ToolUse(
+                tau_ports::fixtures::make_tool_use(
+                    "call_1".into(),
+                    "crashing-tool".into(),
+                    Value::Null,
+                ),
+            )),
+            Ok(CompletionChunk::Finish {
+                stop_reason: PortsStopReason::ToolUse,
+                usage: None,
+            }),
+        ]));
+
+        let stream = run_streaming_inner(
+            llm,
+            agent_def(),
+            manifest_with_no_capabilities(),
+            vec![],
+            user_msg("hi"),
+            RunOptions::default(),
+            tools,
+            validators,
+            vec![],
+            tool_specs_list,
+            vec![],
+            vec![],
+        );
+        let events = collect_events(Box::pin(stream)).await;
+
+        // Expected: ToolCallStarted then RunCompleted{Failed}
+        // (no ToolCallCompleted — plugin crash terminates the run)
+        assert_eq!(events.len(), 2, "got events: {events:#?}");
+        assert!(
+            matches!(&events[0], RunEvent::ToolCallStarted { name, .. } if name == "crashing-tool"),
+            "expected ToolCallStarted, got {:?}",
+            events[0]
+        );
+        let RunEvent::RunCompleted { outcome } = &events[1] else {
+            panic!("expected RunCompleted, got {:?}", events[1])
+        };
+        assert!(
+            matches!(outcome, RunOutcome::Failed { .. }),
+            "expected Failed outcome, got {:?}",
+            outcome
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_dispatch_two_tools_in_one_turn_emits_both_started_and_both_completed() {
+        use tau_ports::fixtures::{make_tool_spec, MockTool};
+
+        let spec_a = make_tool_spec("tool-a".into(), "tool a".into(), Value::Null);
+        let spec_b = make_tool_spec("tool-b".into(), "tool b".into(), Value::Null);
+        let tool_a: Arc<dyn DynTool> = Arc::new(MockTool::new("tool-a", spec_a));
+        let tool_b: Arc<dyn DynTool> = Arc::new(MockTool::new("tool-b", spec_b));
+
+        let mut tools: HashMap<String, Arc<dyn DynTool>> = HashMap::new();
+        let mut validators: HashMap<String, ToolArgsValidator> = HashMap::new();
+        let spec_a2 = tool_a.schema();
+        let spec_b2 = tool_b.schema();
+        tools.insert("tool-a".to_string(), tool_a);
+        tools.insert("tool-b".to_string(), tool_b);
+        validators.insert("tool-a".to_string(), make_passthrough_validator());
+        validators.insert("tool-b".to_string(), make_passthrough_validator());
+        let tool_specs_list = vec![spec_a2, spec_b2];
+
+        // Turn 1: two ToolUse chunks + Finish.
+        // Turn 2: text + EndTurn.
+        let llm: Arc<dyn DynLlmBackend> = Arc::new(ScriptedLlm::multi_turn(vec![
+            vec![
+                Ok(CompletionChunk::ToolUse(
+                    tau_ports::fixtures::make_tool_use("id_a".into(), "tool-a".into(), Value::Null),
+                )),
+                Ok(CompletionChunk::ToolUse(
+                    tau_ports::fixtures::make_tool_use("id_b".into(), "tool-b".into(), Value::Null),
+                )),
+                Ok(CompletionChunk::Finish {
+                    stop_reason: PortsStopReason::ToolUse,
+                    usage: None,
+                }),
+            ],
+            vec![
+                Ok(CompletionChunk::Text {
+                    delta: "both done".into(),
+                }),
+                Ok(CompletionChunk::Finish {
+                    stop_reason: PortsStopReason::EndTurn,
+                    usage: None,
+                }),
+            ],
+        ]));
+
+        let stream = run_streaming_inner(
+            llm,
+            agent_def(),
+            manifest_with_no_capabilities(),
+            vec![],
+            user_msg("hi"),
+            RunOptions::default(),
+            tools,
+            validators,
+            vec![],
+            tool_specs_list,
+            vec![],
+            vec![],
+        );
+        let events = collect_events(Box::pin(stream)).await;
+
+        // Expected order:
+        // ToolCallStarted(a), ToolCallStarted(b)  [during LLM stream drain]
+        // ToolCallCompleted(a), ToolCallCompleted(b)  [during dispatch]
+        // TurnCompleted(1)
+        // TextDelta
+        // TurnCompleted(2)
+        // RunCompleted
+        assert_eq!(events.len(), 8, "got events: {events:#?}");
+
+        assert!(
+            matches!(&events[0], RunEvent::ToolCallStarted { name, .. } if name == "tool-a"),
+            "expected ToolCallStarted(a), got {:?}",
+            events[0]
+        );
+        assert!(
+            matches!(&events[1], RunEvent::ToolCallStarted { name, .. } if name == "tool-b"),
+            "expected ToolCallStarted(b), got {:?}",
+            events[1]
+        );
+        assert!(
+            matches!(&events[2], RunEvent::ToolCallCompleted { name, result: Ok(_), .. } if name == "tool-a"),
+            "expected ToolCallCompleted(a) Ok, got {:?}",
+            events[2]
+        );
+        assert!(
+            matches!(&events[3], RunEvent::ToolCallCompleted { name, result: Ok(_), .. } if name == "tool-b"),
+            "expected ToolCallCompleted(b) Ok, got {:?}",
+            events[3]
+        );
+        assert!(
+            matches!(&events[4], RunEvent::TurnCompleted { turn: 1, .. }),
+            "expected TurnCompleted(1), got {:?}",
+            events[4]
+        );
+        assert!(
+            matches!(&events[5], RunEvent::TextDelta { .. }),
+            "expected TextDelta, got {:?}",
+            events[5]
+        );
+        assert!(
+            matches!(&events[6], RunEvent::TurnCompleted { turn: 2, .. }),
+            "expected TurnCompleted(2), got {:?}",
+            events[6]
+        );
+        assert!(
+            matches!(
+                &events[7],
+                RunEvent::RunCompleted {
+                    outcome: RunOutcome::Completed { .. }
+                }
+            ),
+            "expected RunCompleted Completed, got {:?}",
+            events[7]
+        );
     }
 }

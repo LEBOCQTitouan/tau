@@ -758,7 +758,7 @@ fn preview_value(v: &Value, n: usize) -> String {
 
 /// Flatten a tool's content blocks into a single human-readable string,
 /// for use as the `message` field of [`MessagePayload::ToolError`].
-fn flatten_content_to_string(blocks: &[ToolContent]) -> String {
+pub(crate) fn flatten_content_to_string(blocks: &[ToolContent]) -> String {
     let mut out = String::new();
     for block in blocks {
         match block {
@@ -786,7 +786,7 @@ fn flatten_content_to_string(blocks: &[ToolContent]) -> String {
 ///
 /// - exactly one [`ToolContent::Json { data }`] → return `data` directly;
 /// - everything else → wrap into an `Object { content: Array of strings/values }`.
-fn content_to_value(blocks: &[ToolContent]) -> Value {
+pub(crate) fn content_to_value(blocks: &[ToolContent]) -> Value {
     if blocks.len() == 1 {
         if let ToolContent::Json { data } = &blocks[0] {
             return data.clone();
@@ -863,7 +863,7 @@ fn narrowed_capability_for_session(eff: &EffectiveCapability) -> Capability {
 
 /// Top-level capability kind string used in
 /// [`CapabilityDenial::required_kind`] and the `capability.deny` event.
-fn capability_kind_str(cap: &Capability) -> String {
+pub(crate) fn capability_kind_str(cap: &Capability) -> String {
     use tau_domain::{AgentCapability, FsCapability, NetCapability, ProcessCapability};
     match cap {
         Capability::Filesystem(FsCapability::Read { .. }) => "fs.read".into(),
