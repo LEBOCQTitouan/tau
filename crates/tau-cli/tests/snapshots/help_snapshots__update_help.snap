@@ -1,0 +1,51 @@
+---
+source: crates/tau-cli/tests/help_snapshots.rs
+expression: s
+---
+Update an installed package to a newer or specific version (spec §2)
+
+Usage: tau update [OPTIONS] <PACKAGE>
+
+Arguments:
+  <PACKAGE>
+          Package name to update
+
+Options:
+      --version <VERSION>
+          Specific version (default: latest tag)
+
+      --prune
+          Remove the old active version after the new install succeeds
+
+      --global
+          Use global scope
+
+  -v, --verbose...
+          Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
+
+  -q, --quiet
+          Suppress non-error output (sets tracing to WARN)
+
+      --debug
+          Show full error chain + DEBUG-level tracing on failures
+
+      --color <COLOR>
+          Color mode for terminal output
+
+          Possible values:
+          - always: Always emit ANSI color codes
+          - auto:   Auto-detect based on terminal capabilities
+          - never:  Never emit color codes
+          
+          [default: auto]
+
+      --json
+          Emit structured JSON output instead of human-readable. Only supported on `install`, `list`, `run`, `init`
+
+      --record-protocol <PATH>
+          Mirror every plugin protocol frame to a JSONL file at this path.
+          
+          Useful for debugging plugin behavior and replaying via `tau plugin protocol decode <path>`. The recording is best-effort per spec §7.8: write/open failures are logged but never abort the invocation.
+
+  -h, --help
+          Print help (see a summary with '-h')
