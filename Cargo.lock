@@ -2745,6 +2745,7 @@ dependencies = [
  "base64",
  "clap",
  "futures-core",
+ "humantime-serde",
  "insta",
  "is-terminal",
  "predicates",
