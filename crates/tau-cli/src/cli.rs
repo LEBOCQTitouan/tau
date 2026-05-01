@@ -79,6 +79,8 @@ pub enum Command {
         #[command(subcommand)]
         action: PluginAction,
     },
+    /// Session management (list, show, delete, export).
+    Session(SessionArgs),
 }
 
 /// `tau plugin <action>` — debug-tier helpers per spec §9.
@@ -143,6 +145,38 @@ pub struct PluginProtocolDecodeArgs {
     /// Emit one decoded JSON object per line (machine-readable).
     #[arg(long)]
     pub json: bool,
+}
+
+/// Arguments for `tau session`.
+#[derive(Args, Debug)]
+pub struct SessionArgs {
+    /// Sub-action within the session group.
+    #[command(subcommand)]
+    pub action: SessionAction,
+}
+
+/// Sub-actions of `tau session`.
+#[derive(Subcommand, Debug)]
+pub enum SessionAction {
+    /// List sessions in the current scope.
+    List(SessionListArgs),
+    // Show, Delete, Export added in Tasks 8-10.
+}
+
+/// Arguments for `tau session list`.
+#[derive(Args, Debug)]
+pub struct SessionListArgs {
+    /// Filter by agent name.
+    pub agent: Option<String>,
+    /// Use global scope instead of project scope.
+    #[arg(long)]
+    pub global: bool,
+    /// Maximum number of sessions to display (default 20).
+    #[arg(long, default_value_t = 20)]
+    pub limit: usize,
+    /// Disable the limit; show all sessions.
+    #[arg(long)]
+    pub all: bool,
 }
 
 /// Arguments for `tau init`.

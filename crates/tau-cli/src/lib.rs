@@ -78,5 +78,6 @@ async fn dispatch(cli: cli::Cli) -> anyhow::Result<()> {
         cli::Command::Plugin { action } => {
             cmd::plugin::dispatch(action, record_protocol, &mut output).await
         }
+        cli::Command::Session(args) => cmd::session::run(&args, &mut output).await,
     }
 }

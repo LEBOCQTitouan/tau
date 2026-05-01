@@ -111,3 +111,13 @@ fn snapshot_update_help() {
     let s = capture_help(&["update", "--help"]);
     insta::assert_snapshot!("update_help", s);
 }
+
+#[test]
+fn snapshot_session_help() {
+    insta::assert_snapshot!(capture_help(&["session", "--help"]));
+}
+
+#[test]
+fn snapshot_session_list_help() {
+    insta::assert_snapshot!(capture_help(&["session", "list", "--help"]));
+}
