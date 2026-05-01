@@ -17,9 +17,11 @@
 use std::path::PathBuf;
 
 pub mod id;
+pub mod render;
 pub mod store;
 
 pub use id::{mint, resolve_id_prefix, SessionId};
+pub use render::render_session;
 pub use store::{
     list_sessions, SessionEntry, SessionHeader, SessionMetadata, SessionPackage, SessionReader,
     SessionWriter, SCHEMA_VERSION,
