@@ -517,7 +517,6 @@ fn make_backend_error_outcome(
     }
 }
 
-#[allow(dead_code)] // wired up by Task 5
 fn make_max_turns_outcome(
     messages: Vec<Message>,
     total_turns: u32,
@@ -1404,6 +1403,256 @@ paths = ["/etc/**"]
             ),
             "expected RunCompleted Completed, got {:?}",
             events[7]
+        );
+    }
+
+    // ---- Task 5 tests: failure-mode coverage ----
+
+    #[tokio::test]
+    async fn max_turns_reached_yields_run_completed_failed_out_of_resources() {
+        use tau_domain::{AgentStatus, FailureKind};
+        use tau_ports::fixtures::{make_tool_spec, MockTool};
+
+        let spec = make_tool_spec("echo".into(), "echo tool".into(), Value::Null);
+        let mock_tool = MockTool::new("echo", spec);
+        let tool_arc: Arc<dyn DynTool> = Arc::new(mock_tool);
+        let (tools, validators, tool_specs_list) = make_tool_entry("echo", tool_arc);
+
+        // max_turns = 1: the first turn dispatches a tool use and loops
+        // back; the while-condition `total_turns < 1` is now false, so
+        // the loop falls through to make_max_turns_outcome.
+        let options = RunOptions {
+            max_turns: 1,
+            ..RunOptions::default()
+        };
+
+        // Turn 1 only: LLM emits ToolUse + Finish(ToolUse).
+        // No turn 2 configured — the loop must exit via max_turns guard.
+        let llm: Arc<dyn DynLlmBackend> = Arc::new(ScriptedLlm::new(vec![
+            Ok(CompletionChunk::ToolUse(
+                tau_ports::fixtures::make_tool_use("call_1".into(), "echo".into(), Value::Null),
+            )),
+            Ok(CompletionChunk::Finish {
+                stop_reason: PortsStopReason::ToolUse,
+                usage: Some(PortsTokenUsage::new(10, 5)),
+            }),
+        ]));
+
+        let stream = run_streaming_inner(
+            llm,
+            agent_def(),
+            manifest_with_no_capabilities(),
+            vec![],
+            user_msg("hi"),
+            options,
+            tools,
+            validators,
+            vec![],
+            tool_specs_list,
+            vec![],
+            vec![],
+        );
+        let events = collect_events(Box::pin(stream)).await;
+
+        // Expected: ToolCallStarted, ToolCallCompleted, TurnCompleted, RunCompleted{Failed{OutOfResources}}
+        assert_eq!(events.len(), 4, "got events: {events:#?}");
+        assert!(
+            matches!(&events[0], RunEvent::ToolCallStarted { name, .. } if name == "echo"),
+            "expected ToolCallStarted(echo), got {:?}",
+            events[0]
+        );
+        assert!(
+            matches!(&events[1], RunEvent::ToolCallCompleted { name, result: Ok(_), .. } if name == "echo"),
+            "expected ToolCallCompleted(echo) Ok, got {:?}",
+            events[1]
+        );
+        assert!(
+            matches!(&events[2], RunEvent::TurnCompleted { turn: 1, .. }),
+            "expected TurnCompleted(1), got {:?}",
+            events[2]
+        );
+        let RunEvent::RunCompleted { outcome } = &events[3] else {
+            panic!("expected RunCompleted, got {:?}", events[3])
+        };
+        let RunOutcome::Failed { status, .. } = outcome else {
+            panic!("expected Failed outcome, got {:?}", outcome)
+        };
+        let AgentStatus::Failed { kind, .. } = status else {
+            panic!("expected AgentStatus::Failed, got {:?}", status)
+        };
+        assert_eq!(
+            *kind,
+            FailureKind::OutOfResources,
+            "expected OutOfResources, got {:?}",
+            kind
+        );
+    }
+
+    #[tokio::test]
+    async fn mid_dispatch_crash_after_one_success_yields_started_completed_started_then_run_completed_failed(
+    ) {
+        use tau_ports::fixtures::{make_tool_spec, MockTool};
+
+        let spec_a = make_tool_spec("tool-ok".into(), "succeeds".into(), Value::Null);
+        let spec_b = make_tool_spec("tool-crash".into(), "crashes".into(), Value::Null);
+
+        // tool-ok: default success path.
+        let tool_ok: Arc<dyn DynTool> = Arc::new(MockTool::new("tool-ok", spec_a));
+        // tool-crash: configured to return Internal error from invoke.
+        let tool_crash: Arc<dyn DynTool> = Arc::new(
+            MockTool::new("tool-crash", spec_b).with_error(tau_ports::ToolError::Internal {
+                message: "plugin exploded mid-dispatch".into(),
+            }),
+        );
+
+        let mut tools: HashMap<String, Arc<dyn DynTool>> = HashMap::new();
+        let mut validators: HashMap<String, ToolArgsValidator> = HashMap::new();
+        let spec_ok2 = tool_ok.schema();
+        let spec_crash2 = tool_crash.schema();
+        tools.insert("tool-ok".to_string(), tool_ok);
+        tools.insert("tool-crash".to_string(), tool_crash);
+        validators.insert("tool-ok".to_string(), make_passthrough_validator());
+        validators.insert("tool-crash".to_string(), make_passthrough_validator());
+        let tool_specs_list = vec![spec_ok2, spec_crash2];
+
+        // Single turn: two ToolUse chunks + Finish. No turn 2 needed
+        // (the run terminates on the crash).
+        let llm: Arc<dyn DynLlmBackend> = Arc::new(ScriptedLlm::new(vec![
+            Ok(CompletionChunk::ToolUse(
+                tau_ports::fixtures::make_tool_use("id_1".into(), "tool-ok".into(), Value::Null),
+            )),
+            Ok(CompletionChunk::ToolUse(
+                tau_ports::fixtures::make_tool_use("id_2".into(), "tool-crash".into(), Value::Null),
+            )),
+            Ok(CompletionChunk::Finish {
+                stop_reason: PortsStopReason::ToolUse,
+                usage: None,
+            }),
+        ]));
+
+        let stream = run_streaming_inner(
+            llm,
+            agent_def(),
+            manifest_with_no_capabilities(),
+            vec![],
+            user_msg("hi"),
+            RunOptions::default(),
+            tools,
+            validators,
+            vec![],
+            tool_specs_list,
+            vec![],
+            vec![],
+        );
+        let events = collect_events(Box::pin(stream)).await;
+
+        // Expected order per spec §4.3 pump invariants:
+        //   ToolCallStarted(id_1)  — during chunk drain
+        //   ToolCallStarted(id_2)  — during chunk drain
+        //   ToolCallCompleted(id_1, Ok)  — first dispatch succeeds
+        //   RunCompleted{Failed{BackendError}}  — second dispatch crashes
+        // No ToolCallCompleted for id_2 — terminal failure replaces it.
+        assert_eq!(events.len(), 4, "got events: {events:#?}");
+        assert!(
+            matches!(&events[0], RunEvent::ToolCallStarted { id, .. } if id == "id_1"),
+            "expected ToolCallStarted(id_1), got {:?}",
+            events[0]
+        );
+        assert!(
+            matches!(&events[1], RunEvent::ToolCallStarted { id, .. } if id == "id_2"),
+            "expected ToolCallStarted(id_2), got {:?}",
+            events[1]
+        );
+        assert!(
+            matches!(&events[2], RunEvent::ToolCallCompleted { id, result: Ok(_), .. } if id == "id_1"),
+            "expected ToolCallCompleted(id_1) Ok, got {:?}",
+            events[2]
+        );
+        let RunEvent::RunCompleted { outcome } = &events[3] else {
+            panic!("expected RunCompleted, got {:?}", events[3])
+        };
+        assert!(
+            matches!(outcome, RunOutcome::Failed { .. }),
+            "expected Failed outcome, got {:?}",
+            outcome
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_llm_stream_yields_turn_completed_then_run_completed() {
+        /// LLM whose stream() returns Ok but yields zero chunks.
+        struct EmptyLlm;
+        impl tau_ports::LlmBackend for EmptyLlm {
+            fn name(&self) -> &str {
+                "empty-llm"
+            }
+            async fn complete(
+                &self,
+                _r: tau_ports::CompletionRequest,
+            ) -> Result<tau_ports::CompletionResponse, tau_ports::LlmError> {
+                unimplemented!()
+            }
+            async fn stream(
+                &self,
+                _r: tau_ports::CompletionRequest,
+            ) -> Result<tau_ports::CompletionStream, tau_ports::LlmError> {
+                Ok(Box::pin(async_stream::stream! {
+                    // yield nothing — empty stream
+                    if false {
+                        yield Ok(tau_ports::CompletionChunk::Text { delta: String::new() });
+                    }
+                }))
+            }
+        }
+
+        let llm: Arc<dyn DynLlmBackend> = Arc::new(EmptyLlm);
+
+        let stream = run_streaming_inner(
+            llm,
+            agent_def(),
+            manifest_with_no_capabilities(),
+            vec![],
+            user_msg("hi"),
+            RunOptions::default(),
+            HashMap::new(),
+            HashMap::new(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
+        let events = collect_events(Box::pin(stream)).await;
+
+        // Drain loop's None arm exits with turn_stop_reason = None,
+        // accumulated_text = "", pending_tool_uses = [].
+        // Kernel falls back to StopReason::EndTurn (unwrap_or) and takes
+        // the happy (no-tools) exit path.
+        // Expected: TurnCompleted{EndTurn, usage:None, turn:1}, RunCompleted{Completed}
+        assert_eq!(events.len(), 2, "got events: {events:#?}");
+        let RunEvent::TurnCompleted {
+            stop_reason,
+            usage,
+            turn,
+        } = &events[0]
+        else {
+            panic!("expected TurnCompleted, got {:?}", events[0])
+        };
+        assert_eq!(
+            *stop_reason,
+            StopReason::EndTurn,
+            "expected EndTurn fallback"
+        );
+        assert!(usage.is_none(), "expected no usage for empty stream");
+        assert_eq!(*turn, 1, "expected turn 1");
+        assert!(
+            matches!(
+                &events[1],
+                RunEvent::RunCompleted {
+                    outcome: RunOutcome::Completed { .. }
+                }
+            ),
+            "expected RunCompleted Completed, got {:?}",
+            events[1]
         );
     }
 }
