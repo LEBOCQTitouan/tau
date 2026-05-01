@@ -69,6 +69,8 @@ pub enum Command {
     Resolve(ResolveArgs),
     /// Uninstall a package and remove its lockfile entry.
     Uninstall(UninstallArgs),
+    /// Verify installed packages against the lockfile (spec §3).
+    Verify(VerifyArgs),
     /// Plugin debugging utilities (spec §9 debug tier).
     Plugin {
         /// Sub-action within the plugin group.
@@ -210,6 +212,19 @@ pub struct UninstallArgs {
     #[arg(long)]
     pub version: Option<String>,
     /// Use the global scope (~/.tau) instead of the project scope.
+    #[arg(long)]
+    pub global: bool,
+}
+
+/// Arguments for `tau verify`.
+#[derive(Args, Debug)]
+pub struct VerifyArgs {
+    /// Package name to verify (default: all installed packages).
+    pub package: Option<String>,
+    /// Specific version.
+    #[arg(long)]
+    pub version: Option<String>,
+    /// Use global scope.
     #[arg(long)]
     pub global: bool,
 }
