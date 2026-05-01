@@ -217,6 +217,12 @@ pub struct RunArgs {
     /// `tau install <url>` hints instead.
     #[arg(long)]
     pub no_install: bool,
+    /// Stream events as they arrive. Text deltas appear inline on stdout;
+    /// tool annotations on stderr. With --json, emits one JSON object per
+    /// event line (text_delta / tool_call_started / tool_call_completed /
+    /// turn_completed / run_completed).
+    #[arg(long, default_value_t = false)]
+    pub stream: bool,
 }
 
 /// Arguments for `tau chat`.

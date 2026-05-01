@@ -1,5 +1,6 @@
 ---
 source: crates/tau-cli/tests/help_snapshots.rs
+assertion_line: 52
 expression: s
 ---
 Invoke an agent one-shot
@@ -22,6 +23,9 @@ Options:
 
       --no-install
           Skip auto-install of missing requires.tools dependencies. If anything would need fetching, exit 2 with copy-pasteable `tau install <url>` hints instead
+
+      --stream
+          Stream events as they arrive. Text deltas appear inline on stdout; tool annotations on stderr. With --json, emits one JSON object per event line (text_delta / tool_call_started / tool_call_completed / turn_completed / run_completed)
 
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
