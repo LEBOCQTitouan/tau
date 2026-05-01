@@ -2887,6 +2887,7 @@ dependencies = [
 name = "tau-runtime"
 version = "0.0.0"
 dependencies = [
+ "async-stream",
  "base64",
  "fs-read",
  "futures-core",

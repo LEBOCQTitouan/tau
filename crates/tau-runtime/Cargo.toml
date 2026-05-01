@@ -33,6 +33,8 @@ rmp-serde           = { workspace = true }
 # `Stream` trait from `futures-core` so it can build a
 # `tau_ports::CompletionStream` (which is `Pin<Box<dyn Stream<...>>>`).
 futures-core        = { workspace = true }
+# Async generator for `Runtime::run_streaming` (Tier 2 priority 8 / ADR-0011).
+async-stream        = { workspace = true }
 # Plugin host protocol-recording sink (`plugin_host::recording`)
 # base64-encodes raw MessagePack frame bytes into the JSONL log so the
 # binary frame survives the JSON envelope losslessly.
