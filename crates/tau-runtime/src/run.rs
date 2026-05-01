@@ -137,6 +137,7 @@ impl Runtime {
                     kind,
                     detail,
                     context_json,
+                    tool_error_variant,
                 }) => {
                     // ADR-0006 error/failure dichotomy: the streaming pump
                     // emits FatalError for plugin/dispatch failures that
@@ -164,7 +165,25 @@ impl Runtime {
                             }
                         }
                         "Llm" => RuntimeError::Llm(LlmError::Internal { message: detail }),
-                        "Tool" => RuntimeError::Tool(ToolError::Internal { message: detail }),
+                        // Reconstruct the typed ToolError variant using
+                        // `tool_error_variant` recorded by make_tool_fatal_error.
+                        // This preserves the BadArgs/SessionDead/etc. variant
+                        // through the FatalError round-trip (Approach A fix).
+                        "Tool" => {
+                            let tool_err = match tool_error_variant.as_deref() {
+                                Some("BadArgs") => ToolError::BadArgs { reason: detail },
+                                Some("SessionDead") => ToolError::SessionDead { reason: detail },
+                                Some("DeadlineExceeded") => ToolError::DeadlineExceeded,
+                                Some("CapabilityDenied") => {
+                                    ToolError::CapabilityDenied { capability: detail }
+                                }
+                                // Llm/Storage/Internal and unknown future
+                                // variants all map to Internal — the detail
+                                // string carries the Display output.
+                                _ => ToolError::Internal { message: detail },
+                            };
+                            RuntimeError::Tool(tool_err)
+                        }
                         _ => RuntimeError::Internal { message: detail },
                     });
                 }

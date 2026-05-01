@@ -120,6 +120,12 @@ pub enum RunEvent {
         /// Optional extra context (e.g. `tool_name`, `registered` list).
         /// Encoded as a JSON string for simplicity across crate boundaries.
         context_json: Option<String>,
+        /// When `kind == "Tool"`, the inner `ToolError` variant name
+        /// (`"BadArgs"`, `"Internal"`, `"SessionDead"`, `"DeadlineExceeded"`,
+        /// `"CapabilityDenied"`, `"Llm"`, `"Storage"`). `None` for all
+        /// other `kind` values. Used by the batch drainer to reconstruct
+        /// the typed `ToolError` variant losslessly (Approach A fix).
+        tool_error_variant: Option<String>,
     },
 }
 
@@ -511,16 +517,34 @@ fn make_llm_fatal_error(llm_err: LlmError) -> RunEvent {
         kind: "Llm".to_string(),
         detail: format!("{llm_err}"),
         context_json: None,
+        tool_error_variant: None,
     }
 }
 
 /// Tool-side fatal error (init / invoke / teardown failure).
-/// Drainer converts to Err(RuntimeError::Tool(_)) or Internal.
-fn make_tool_fatal_error(err: impl std::fmt::Display) -> RunEvent {
+/// Drainer converts to Err(RuntimeError::Tool(_)).
+///
+/// Records the `ToolError` variant name in `tool_error_variant` so the
+/// batch drainer can reconstruct the typed `ToolError::*` losslessly
+/// (Approach A fix for Task 7 regression — see run.rs drainer).
+fn make_tool_fatal_error(err: ToolError) -> RunEvent {
+    let variant = match &err {
+        ToolError::BadArgs { .. } => Some("BadArgs"),
+        ToolError::Internal { .. } => Some("Internal"),
+        ToolError::SessionDead { .. } => Some("SessionDead"),
+        ToolError::DeadlineExceeded => Some("DeadlineExceeded"),
+        ToolError::CapabilityDenied { .. } => Some("CapabilityDenied"),
+        ToolError::Llm(_) => Some("Llm"),
+        ToolError::Storage(_) => Some("Storage"),
+        // `ToolError` is `#[non_exhaustive]`; unknown future variants fall
+        // back to Internal in the drainer (None → default branch).
+        _ => None,
+    };
     RunEvent::FatalError {
         kind: "Tool".to_string(),
         detail: format!("{err}"),
         context_json: None,
+        tool_error_variant: variant.map(String::from),
     }
 }
 
@@ -535,6 +559,7 @@ fn make_tool_not_registered_error(tool_name: &str, registered: &[String]) -> Run
         kind: "ToolNotRegistered".to_string(),
         detail: format!("tool `{tool_name}` not registered; registered: {registered:?}"),
         context_json: Some(context.to_string()),
+        tool_error_variant: None,
     }
 }
 
