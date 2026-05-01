@@ -111,3 +111,28 @@ fn snapshot_update_help() {
     let s = capture_help(&["update", "--help"]);
     insta::assert_snapshot!("update_help", s);
 }
+
+#[test]
+fn snapshot_session_help() {
+    insta::assert_snapshot!(capture_help(&["session", "--help"]));
+}
+
+#[test]
+fn snapshot_session_list_help() {
+    insta::assert_snapshot!(capture_help(&["session", "list", "--help"]));
+}
+
+#[test]
+fn snapshot_session_show_help() {
+    insta::assert_snapshot!(capture_help(&["session", "show", "--help"]));
+}
+
+#[test]
+fn snapshot_session_delete_help() {
+    insta::assert_snapshot!(capture_help(&["session", "delete", "--help"]));
+}
+
+#[test]
+fn snapshot_session_export_help() {
+    insta::assert_snapshot!(capture_help(&["session", "export", "--help"]));
+}

@@ -149,12 +149,14 @@ fn chat_help_command_lists_slash_commands() {
         .assert()
         .success()
         .stdout(predicate::str::contains("/exit"))
-        .stdout(predicate::str::contains("/clear"))
+        .stdout(predicate::str::contains("/info"))
         .stdout(predicate::str::contains("/history"));
 }
 
 #[test]
-fn chat_clear_resets_history() {
+fn chat_clear_prints_deprecation() {
+    // Since Task 5, /clear is deprecated: it prints a guidance message
+    // and continues (does NOT clear in-memory history, does NOT quit).
     let dir = common::setup_echo_project("echo", "canned_text = \"first\"\n", &[]);
     let global_dir = dir.path().join("global");
 
@@ -163,12 +165,11 @@ fn chat_clear_resets_history() {
         .args(["chat", "echo"])
         .current_dir(dir.path())
         .env("TAU_HOME", &global_dir)
-        .write_stdin("turn1\n/clear\n/history\n/exit\n")
+        .write_stdin("turn1\n/clear\n/exit\n")
         .assert()
         .success()
-        .stdout(predicate::str::contains("first"))
-        .stdout(predicate::str::contains("(no history yet)"))
-        .stderr(predicate::str::contains("history cleared"));
+        // /clear now emits a deprecation hint via status (stderr).
+        .stderr(predicate::str::contains("/clear was removed"));
 }
 
 #[test]

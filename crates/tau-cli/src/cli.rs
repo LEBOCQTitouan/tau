@@ -79,6 +79,8 @@ pub enum Command {
         #[command(subcommand)]
         action: PluginAction,
     },
+    /// Session management (list, show, delete, export).
+    Session(SessionArgs),
 }
 
 /// `tau plugin <action>` — debug-tier helpers per spec §9.
@@ -143,6 +145,90 @@ pub struct PluginProtocolDecodeArgs {
     /// Emit one decoded JSON object per line (machine-readable).
     #[arg(long)]
     pub json: bool,
+}
+
+/// Arguments for `tau session`.
+#[derive(Args, Debug)]
+pub struct SessionArgs {
+    /// Sub-action within the session group.
+    #[command(subcommand)]
+    pub action: SessionAction,
+}
+
+/// Sub-actions of `tau session`.
+#[derive(Subcommand, Debug)]
+pub enum SessionAction {
+    /// List sessions in the current scope.
+    List(SessionListArgs),
+    /// Print transcript of a session.
+    Show(SessionShowArgs),
+    /// Delete a session.
+    Delete(SessionDeleteArgs),
+    /// Export a session in a specific format.
+    Export(SessionExportArgs),
+}
+
+/// Arguments for `tau session list`.
+#[derive(Args, Debug)]
+pub struct SessionListArgs {
+    /// Filter by agent name.
+    pub agent: Option<String>,
+    /// Use global scope instead of project scope.
+    #[arg(long)]
+    pub global: bool,
+    /// Maximum number of sessions to display (default 20).
+    #[arg(long, default_value_t = 20)]
+    pub limit: usize,
+    /// Disable the limit; show all sessions.
+    #[arg(long)]
+    pub all: bool,
+}
+
+/// Arguments for `tau session show`.
+#[derive(Args, Debug)]
+pub struct SessionShowArgs {
+    /// Session id (or 8+ char prefix).
+    pub id: String,
+    /// Use global scope.
+    #[arg(long)]
+    pub global: bool,
+}
+
+/// Arguments for `tau session delete`.
+#[derive(Args, Debug)]
+pub struct SessionDeleteArgs {
+    /// Session id (or 8+ char prefix).
+    pub id: String,
+    /// Use global scope.
+    #[arg(long)]
+    pub global: bool,
+    /// Skip the confirmation prompt.
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
+}
+
+/// Export format for `tau session export`.
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum ExportFormat {
+    /// Raw JSONL passthrough (cat-equivalent).
+    Jsonl,
+    /// Markdown render (same as `tau session show` human mode).
+    Md,
+    /// Single envelope JSON object containing header + messages.
+    Json,
+}
+
+/// Arguments for `tau session export`.
+#[derive(Args, Debug)]
+pub struct SessionExportArgs {
+    /// Session id (or 8+ char prefix).
+    pub id: String,
+    /// Output format.
+    #[arg(long, value_enum, default_value_t = ExportFormat::Jsonl)]
+    pub format: ExportFormat,
+    /// Use global scope.
+    #[arg(long)]
+    pub global: bool,
 }
 
 /// Arguments for `tau init`.
@@ -293,6 +379,15 @@ pub struct ChatArgs {
     /// instead of typewriter-style as it arrives.
     #[arg(long, default_value_t = false)]
     pub no_stream: bool,
+    /// Don't persist this session to disk; in-memory only.
+    #[arg(long, default_value_t = false)]
+    pub ephemeral: bool,
+    /// Resume an existing session (id or 8+ char prefix).
+    #[arg(long)]
+    pub resume: Option<String>,
+    /// Override drift detection on resume.
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
 }
 
 /// Resource kinds accepted by `tau list`.

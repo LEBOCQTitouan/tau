@@ -2745,6 +2745,8 @@ dependencies = [
  "base64",
  "clap",
  "futures-core",
+ "humantime",
+ "humantime-serde",
  "insta",
  "is-terminal",
  "predicates",
@@ -2768,6 +2770,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "uuid",
 ]
 
 [[package]]

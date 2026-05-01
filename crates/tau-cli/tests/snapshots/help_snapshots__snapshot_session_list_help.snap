@@ -1,36 +1,26 @@
 ---
 source: crates/tau-cli/tests/help_snapshots.rs
-expression: s
+expression: "capture_help(&[\"session\", \"list\", \"--help\"])"
 ---
-Open a REPL chat session with an agent
+List sessions in the current scope
 
-Usage: tau chat [OPTIONS] <AGENT_ID>
+Usage: tau session list [OPTIONS] [AGENT]
 
 Arguments:
-  <AGENT_ID>
-          Identifier of the agent to chat with
+  [AGENT]
+          Filter by agent name
 
 Options:
-      --max-turns <MAX_TURNS>
-          Override RunOptions::max_turns
+      --global
+          Use global scope instead of project scope
 
-      --dry-run
-          Validate setup without entering the REPL
+      --limit <LIMIT>
+          Maximum number of sessions to display (default 20)
+          
+          [default: 20]
 
-      --no-install
-          Skip auto-install of missing requires.tools dependencies. If anything would need fetching, exit 2 with copy-pasteable `tau install <url>` hints instead
-
-      --no-stream
-          Disable streaming output. Renders the full response after each turn instead of typewriter-style as it arrives
-
-      --ephemeral
-          Don't persist this session to disk; in-memory only
-
-      --resume <RESUME>
-          Resume an existing session (id or 8+ char prefix)
-
-      --force
-          Override drift detection on resume
+      --all
+          Disable the limit; show all sessions
 
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)

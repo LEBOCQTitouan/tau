@@ -22,9 +22,10 @@ enforcement. **Tier 2 fully complete** as of 2026-05-01: priorities
 4 (capability override), 5 (transitive dependency resolution), 6
 (tool-args schema validation), 7 (tau update/verify/uninstall), and
 8 (streaming LLM responses) all shipped, closing the ADR-0007 §4,
-§5, §1, ADR-0006 §3, and ADR-0006 §5 reservations. Tier 3 (multi-
-agent orchestration, workflow runner, REPL persistence, sandboxing)
-is the natural next phase of work.
+§5, §1, ADR-0006 §3, and ADR-0006 §5 reservations. Tier 3 priority
+11 (REPL persistence) shipped 2026-05-02 — closing ADR-0006 §16 +
+ADR-0007 §11. Remaining Tier 3: priorities 9 (multi-agent
+orchestration), 10 (workflow runner), and 12 (sandboxing).
 
 | # | Sub-project | Produces | Merged |
 |---|---|---|---|
@@ -37,6 +38,7 @@ is the natural next phase of work.
 | 5 | Transitive dependency resolution ✅ | Tier 2 priority 5 — realizes ADR-0007 §5 reservation. New `tau-pkg::source_list` (git ls-remote tag enumeration + rev-pinned shallow read) and `tau-pkg::resolve` (three-phase resolver: group / conflict / pick highest-compatible). New `tau resolve` subcommand. Schema upgrade: `[[agents.<id>.requires.tools]]` typed entries with `name + source + version`; bare strings rejected at parse. Lazy resolve at `tau run`/`tau chat` with `--no-install` opt-out emitting copy-pasteable install hints. npm-style progress output (one line per phase, JSON event stream). New typed `ResolveError`, `SourceListError`, `RequiresToolsBareStringRejected`. Tests use `file://` git fixtures — no real network in CI. No new CI jobs (23 required checks unchanged). | 2026-04-30 |
 | 6 | Tool-args schema validation ✅ | Tier 2 priority 6 — realizes ADR-0006 §3 deferral closure. New `tau-runtime::tool_args` module with `ToolArgsValidator` (Draft 7 via `jsonschema` crate). Schemas pre-compile at `RuntimeBuilder::build()`; malformed → `BuildError::ToolSchemaInvalid` (terminates build before any LLM round-trip). Runtime arg-validation failures surface as `ToolError::BadArgs` with MANDATORY template (original args + full schema + specific issue) so the LLM self-corrects via the conversation. Loop survives validation errors; only real plugin invocation crashes still terminate. New ADR-0010. No new CI jobs (23 required checks unchanged). | 2026-04-30 |
 | 7 | tau update / verify / uninstall ✅ | Tier 2 priority 7 — closes ADR-0007 §1 deferral. New tau_pkg::tree_hash module (walkdir + sha2; excludes .git/, target/, *.tau-tmp/; symlinks contribute target bytes). New tau_pkg::verify module returning structured VerifyReport (Ok / TreeDrift / BinaryDrift / Missing / Unverified). New tau_pkg::update_package library function composing existing source_list + resolver + install + uninstall. Three CLI subcommands: tau update (default latest tag, --version pin, --prune), tau verify (exit 0/2, --json), tau uninstall (permissive + remediation hint). Lockfile schema v2 → v3 additive (LockedPlugin.binary_sha256 field; v2-leftover entries flagged unverified, not drift). Existing tau_pkg::uninstall library function reused unchanged. New ADR-0012. No new CI jobs (23 required checks unchanged). | 2026-05-01 |
+| 11 | REPL persistence ✅ | Tier 3 priority 11 — closes ADR-0006 §16 + ADR-0007 §11 deferrals. New tau-cli/src/session module: SessionId (UUID v7), SessionWriter / SessionReader (JSONL), list_sessions, render_session. Auto-save default with --ephemeral opt-out. tau chat --resume <id-or-prefix> with strict drift validation (agent_id + package.name + package.version + llm_backend match), --force overrides. New tau session subcommand group (list, show, delete, export with jsonl/md/json formats). /clear removed (incoherent with persistence); /info added. Schema v1 baseline. No tau-runtime changes. New ADR-0013. No new CI jobs (23 required checks unchanged). | 2026-05-02 |
 | 8 | Streaming LLM responses ✅ | Tier 2 priority 8 — realizes ADR-0006 §5 deferral closure. New `tau-runtime::stream` module with `RunEvent` enum + `run_streaming_inner` async generator (via `async-stream` crate). Kernel pump translates `CompletionChunk` into higher-level `RunEvent`s (`TextDelta`, `ToolCallStarted`, `ToolCallCompleted`, `TurnCompleted`, `RunCompleted`, `FatalError`). `Runtime::run_streaming` + `run_streaming_with_history` public entry points return `Result<impl Stream + 'static, RuntimeError>`. `Runtime::run`/`run_with_history` REFACTOR as thin stream-drainers (zero behavior change; 100+ existing tests pass unchanged). New `RunEvent::FatalError` variant (with `tool_error_variant` tag) preserves byte-identical batch-API error reconstruction for typed `RuntimeError::*` variants (plan-erratum revision documented in ADR-0011 decision 2). `tau chat` streams by default (`--no-stream` opt-out, two-pass termimad render); `tau run --stream` opt-in flag (human + JSON modes; canonical 5-event JSON shape per spec §4.6). New ADR-0011. No new CI jobs (23 required checks unchanged). | 2026-04-30 |
 
 ## Phase 0 (complete) — bootstrap + foundational sub-projects
@@ -166,7 +168,16 @@ Tier ordering reflects criticality, not strict implementation order
 9. **Multi-agent orchestration** (G10's deferred half).
 10. **Workflow / pipeline runner** (deterministic step-by-step
     pipelines; possibly new `tau-workflow` crate).
-11. **REPL persistence** (`tau chat --resume <id>`).
+11. **REPL persistence** (`tau chat --resume <id>`) ✅ Shipped 2026-05-02 — see
+    [spec](docs/superpowers/specs/2026-05-01-repl-persistence-design.md)
+    and [ADR-0013](docs/decisions/0013-repl-persistence.md).
+    Sessions auto-save to JSONL files at `<scope>/.tau/sessions/<uuid>.jsonl`.
+    `--ephemeral` opts out. `tau chat <agent> --resume <id-or-prefix>`
+    with strict-mode drift validation (`--force` overrides). New
+    `tau session` subcommand group (list, show, delete, export). New
+    `/info` REPL slash command; `/clear` removed (replaced by `/exit`
+    + re-run). No tau-runtime changes (NG6 preserved). No new CI jobs
+    (23 required checks unchanged).
 12. **Sandboxing implementation** (Constitution G12).
 
 ### Tier 4 — operational quality
