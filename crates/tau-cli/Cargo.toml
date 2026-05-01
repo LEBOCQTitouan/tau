@@ -31,6 +31,8 @@ serde              = { workspace = true }
 serde_json         = "1"
 toml               = { workspace = true }
 thiserror          = { workspace = true }
+# UUID v7 for session ids (ADR-0013 / Tier 3 priority 11).
+uuid               = { workspace = true }
 anyhow             = "1"
 termimad           = "0.30"
 rustyline          = "14"
