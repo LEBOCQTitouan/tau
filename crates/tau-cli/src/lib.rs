@@ -11,7 +11,7 @@ pub mod cmd;
 pub mod config;
 pub mod exit;
 pub mod output;
-mod session;
+pub(crate) mod session;
 pub mod tracing;
 
 pub use config::{

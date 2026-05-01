@@ -1,7 +1,3 @@
-// Dead-code / unused-import warnings are expected until Tasks 5+ wire up
-// this module. Suppress them so clippy -D warnings stays green.
-#![allow(dead_code, unused_imports)]
-
 //! Session storage for `tau chat` REPL persistence (ADR-0013 / Tier 3
 //! priority 11).
 //!
@@ -20,14 +16,20 @@ pub mod id;
 pub mod render;
 pub mod store;
 
-pub use id::{mint, resolve_id_prefix, SessionId};
+pub use id::{mint, SessionId};
+// resolve_id_prefix, render_session, list_sessions, SessionEntry, SessionMetadata,
+// SessionReader, SCHEMA_VERSION are staged for Tasks 6-10; suppress until wired.
+#[allow(unused_imports)]
+pub use id::resolve_id_prefix;
+#[allow(unused_imports)]
 pub use render::render_session;
-pub use store::{
-    list_sessions, SessionEntry, SessionHeader, SessionMetadata, SessionPackage, SessionReader,
-    SessionWriter, SCHEMA_VERSION,
-};
+#[allow(unused_imports)]
+pub use store::{list_sessions, SessionEntry, SessionMetadata, SessionReader, SCHEMA_VERSION};
+pub use store::{SessionHeader, SessionPackage, SessionWriter};
 
 /// Errors returned by the session storage layer.
+// Most variants are staged for Tasks 6-10 (resume, list, show, delete, export).
+#[allow(dead_code)]
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {

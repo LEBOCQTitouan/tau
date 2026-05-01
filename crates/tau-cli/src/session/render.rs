@@ -6,12 +6,12 @@
 //! through termimad for ANSI rendering or to emit raw markdown
 //! (e.g., `tau session export --format md`).
 
-#![allow(dead_code)]
-
 use tau_domain::{Address, Message, MessagePayload};
 
 use super::store::{SessionEntry, SessionHeader};
 
+// Staged for Task 8 (tau session show).
+#[allow(dead_code)]
 const BODY_PREVIEW_CHARS: usize = 200;
 
 /// Render a session as markdown.
@@ -19,6 +19,8 @@ const BODY_PREVIEW_CHARS: usize = 200;
 /// Header summary at the top, `---` separator, then each message in
 /// order. TurnSummary entries are counted into the header's
 /// "Turns:" total but not rendered inline.
+// Staged for Task 8 (tau session show).
+#[allow(dead_code)]
 pub fn render_session(header: &SessionHeader, entries: &[SessionEntry]) -> String {
     let mut out = String::new();
 

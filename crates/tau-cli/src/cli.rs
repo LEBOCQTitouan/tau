@@ -293,6 +293,9 @@ pub struct ChatArgs {
     /// instead of typewriter-style as it arrives.
     #[arg(long, default_value_t = false)]
     pub no_stream: bool,
+    /// Don't persist this session to disk; in-memory only.
+    #[arg(long, default_value_t = false)]
+    pub ephemeral: bool,
 }
 
 /// Resource kinds accepted by `tau list`.

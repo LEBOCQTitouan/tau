@@ -1,6 +1,3 @@
-// Dead-code warnings expected until Tasks 5+ wire up the session module.
-#![allow(dead_code)]
-
 //! UUID v7 session ids with prefix resolution.
 //!
 //! v7 = timestamp-prefixed UUIDs (sortable lexicographically by
@@ -25,11 +22,15 @@ pub struct SessionId(Uuid);
 
 impl SessionId {
     /// Wrap a raw `Uuid` (used by parsers/tests).
+    // Staged for Task 6 (resume parser).
+    #[allow(dead_code)]
     pub fn from_uuid(u: Uuid) -> Self {
         Self(u)
     }
 
     /// Underlying UUID.
+    // Staged for Task 6+ internals.
+    #[allow(dead_code)]
     pub fn as_uuid(&self) -> &Uuid {
         &self.0
     }
@@ -65,6 +66,8 @@ pub fn mint() -> SessionId {
 
 /// Resolve a user-supplied id-or-prefix to an exact `SessionId` by
 /// scanning `<sessions_dir>/*.jsonl`.
+// Staged for Task 6 (--resume flag).
+#[allow(dead_code)]
 ///
 /// - Exact 36-char match: short-circuits.
 /// - 8+ char prefix: matches against canonical filenames; one hit

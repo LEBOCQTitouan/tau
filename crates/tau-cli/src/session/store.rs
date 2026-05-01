@@ -10,8 +10,6 @@
 //!   Tolerates a trailing malformed line (logs a `tracing::warn!` and
 //!   continues), so a crashed REPL can still resume.
 
-#![allow(dead_code)]
-
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -24,6 +22,8 @@ use super::id::SessionId;
 use super::SessionError;
 
 /// Current session-file schema version. Bump on breaking changes only.
+// Staged for Tasks 6+ (schema validation in resume path).
+#[allow(dead_code)]
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Package metadata recorded in the session header for drift checks.
@@ -85,6 +85,8 @@ impl SessionHeader {
 }
 
 /// Parsed entries that follow the header in a session file.
+// Staged for Tasks 6+ (resume reader, session show, etc.).
+#[allow(dead_code)]
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum SessionEntry {
@@ -152,6 +154,8 @@ impl SessionWriter {
 
     /// Open an existing session file in append mode (used after
     /// resume).
+    // Staged for Task 6 (--resume flag).
+    #[allow(dead_code)]
     pub fn open_append(path: &Path) -> Result<Self, SessionError> {
         let file = OpenOptions::new()
             .append(true)
@@ -263,12 +267,16 @@ impl SessionWriter {
 }
 
 /// Parser for an existing session file.
+// Staged for Tasks 6+ (resume, show, list, export).
+#[allow(dead_code)]
 pub struct SessionReader;
 
 impl SessionReader {
     /// Open and parse a session file. Returns the header + every
     /// non-header entry. Skips a trailing malformed line gracefully
     /// (logs `tracing::warn!`).
+    // Staged for Tasks 6+ (resume, show, list, export).
+    #[allow(dead_code)]
     pub fn read(path: &Path) -> Result<(SessionHeader, Vec<SessionEntry>), SessionError> {
         let file = File::open(path).map_err(|e| SessionError::Io {
             path: path.to_path_buf(),
@@ -346,6 +354,8 @@ impl SessionReader {
     }
 }
 
+// Staged for Tasks 6+ (resume reader uses this).
+#[allow(dead_code)]
 fn parse_entry(line: &str) -> Result<SessionEntry, String> {
     #[derive(Deserialize)]
     struct Discriminator {
@@ -386,6 +396,8 @@ fn parse_entry(line: &str) -> Result<SessionEntry, String> {
     }
 }
 
+// Staged for Tasks 6+ (used by SessionReader::read).
+#[allow(dead_code)]
 fn file_stem(path: &Path) -> String {
     path.file_stem()
         .and_then(|s| s.to_str())
@@ -398,6 +410,8 @@ fn file_stem(path: &Path) -> String {
 /// Built from the file's header line + a count of subsequent
 /// non-header lines. Reads the whole file (cheap for typical
 /// session sizes < 10MB).
+// Staged for Task 7 (tau session list).
+#[allow(dead_code)]
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct SessionMetadata {
@@ -423,6 +437,8 @@ pub struct SessionMetadata {
 /// Sort is descending by `created_at`. `agent_filter` filters by
 /// `header.agent_id` if `Some(name)`. Files that fail to parse the
 /// header line are silently skipped (logged at `warn`).
+// Staged for Task 7 (tau session list).
+#[allow(dead_code)]
 pub fn list_sessions(
     sessions_dir: &Path,
     agent_filter: Option<&str>,

@@ -23,6 +23,9 @@ Options:
       --no-stream
           Disable streaming output. Renders the full response after each turn instead of typewriter-style as it arrives
 
+      --ephemeral
+          Don't persist this session to disk; in-memory only
+
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
 

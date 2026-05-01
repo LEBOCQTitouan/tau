@@ -75,10 +75,12 @@ pub enum SlashCommand {
     Exit,
     /// Print the slash-command cheat sheet.
     Help,
-    /// Drop the in-memory conversation history.
+    /// Deprecated: previously dropped in-memory conversation history.
     Clear,
     /// Render the current conversation history.
     History,
+    /// Print information about the current session.
+    Info,
 }
 
 /// Parse a single line of REPL input.
@@ -96,6 +98,7 @@ pub fn parse_input(line: &str) -> ReplInput {
         "/help" => ReplInput::Slash(SlashCommand::Help),
         "/clear" => ReplInput::Slash(SlashCommand::Clear),
         "/history" => ReplInput::Slash(SlashCommand::History),
+        "/info" => ReplInput::Slash(SlashCommand::Info),
         _ => ReplInput::Prompt(line.to_string()),
     }
 }
@@ -185,6 +188,8 @@ pub async fn run(
         &manifest,
         &options,
         args.no_stream,
+        args.ephemeral,
+        &scope,
         &runtime,
         output,
     )
@@ -209,6 +214,8 @@ async fn run_repl(
     manifest: &tau_domain::PackageManifest,
     options: &RunOptions,
     no_stream: bool,
+    ephemeral: bool,
+    scope: &tau_pkg::Scope,
     runtime: &tau_runtime::Runtime,
     output: &mut Output,
 ) -> anyhow::Result<()> {
@@ -220,6 +227,31 @@ async fn run_repl(
         manifest.version()
     ))?;
 
+    // ---- Session writer setup -----------------------------------------------
+    let session_id = crate::session::mint();
+    let mut session_writer: Option<crate::session::SessionWriter> = if !ephemeral {
+        let sessions_dir = scope.state_path().join("sessions");
+        let header = crate::session::SessionHeader::new(
+            &session_id,
+            entry.id.clone(),
+            crate::session::SessionPackage {
+                name: manifest.name().to_string(),
+                version: manifest.version().to_string(),
+                resolved_commit: String::new(),
+            },
+            agent_def.llm_backend.to_string(),
+        );
+        let writer = crate::session::SessionWriter::create(&sessions_dir, &session_id, &header)?;
+        output.status(format!("Session: {} (will be saved)", session_id.short()))?;
+        Some(writer)
+    } else {
+        output.status("Ephemeral session — not saved to disk")?;
+        None
+    };
+
+    let session_started_at = std::time::SystemTime::now();
+    let mut turn_counter: u32 = 0;
+
     let mut editor = DefaultEditor::new().context("initialising rustyline editor")?;
     let mut history: Vec<Message> = Vec::new();
     let mut total_tokens = TokenUsage::default();
@@ -228,7 +260,13 @@ async fn run_repl(
         let line = match editor.readline("> ") {
             Ok(line) => line,
             Err(ReadlineError::Eof) | Err(ReadlineError::Interrupted) => {
-                emit_session_summary(total_tokens, output)?;
+                close_session_and_summary(
+                    session_writer.take(),
+                    &session_id,
+                    &entry.id,
+                    total_tokens,
+                    output,
+                )?;
                 return Ok(());
             }
             Err(e) => {
@@ -242,18 +280,46 @@ async fn run_repl(
 
         match parse_input(&line) {
             ReplInput::Slash(SlashCommand::Exit) => {
-                emit_session_summary(total_tokens, output)?;
+                close_session_and_summary(
+                    session_writer.take(),
+                    &session_id,
+                    &entry.id,
+                    total_tokens,
+                    output,
+                )?;
                 return Ok(());
             }
             ReplInput::Slash(SlashCommand::Help) => {
                 print_help(output)?;
             }
             ReplInput::Slash(SlashCommand::Clear) => {
-                history.clear();
-                output.status("history cleared.")?;
+                // /clear was removed — in-memory history clear is incoherent
+                // with persistence (clearing in-memory leaves the file intact,
+                // so resume would surface the cleared messages). Print a
+                // deprecation message and continue.
+                output.status(
+                    "/clear was removed. Exit (/exit) and re-run `tau chat <agent>` for a fresh session.",
+                )?;
             }
             ReplInput::Slash(SlashCommand::History) => {
                 render_history(&history, output)?;
+            }
+            ReplInput::Slash(SlashCommand::Info) => {
+                let path_label = session_writer
+                    .as_ref()
+                    .map(|w| w.path().display().to_string())
+                    .unwrap_or_else(|| "(ephemeral; not saved)".to_string());
+                let started = humantime::format_rfc3339_seconds(session_started_at).to_string();
+                output.status(format!(
+                    "Session: {}\nFile: {}\nTurns: {}\nStarted: {}\nAgent: {} ({}@{})",
+                    session_id.as_str(),
+                    path_label,
+                    turn_counter,
+                    started,
+                    entry.id,
+                    manifest.name(),
+                    manifest.version()
+                ))?;
             }
             ReplInput::Prompt(text) if text.trim().is_empty() => {
                 // Empty / whitespace-only input — no-op. Skip the round
@@ -261,6 +327,7 @@ async fn run_repl(
                 continue;
             }
             ReplInput::Prompt(text) => {
+                let prev_history_len = history.len();
                 let initial = Message::new(
                     Address::User,
                     // The kernel mints its own per-run AgentInstanceId;
@@ -272,7 +339,7 @@ async fn run_repl(
                 );
 
                 if no_stream {
-                    // ---- Batch (non-streaming) path — unchanged ----
+                    // ---- Batch (non-streaming) path ----
                     let outcome = runtime
                         .run_with_history(
                             agent_def.clone(),
@@ -292,6 +359,26 @@ async fn run_repl(
                         }) => {
                             render_final_message(&final_message, output)?;
                             accumulate_tokens(&mut total_tokens, &token_usage);
+                            // Persist new messages before updating history.
+                            if let Some(writer) = session_writer.as_mut() {
+                                let new_messages = &all_messages[prev_history_len..];
+                                if let Err(e) = writer.append_messages(new_messages) {
+                                    tracing::warn!(
+                                        name = "session.write_failed",
+                                        error = %e,
+                                        "session write failed; continuing"
+                                    );
+                                } else {
+                                    turn_counter += 1;
+                                    let stop_str = "Completed".to_string();
+                                    let _ = writer.append_turn_summary(
+                                        turn_counter,
+                                        &stop_str,
+                                        Some(token_usage.input_tokens),
+                                        Some(token_usage.output_tokens),
+                                    );
+                                }
+                            }
                             history = all_messages;
                         }
                         Ok(RunOutcome::Failed {
@@ -305,6 +392,26 @@ async fn run_repl(
                             // which aborts the REPL below.)
                             output.error(format!("agent failed: {status:?}"))?;
                             accumulate_tokens(&mut total_tokens, &token_usage);
+                            // Persist partial messages even on failure.
+                            if let Some(writer) = session_writer.as_mut() {
+                                let new_messages = &all_messages[prev_history_len..];
+                                if let Err(e) = writer.append_messages(new_messages) {
+                                    tracing::warn!(
+                                        name = "session.write_failed",
+                                        error = %e,
+                                        "session write failed; continuing"
+                                    );
+                                } else {
+                                    turn_counter += 1;
+                                    let stop_str = format!("Failed({status:?})");
+                                    let _ = writer.append_turn_summary(
+                                        turn_counter,
+                                        &stop_str,
+                                        Some(token_usage.input_tokens),
+                                        Some(token_usage.output_tokens),
+                                    );
+                                }
+                            }
                             history = all_messages;
                         }
                         Ok(_) => {
@@ -398,6 +505,26 @@ async fn run_repl(
                                     } => {
                                         render_final_message(&final_message, output)?;
                                         accumulate_tokens(&mut total_tokens, &token_usage);
+                                        // Persist new messages before updating history.
+                                        if let Some(writer) = session_writer.as_mut() {
+                                            let new_messages = &all_messages[prev_history_len..];
+                                            if let Err(e) = writer.append_messages(new_messages) {
+                                                tracing::warn!(
+                                                    name = "session.write_failed",
+                                                    error = %e,
+                                                    "session write failed; continuing"
+                                                );
+                                            } else {
+                                                turn_counter += 1;
+                                                let stop_str = "Completed".to_string();
+                                                let _ = writer.append_turn_summary(
+                                                    turn_counter,
+                                                    &stop_str,
+                                                    Some(token_usage.input_tokens),
+                                                    Some(token_usage.output_tokens),
+                                                );
+                                            }
+                                        }
                                         history = all_messages;
                                     }
                                     RunOutcome::Failed {
@@ -408,6 +535,26 @@ async fn run_repl(
                                     } => {
                                         output.error(format!("agent failed: {status:?}"))?;
                                         accumulate_tokens(&mut total_tokens, &token_usage);
+                                        // Persist partial messages even on failure.
+                                        if let Some(writer) = session_writer.as_mut() {
+                                            let new_messages = &all_messages[prev_history_len..];
+                                            if let Err(e) = writer.append_messages(new_messages) {
+                                                tracing::warn!(
+                                                    name = "session.write_failed",
+                                                    error = %e,
+                                                    "session write failed; continuing"
+                                                );
+                                            } else {
+                                                turn_counter += 1;
+                                                let stop_str = format!("Failed({status:?})");
+                                                let _ = writer.append_turn_summary(
+                                                    turn_counter,
+                                                    &stop_str,
+                                                    Some(token_usage.input_tokens),
+                                                    Some(token_usage.output_tokens),
+                                                );
+                                            }
+                                        }
                                         history = all_messages;
                                     }
                                     _ => {
@@ -435,6 +582,31 @@ async fn run_repl(
             }
         }
     }
+}
+
+/// Close the session writer (if any) and emit the end-of-session summary.
+///
+/// Prints a resume hint for non-ephemeral sessions or "Session discarded."
+/// for ephemeral ones. Called from both exit paths (`/exit` and EOF/Ctrl-D).
+fn close_session_and_summary(
+    session_writer: Option<crate::session::SessionWriter>,
+    session_id: &crate::session::SessionId,
+    agent_id: &str,
+    total_tokens: TokenUsage,
+    output: &mut Output,
+) -> anyhow::Result<()> {
+    emit_session_summary(total_tokens, output)?;
+    if let Some(writer) = session_writer {
+        writer.close()?;
+        output.status(format!(
+            "Session saved. Resume with: tau chat {} --resume {}",
+            agent_id,
+            session_id.short()
+        ))?;
+    } else {
+        output.status("Session discarded.")?;
+    }
+    Ok(())
 }
 
 /// Render the final message of a completed turn. Text payloads go
@@ -505,7 +677,7 @@ fn print_help(output: &mut Output) -> anyhow::Result<()> {
     output.human("Slash commands:")?;
     output.human("  /exit      End the session.")?;
     output.human("  /help      Show this help.")?;
-    output.human("  /clear     Clear conversation history.")?;
+    output.human("  /info      Show session info (id, file, turns, agent).")?;
     output.human("  /history   Show conversation history.")?;
     Ok(())
 }
