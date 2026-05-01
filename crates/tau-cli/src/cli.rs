@@ -67,6 +67,8 @@ pub enum Command {
     /// the project tau.toml. Project-wide form of the lazy resolve
     /// that `tau run` and `tau chat` perform per-agent.
     Resolve(ResolveArgs),
+    /// Uninstall a package and remove its lockfile entry.
+    Uninstall(UninstallArgs),
     /// Plugin debugging utilities (spec §9 debug tier).
     Plugin {
         /// Sub-action within the plugin group.
@@ -197,6 +199,19 @@ pub struct ResolveArgs {
     /// Print the resolution plan without fetching anything.
     #[arg(long)]
     pub dry_run: bool,
+}
+
+/// Arguments for `tau uninstall`.
+#[derive(Args, Debug)]
+pub struct UninstallArgs {
+    /// Package name to uninstall.
+    pub package: String,
+    /// Specific version (default: all versions).
+    #[arg(long)]
+    pub version: Option<String>,
+    /// Use the global scope (~/.tau) instead of the project scope.
+    #[arg(long)]
+    pub global: bool,
 }
 
 /// Arguments for `tau run`.
