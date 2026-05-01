@@ -235,6 +235,10 @@ pub struct ChatArgs {
     /// `tau install <url>` hints instead.
     #[arg(long)]
     pub no_install: bool,
+    /// Disable streaming output. Renders the full response after each turn
+    /// instead of typewriter-style as it arrives.
+    #[arg(long, default_value_t = false)]
+    pub no_stream: bool,
 }
 
 /// Resource kinds accepted by `tau list`.

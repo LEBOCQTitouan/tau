@@ -20,6 +20,9 @@ Options:
       --no-install
           Skip auto-install of missing requires.tools dependencies. If anything would need fetching, exit 2 with copy-pasteable `tau install <url>` hints instead
 
+      --no-stream
+          Disable streaming output. Renders the full response after each turn instead of typewriter-style as it arrives
+
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
 

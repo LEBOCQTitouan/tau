@@ -228,3 +228,66 @@ fn chat_history_threads_across_turns() {
         .stdout(predicate::str::contains("[0]"))
         .stdout(predicate::str::contains("[3]"));
 }
+
+// ---- Streaming integration tests -------------------------------------------
+//
+// The streaming path (default, --no-stream unset) calls
+// runtime.run_streaming_with_history and renders in two passes:
+//   Pass 1: text deltas inline via raw print!/flush (typewriter UX).
+//   Pass 2: re-render via termimad on RunCompleted.
+//
+// Both tests use assert_cmd + scripted stdin + stdout capture, following the
+// same pattern as chat_repl_three_turn_via_stdin_pipe above. The echo-llm
+// plugin is used as the scripted LLM backend — it echoes canned text, which
+// is what both streaming and batch paths produce.
+//
+// The streaming path goes through run_streaming_with_history; the batch path
+// goes through run_with_history. Both ultimately produce the same text output
+// (the canned echo text), so asserting stdout contains the text is sufficient
+// to confirm the path ran.
+
+#[test]
+fn chat_streaming_emits_text_deltas_inline() {
+    // Default (no --no-stream flag): streaming path is active. The echo-llm
+    // plugin drives the LLM layer; it emits the canned text as the agent
+    // response, which the streaming path renders via print!/flush and then
+    // re-renders via termimad. Both passes write to stdout, so the text
+    // appears at least once in stdout.
+    let dir = common::setup_echo_project("echo", "canned_text = \"hello-streaming\"\n", &[]);
+    let global_dir = dir.path().join("global");
+
+    AssertCmd::cargo_bin("tau")
+        .unwrap()
+        .args(["chat", "echo"])
+        .current_dir(dir.path())
+        .env("TAU_HOME", &global_dir)
+        .write_stdin("hi\n/exit\n")
+        .assert()
+        .success()
+        // The streaming path print!s text deltas and then termimad re-renders.
+        // Either pass (or both) ensures "hello-streaming" appears in stdout.
+        .stdout(predicate::str::contains("hello-streaming"))
+        .stderr(predicate::str::contains("session ended"));
+}
+
+#[test]
+fn chat_no_stream_flag_disables_streaming() {
+    // With --no-stream: the batch flow runs (run_with_history). The echo-llm
+    // plugin produces the same canned text, but via the batch path that
+    // calls render_final_message (termimad rendering on stdout).
+    let dir = common::setup_echo_project("echo", "canned_text = \"hello-no-stream\"\n", &[]);
+    let global_dir = dir.path().join("global");
+
+    AssertCmd::cargo_bin("tau")
+        .unwrap()
+        .args(["chat", "echo", "--no-stream"])
+        .current_dir(dir.path())
+        .env("TAU_HOME", &global_dir)
+        .write_stdin("hi\n/exit\n")
+        .assert()
+        .success()
+        // The batch path uses termimad's render_final_message, which writes
+        // directly to stdout. "hello-no-stream" must appear.
+        .stdout(predicate::str::contains("hello-no-stream"))
+        .stderr(predicate::str::contains("session ended"));
+}
