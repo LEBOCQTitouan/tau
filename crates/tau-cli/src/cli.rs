@@ -67,6 +67,12 @@ pub enum Command {
     /// the project tau.toml. Project-wide form of the lazy resolve
     /// that `tau run` and `tau chat` perform per-agent.
     Resolve(ResolveArgs),
+    /// Uninstall a package and remove its lockfile entry.
+    Uninstall(UninstallArgs),
+    /// Verify installed packages against the lockfile (spec §3).
+    Verify(VerifyArgs),
+    /// Update an installed package to a newer or specific version (spec §2).
+    Update(UpdateArgs),
     /// Plugin debugging utilities (spec §9 debug tier).
     Plugin {
         /// Sub-action within the plugin group.
@@ -197,6 +203,48 @@ pub struct ResolveArgs {
     /// Print the resolution plan without fetching anything.
     #[arg(long)]
     pub dry_run: bool,
+}
+
+/// Arguments for `tau uninstall`.
+#[derive(Args, Debug)]
+pub struct UninstallArgs {
+    /// Package name to uninstall.
+    pub package: String,
+    /// Specific version (default: all versions).
+    #[arg(long)]
+    pub version: Option<String>,
+    /// Use the global scope (~/.tau) instead of the project scope.
+    #[arg(long)]
+    pub global: bool,
+}
+
+/// Arguments for `tau verify`.
+#[derive(Args, Debug)]
+pub struct VerifyArgs {
+    /// Package name to verify (default: all installed packages).
+    pub package: Option<String>,
+    /// Specific version.
+    #[arg(long)]
+    pub version: Option<String>,
+    /// Use global scope.
+    #[arg(long)]
+    pub global: bool,
+}
+
+/// Arguments for `tau update`.
+#[derive(Args, Debug)]
+pub struct UpdateArgs {
+    /// Package name to update.
+    pub package: String,
+    /// Specific version (default: latest tag).
+    #[arg(long)]
+    pub version: Option<String>,
+    /// Remove the old active version after the new install succeeds.
+    #[arg(long)]
+    pub prune: bool,
+    /// Use global scope.
+    #[arg(long)]
+    pub global: bool,
 }
 
 /// Arguments for `tau run`.

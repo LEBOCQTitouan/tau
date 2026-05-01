@@ -30,7 +30,7 @@ async fn handshake_completes_under_one_second_in_release() {
         PluginKind::RustCargo,
         "echo-llm".to_string(),
     );
-    let plugin = LockedPlugin::new(manifest, echo_llm, SystemTime::now());
+    let plugin = LockedPlugin::new(manifest, echo_llm, SystemTime::now(), String::new());
 
     let trace_context = TraceContext::new(
         "perf-smoke".to_string(),

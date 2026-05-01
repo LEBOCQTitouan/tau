@@ -14,3 +14,6 @@ pub(crate) mod plugin_loader;
 pub mod resolve;
 pub(crate) mod resolve_helpers;
 pub mod run;
+pub mod uninstall;
+pub mod update;
+pub mod verify;

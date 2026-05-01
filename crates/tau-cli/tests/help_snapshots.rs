@@ -93,3 +93,21 @@ fn snapshot_plugin_protocol_decode_help() {
     let s = capture_help(&["plugin", "protocol", "decode", "--help"]);
     insta::assert_snapshot!("plugin_protocol_decode_help", s);
 }
+
+#[test]
+fn snapshot_uninstall_help() {
+    let s = capture_help(&["uninstall", "--help"]);
+    insta::assert_snapshot!("uninstall_help", s);
+}
+
+#[test]
+fn snapshot_verify_help() {
+    let s = capture_help(&["verify", "--help"]);
+    insta::assert_snapshot!("verify_help", s);
+}
+
+#[test]
+fn snapshot_update_help() {
+    let s = capture_help(&["update", "--help"]);
+    insta::assert_snapshot!("update_help", s);
+}

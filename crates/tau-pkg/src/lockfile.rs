@@ -12,8 +12,10 @@
 //! on breaking changes; lockfiles with a newer version than this tau
 //! version supports are rejected via [`crate::RegistryError::SchemaTooNew`].
 //!
-//! The `sha256` slot on [`LockedVersion`] is reserved for content
-//! hashing in Phase 1+ (`tau verify`); it is left empty at v0.1.
+//! The `sha256` slot on [`LockedVersion`] is populated by
+//! `install_with_options` after source materialization (Task 2).
+//! The `binary_sha256` slot on [`LockedPlugin`] is populated by
+//! `install_with_options` after `cargo build` succeeds (Task 2).
 //!
 //! [`LockFile::load`]/[`save`]/[`find`]/[`upsert`]/[`remove`] land in
 //! Task 7. This file (Task 6) defines only the data shapes + `Default`.
@@ -36,7 +38,12 @@ use crate::error::RegistryError;
 /// - `2` — Plugin loading: `LockedPackage::plugin: Option<LockedPlugin>`
 ///   added. v1 lockfiles auto-upgrade to v2 on load (the `plugin` field
 ///   defaults to `None` for legacy entries via `#[serde(default)]`).
-pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 2;
+/// - `3` — Content hashing: `LockedPlugin::binary_sha256: String` and
+///   `LockedVersion::sha256` now populated by `install_with_options`.
+///   v2 lockfiles auto-upgrade to v3 on load (`binary_sha256` defaults
+///   to `""` for legacy entries via `#[serde(default)]`; these are
+///   flagged `unverified` by `tau verify`).
+pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 3;
 
 /// Schema for `tau-lock.toml`.
 ///
@@ -50,15 +57,17 @@ pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 2;
 /// use tau_pkg::lockfile::LockFile;
 ///
 /// let lf = LockFile::default();
-/// assert_eq!(lf.schema_version, 2);
+/// assert_eq!(lf.schema_version, 3);
 /// assert!(lf.packages.is_empty());
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LockFile {
-    /// Schema version. Currently `2`. Bumped on breaking changes only.
-    /// v1 lockfiles are accepted on load and auto-upgraded to v2 on the
-    /// next save (legacy entries get `plugin = None`).
+    /// Schema version. Currently `3`. Bumped on breaking changes only.
+    /// v1/v2 lockfiles are accepted on load and auto-upgraded to v3 on
+    /// the next save (v1→v2: legacy entries get `plugin = None`;
+    /// v2→v3: `LockedPlugin` entries get `binary_sha256 = ""`
+    /// defaulted via `#[serde(default)]`).
     pub schema_version: u32,
     /// `CARGO_PKG_VERSION` of the tau-pkg crate that last wrote this file.
     pub generated_by_tau_version: String,
@@ -144,17 +153,31 @@ pub struct LockedPlugin {
     /// step that produced it).
     #[serde(with = "humantime_serde")]
     pub built_at: SystemTime,
+    /// SHA-256 of the built binary at `binary_path`. Populated by
+    /// `install_with_options` after `cargo build` succeeds. Empty
+    /// for v2-leftover entries (informational `unverified` status
+    /// from `tau verify`, not drift).
+    ///
+    /// Added in lockfile schema v3.
+    #[serde(default)]
+    pub binary_sha256: String,
 }
 
 impl LockedPlugin {
     /// Construct a `LockedPlugin`. `#[non_exhaustive]`; external callers
     /// (notably tau-runtime integration tests that synthesize a
     /// lockfile against pre-built binaries) use this constructor.
-    pub fn new(manifest: PluginManifest, binary_path: PathBuf, built_at: SystemTime) -> Self {
+    pub fn new(
+        manifest: PluginManifest,
+        binary_path: PathBuf,
+        built_at: SystemTime,
+        binary_sha256: String,
+    ) -> Self {
         Self {
             manifest,
             binary_path,
             built_at,
+            binary_sha256,
         }
     }
 }
@@ -166,8 +189,9 @@ impl LockedPlugin {
 /// produced after the clone. Together they support reproducible
 /// installs even when the user pinned a moving branch.
 ///
-/// `sha256` is reserved for Phase-1 content hashing (`tau verify`)
-/// and is left empty at v0.1.
+/// `sha256` is the SHA-256 of the installed source tree, computed by
+/// `install_with_options` after source materialization (Task 2).
+/// Empty for v2-leftover entries.
 ///
 /// # Example
 ///
@@ -184,7 +208,10 @@ pub struct LockedVersion {
     pub rev: Option<String>,
     /// Full 40-char commit SHA after `git rev-parse HEAD` at install time.
     pub resolved_commit: String,
-    /// Reserved for Phase-1 `tau verify` content hashing. Empty at v0.1.
+    /// SHA-256 of the installed source tree at install time. Computed by
+    /// `install_with_options` via `tau_pkg::tree_hash` after source
+    /// materialization. Empty for v2-leftover entries (flagged
+    /// `unverified` by `tau verify`).
     #[serde(default)]
     pub sha256: String,
     /// When this version was installed.
@@ -254,12 +281,17 @@ impl LockFile {
             });
         }
 
-        // Auto-upgrade v1 lockfiles in memory. v1 had no `plugin` field
-        // on `LockedPackage`; `#[serde(default)]` already populates it
-        // as `None`. We only need to bump the recorded schema version
-        // so the next `save()` writes `schema_version = 2`. Future
-        // schema bumps would add additional in-memory transformations
-        // here.
+        // Auto-upgrade older lockfiles in memory.
+        //
+        // v1 → v2: `LockedPackage::plugin` was not present in v1; it
+        // defaults to `None` via `#[serde(default)]`.
+        //
+        // v2 → v3: `LockedPlugin::binary_sha256` was not present in v2;
+        // it defaults to `""` via `#[serde(default)]`. `tau verify`
+        // treats empty `binary_sha256` as `unverified` (not drift).
+        //
+        // In both cases we only need to bump the recorded schema version
+        // so the next `save()` writes the current `MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION`.
         if parsed.schema_version < MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION {
             parsed.schema_version = MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION;
         }
@@ -433,7 +465,7 @@ mod tests {
     fn default_lockfile_has_current_schema_version() {
         let lf = LockFile::default();
         assert_eq!(lf.schema_version, MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION);
-        assert_eq!(lf.schema_version, 2);
+        assert_eq!(lf.schema_version, 3);
     }
 
     #[test]
@@ -536,6 +568,8 @@ mod tests {
     #[test]
     fn lockfile_parses_when_packages_field_omitted() {
         // #[serde(default)] should let a TOML doc with no [[package]] parse cleanly.
+        // Use schema_version = 2 (old format) to verify backward compatibility;
+        // the loaded value is auto-upgraded to 3 in memory.
         let toml_str = r#"
             schema_version = 2
             generated_by_tau_version = "0.0.0"
@@ -543,6 +577,8 @@ mod tests {
         "#;
         let parsed: LockFile = toml::from_str(toml_str).unwrap();
         assert!(parsed.packages.is_empty());
+        // Note: `toml::from_str` bypasses `LockFile::load`'s auto-upgrade
+        // logic, so the raw parsed value retains the file's schema_version.
         assert_eq!(parsed.schema_version, 2);
     }
 
@@ -621,7 +657,7 @@ mod tests {
             err,
             RegistryError::SchemaTooNew {
                 found: 999,
-                supported: 2,
+                supported: 3,
             }
         ));
     }

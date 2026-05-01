@@ -18,12 +18,13 @@ Phase 1 unblocks everything else.
 shell) shipped 2026-04-30. Tier 1 fully complete: plugin loading
 mechanism (priority 1), three real LLM-backend plugins (priority 2),
 and two real Tool plugins (priority 3) with end-to-end capability
-enforcement. Tier 2 priorities 4 (capability override), 5 (transitive
-dependency resolution), 6 (tool-args schema validation), and 8
-(streaming LLM responses) shipped 2026-04-30, closing the ADR-0007 §4,
-ADR-0007 §5, ADR-0006 §3, and ADR-0006 §5 reservations. The remaining
-Tier 2 deferral — tau update/verify/uninstall — is the natural next
-phase of work.
+enforcement. **Tier 2 fully complete** as of 2026-05-01: priorities
+4 (capability override), 5 (transitive dependency resolution), 6
+(tool-args schema validation), 7 (tau update/verify/uninstall), and
+8 (streaming LLM responses) all shipped, closing the ADR-0007 §4,
+§5, §1, ADR-0006 §3, and ADR-0006 §5 reservations. Tier 3 (multi-
+agent orchestration, workflow runner, REPL persistence, sandboxing)
+is the natural next phase of work.
 
 | # | Sub-project | Produces | Merged |
 |---|---|---|---|
@@ -35,6 +36,7 @@ phase of work.
 | 4 | Capability override implementation ✅ | Tier 2 priority 4 — realizes ADR-0007 §4 reservation. Project tau.toml `[[agents.<id>.capabilities]]` narrows but never expands package manifest grants. `tau-runtime::capability_override` module (semantic glob-subset analyzer + `compute_effective`); `RunOptions.project_override` flows from tau-cli through `Runtime::run`; `SessionContext.deny_entries` channel; `DenyEntry` type; fs-read + shell plugins honor deny-after-allow (deny wins per spec §9). Validation at parse time AND every runtime load (fail-closed both places). New `tau list agents --capabilities` audit surface. New typed errors `ProjectConfigError::CapabilityOverrideExpands` and `RuntimeError::CapabilityOverrideExpands`. Telemetry event `runtime.capability_override_rejected`. No new CI jobs (23 required checks unchanged). | 2026-04-30 |
 | 5 | Transitive dependency resolution ✅ | Tier 2 priority 5 — realizes ADR-0007 §5 reservation. New `tau-pkg::source_list` (git ls-remote tag enumeration + rev-pinned shallow read) and `tau-pkg::resolve` (three-phase resolver: group / conflict / pick highest-compatible). New `tau resolve` subcommand. Schema upgrade: `[[agents.<id>.requires.tools]]` typed entries with `name + source + version`; bare strings rejected at parse. Lazy resolve at `tau run`/`tau chat` with `--no-install` opt-out emitting copy-pasteable install hints. npm-style progress output (one line per phase, JSON event stream). New typed `ResolveError`, `SourceListError`, `RequiresToolsBareStringRejected`. Tests use `file://` git fixtures — no real network in CI. No new CI jobs (23 required checks unchanged). | 2026-04-30 |
 | 6 | Tool-args schema validation ✅ | Tier 2 priority 6 — realizes ADR-0006 §3 deferral closure. New `tau-runtime::tool_args` module with `ToolArgsValidator` (Draft 7 via `jsonschema` crate). Schemas pre-compile at `RuntimeBuilder::build()`; malformed → `BuildError::ToolSchemaInvalid` (terminates build before any LLM round-trip). Runtime arg-validation failures surface as `ToolError::BadArgs` with MANDATORY template (original args + full schema + specific issue) so the LLM self-corrects via the conversation. Loop survives validation errors; only real plugin invocation crashes still terminate. New ADR-0010. No new CI jobs (23 required checks unchanged). | 2026-04-30 |
+| 7 | tau update / verify / uninstall ✅ | Tier 2 priority 7 — closes ADR-0007 §1 deferral. New tau_pkg::tree_hash module (walkdir + sha2; excludes .git/, target/, *.tau-tmp/; symlinks contribute target bytes). New tau_pkg::verify module returning structured VerifyReport (Ok / TreeDrift / BinaryDrift / Missing / Unverified). New tau_pkg::update_package library function composing existing source_list + resolver + install + uninstall. Three CLI subcommands: tau update (default latest tag, --version pin, --prune), tau verify (exit 0/2, --json), tau uninstall (permissive + remediation hint). Lockfile schema v2 → v3 additive (LockedPlugin.binary_sha256 field; v2-leftover entries flagged unverified, not drift). Existing tau_pkg::uninstall library function reused unchanged. New ADR-0012. No new CI jobs (23 required checks unchanged). | 2026-05-01 |
 | 8 | Streaming LLM responses ✅ | Tier 2 priority 8 — realizes ADR-0006 §5 deferral closure. New `tau-runtime::stream` module with `RunEvent` enum + `run_streaming_inner` async generator (via `async-stream` crate). Kernel pump translates `CompletionChunk` into higher-level `RunEvent`s (`TextDelta`, `ToolCallStarted`, `ToolCallCompleted`, `TurnCompleted`, `RunCompleted`, `FatalError`). `Runtime::run_streaming` + `run_streaming_with_history` public entry points return `Result<impl Stream + 'static, RuntimeError>`. `Runtime::run`/`run_with_history` REFACTOR as thin stream-drainers (zero behavior change; 100+ existing tests pass unchanged). New `RunEvent::FatalError` variant (with `tool_error_variant` tag) preserves byte-identical batch-API error reconstruction for typed `RuntimeError::*` variants (plan-erratum revision documented in ADR-0011 decision 2). `tau chat` streams by default (`--no-stream` opt-out, two-pass termimad render); `tau run --stream` opt-in flag (human + JSON modes; canonical 5-event JSON shape per spec §4.6). New ADR-0011. No new CI jobs (23 required checks unchanged). | 2026-04-30 |
 
 ## Phase 0 (complete) — bootstrap + foundational sub-projects
@@ -131,7 +133,18 @@ Tier ordering reflects criticality, not strict implementation order
    conversation. `RuntimeError::PluginContractViolation` stays
    reserved for a future out-of-process plugin handshake-lying
    trigger path. No new CI jobs (23 required checks unchanged).
-7. **`tau update` / `tau verify` / `tau uninstall` subcommands.**
+7. **`tau update` / `tau verify` / `tau uninstall` subcommands** ✅ Shipped 2026-05-01 — see
+   [spec](docs/superpowers/specs/2026-05-01-tau-lifecycle-design.md)
+   and [ADR-0012](docs/decisions/0012-tau-lifecycle-commands.md).
+   New `tau_pkg::tree_hash`, `verify`, `update_package` modules.
+   Whole-tree SHA-256 verify is source-agnostic (anticipates future
+   `PackageSource` variants). `tau update <pkg>` defaults to latest
+   tag; `--version` to pin; `--prune` opt-in. `tau uninstall` is
+   permissive with a remediation hint pointing to project tau.toml's
+   `[[requires.tools]]` entries. Lockfile schema v2 → v3 (additive:
+   `LockedPlugin.binary_sha256`). Existing `tau_pkg::uninstall`
+   library function reused unchanged. No new CI jobs (23 required
+   checks unchanged).
 8. **Streaming LLM responses** ✅ Shipped 2026-04-30 — see
    [spec](docs/superpowers/specs/2026-04-30-streaming-design.md)
    and [ADR-0011](docs/decisions/0011-streaming-llm-responses.md).

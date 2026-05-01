@@ -9,7 +9,7 @@ use std::str::FromStr;
 use tempfile::TempDir;
 
 use tau_domain::PackageSource;
-use tau_pkg::{install, list, Scope};
+use tau_pkg::{install, list, LockFile, Scope};
 
 #[test]
 fn install_minimal_tool_package() {
@@ -63,6 +63,83 @@ fn install_is_idempotent_when_called_twice() {
     let pkgs = list(&scope).unwrap();
     assert_eq!(pkgs.len(), 1, "second install should not duplicate");
     assert_eq!(pkgs[0].installed_versions.len(), 1);
+}
+
+/// Task 2: After install, `LockedVersion.sha256` must be a non-empty 64-char hex string
+/// computed from the source tree. This verifies `tree_hash` is called and persisted.
+#[test]
+fn install_populates_locked_version_sha256() {
+    if !fixtures::git_available() {
+        eprintln!("skipping: `git` not on PATH");
+        return;
+    }
+
+    let tmp = TempDir::new().unwrap();
+    let project_root = tmp.path().join("tau-home");
+    std::fs::create_dir_all(&project_root).unwrap();
+    let scope = Scope::new_project(&project_root).unwrap();
+
+    let bare = fixtures::make_fixture_repo(tmp.path(), "sha256-tool", "1.0.0", "tool");
+    let source = PackageSource::from_str(&fixtures::file_url(&bare)).unwrap();
+
+    install(&source, &scope).unwrap();
+
+    let lf = LockFile::load(&scope.lockfile_path()).unwrap();
+    let pkg = lf
+        .packages
+        .iter()
+        .find(|p| p.name.as_str() == "sha256-tool")
+        .expect("package should be recorded in lockfile");
+    let locked_version = &pkg.installed_versions[0];
+
+    let sha = &locked_version.sha256;
+    assert_eq!(
+        sha.len(),
+        64,
+        "LockedVersion.sha256 should be 64-char hex after install; got: {sha:?}"
+    );
+    assert!(
+        sha.chars().all(|c| c.is_ascii_hexdigit()),
+        "LockedVersion.sha256 should be hex; got: {sha:?}"
+    );
+    assert!(
+        !sha.is_empty(),
+        "LockedVersion.sha256 should be non-empty after install"
+    );
+}
+
+/// Task 2: After install, the lockfile schema_version should be bumped to 3
+/// (the version that introduced populated sha256 fields).
+#[test]
+fn install_writes_schema_version_3_lockfile() {
+    if !fixtures::git_available() {
+        eprintln!("skipping: `git` not on PATH");
+        return;
+    }
+
+    let tmp = TempDir::new().unwrap();
+    let project_root = tmp.path().join("tau-home");
+    std::fs::create_dir_all(&project_root).unwrap();
+    let scope = Scope::new_project(&project_root).unwrap();
+
+    let bare = fixtures::make_fixture_repo(tmp.path(), "schema-v3-tool", "1.0.0", "tool");
+    let source = PackageSource::from_str(&fixtures::file_url(&bare)).unwrap();
+
+    install(&source, &scope).unwrap();
+
+    // Check the on-disk TOML file directly — this confirms schema_version is
+    // written as 3 (not still 2 from a default that was never bumped).
+    let disk_content = std::fs::read_to_string(scope.lockfile_path()).unwrap();
+    assert!(
+        disk_content.contains("schema_version = 3"),
+        "lockfile on disk should contain schema_version = 3 after fresh install;\ngot:\n{disk_content}"
+    );
+
+    let lf = LockFile::load(&scope.lockfile_path()).unwrap();
+    assert_eq!(
+        lf.schema_version, 3,
+        "LockFile::load should return schema_version = 3"
+    );
 }
 
 #[test]
