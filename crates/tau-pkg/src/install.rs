@@ -307,6 +307,13 @@ pub fn install_with_options(
             });
         }
 
+        // Step 8.6: compute source tree SHA-256 (post-rename, the install
+        // dir is in its final location; `target/` is excluded by tree_hash).
+        let source_sha256 =
+            crate::tree_hash::tree_hash(&target).map_err(|e| InstallError::Internal {
+                message: format!("computing source tree hash: {e}"),
+            })?;
+
         // Step 8.5: build (only for kind = "rust-cargo" plugin packages).
         //
         // Per spec §6.3, the build is invoked between materialization
@@ -322,7 +329,7 @@ pub fn install_with_options(
             version: manifest.version().clone(),
             rev: rev_from_source(source),
             resolved_commit,
-            sha256: String::new(),
+            sha256: source_sha256,
             installed_at: now,
         };
 
@@ -511,10 +518,16 @@ fn build_rust_cargo_plugin(
             ),
         })?;
 
+    let binary_sha256 =
+        crate::tree_hash::sha256_of_file(&canonical).map_err(|e| InstallError::Internal {
+            message: format!("computing plugin binary hash: {e}"),
+        })?;
+
     Ok(Some(LockedPlugin::new(
         plugin_manifest.clone(),
         canonical,
         SystemTime::now(),
+        binary_sha256,
     )))
 }
 
