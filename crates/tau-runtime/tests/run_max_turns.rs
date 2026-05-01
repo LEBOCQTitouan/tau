@@ -32,8 +32,9 @@ impl LlmBackend for InfiniteToolUseLlm {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(self.response.clone())
     }
-    async fn stream(&self, _req: CompletionRequest) -> Result<CompletionStream, LlmError> {
-        unimplemented!("InfiniteToolUseLlm only supports complete()")
+    async fn stream(&self, req: CompletionRequest) -> Result<CompletionStream, LlmError> {
+        let resp = self.complete(req).await?;
+        Ok(tau_ports::batch_to_stream(resp))
     }
 }
 

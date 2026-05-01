@@ -347,6 +347,229 @@ impl Runtime {
     pub(crate) fn storages(&self) -> &HashMap<String, Arc<dyn DynStorage>> {
         &self.storages
     }
+
+    // -----------------------------------------------------------------------
+    // Public streaming entry points (Task 6)
+    // -----------------------------------------------------------------------
+
+    /// Stream an agent run from a single initial message.
+    ///
+    /// Convenience wrapper over [`Runtime::run_streaming_with_history`]
+    /// that passes an empty history. Validates inputs (capability override,
+    /// LLM backend resolution, tool capability filtering) and constructs
+    /// owned snapshots of registry data for the `'static` stream.
+    ///
+    /// Returns a `Stream<Item = RunEvent>` that yields text deltas,
+    /// tool-call events, turn-completion signals, and a terminal
+    /// `RunCompleted` event.
+    ///
+    /// # Note: non-`Send` stream
+    ///
+    /// Note: the returned stream is **not** `Send`. The underlying
+    /// `DynLlmBackend::stream` returns a non-`Send` boxed future per
+    /// the design at `builder.rs:45-50`. Consumers must drive the
+    /// stream from a single tokio task (or use `tokio::task::LocalSet`
+    /// for cross-task usage).
+    ///
+    /// This will be revisited in a future ADR if/when `DynLlmBackend`
+    /// gains a Send-bounded variant.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tau_runtime::Runtime;
+    /// use futures_core::Stream;
+    ///
+    /// let runtime: Runtime = /* ... */;
+    /// let mut stream = runtime.run_streaming(agent_def, manifest, msg, opts).await?;
+    /// while let Some(event) = futures_util::StreamExt::next(&mut stream).await {
+    ///     // handle event
+    /// }
+    /// ```
+    pub async fn run_streaming(
+        &self,
+        agent_def: tau_domain::AgentDefinition,
+        package_manifest: tau_domain::PackageManifest,
+        initial_message: tau_domain::Message,
+        options: crate::options::RunOptions,
+    ) -> Result<
+        impl futures_core::Stream<Item = crate::stream::RunEvent> + 'static,
+        crate::error::RuntimeError,
+    > {
+        self.run_streaming_with_history(
+            agent_def,
+            package_manifest,
+            Vec::new(),
+            initial_message,
+            options,
+        )
+        .await
+    }
+
+    /// Stream an agent run, prepending conversation history before the
+    /// initial message.
+    ///
+    /// Validates inputs — capability override compute, LLM backend
+    /// resolution, and tool capability filtering — then builds owned
+    /// snapshots of the registry data and constructs the stream by
+    /// calling `crate::stream::run_streaming_inner`.
+    ///
+    /// The setup mirrors `run.rs` `run_with_history` exactly (§4.1):
+    ///   - `compute_effective` for project capability override
+    ///   - `granted_for_kernel` + `granted_for_session` views
+    ///   - `deny_entries` collection
+    ///   - LLM backend resolution
+    ///   - capability-filtered `tool_specs` (filtered tools are dropped)
+    ///   - `tools` + `tool_validators` HashMap snapshots (Arc-clones)
+    ///
+    /// # Note: non-`Send` stream
+    ///
+    /// Note: the returned stream is **not** `Send`. The underlying
+    /// `DynLlmBackend::stream` returns a non-`Send` boxed future per
+    /// the design at `builder.rs:45-50`. Consumers must drive the
+    /// stream from a single tokio task (or use `tokio::task::LocalSet`
+    /// for cross-task usage).
+    ///
+    /// This will be revisited in a future ADR if/when `DynLlmBackend`
+    /// gains a Send-bounded variant.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tau_runtime::Runtime;
+    /// use futures_core::Stream;
+    ///
+    /// let runtime: Runtime = /* ... */;
+    /// let mut stream = runtime
+    ///     .run_streaming_with_history(agent_def, manifest, history, msg, opts)
+    ///     .await?;
+    /// while let Some(event) = futures_util::StreamExt::next(&mut stream).await {
+    ///     // handle event
+    /// }
+    /// ```
+    pub async fn run_streaming_with_history(
+        &self,
+        agent_def: tau_domain::AgentDefinition,
+        package_manifest: tau_domain::PackageManifest,
+        history: Vec<tau_domain::Message>,
+        initial_message: tau_domain::Message,
+        options: crate::options::RunOptions,
+    ) -> Result<
+        impl futures_core::Stream<Item = crate::stream::RunEvent> + 'static,
+        crate::error::RuntimeError,
+    > {
+        use crate::capability::check_capabilities;
+        use crate::run::narrowed_capability_for_session;
+        use tau_domain::Capability;
+        use tau_ports::{DenyEntry, ToolSpec};
+        use tracing::{debug, info, warn};
+
+        info!(name = "runtime.run_streaming_started");
+
+        // Step 1: Apply capability override (defense-in-depth, mirrors
+        // `run_with_history`). Narrowing is enforced plugin-side via
+        // SessionContext.
+        let effective = crate::capability_override::compute_effective(
+            package_manifest.capabilities(),
+            &options.project_override,
+        )
+        .map_err(|e| {
+            warn!(
+                name = "runtime.streaming_capability_override_rejected",
+                agent_id = %agent_def.id,
+                package_id = %agent_def.package.name,
+                kind = %e.kind,
+                reason = %e.reason,
+            );
+            crate::error::RuntimeError::CapabilityOverrideExpands {
+                kind: e.kind,
+                reason: e.reason,
+            }
+        })?;
+
+        // Step 2: Build granted_for_kernel (structural package grants).
+        let granted_for_kernel: Vec<Capability> =
+            effective.iter().map(|e| e.source.clone()).collect();
+        let granted: &[Capability] = &granted_for_kernel;
+        debug!(
+            name = "runtime.streaming_capability_set_loaded",
+            count = granted.len(),
+            overrides_applied = options.project_override.len(),
+        );
+
+        // Step 3: Build granted_for_session (narrowed view).
+        let granted_for_session: Vec<Capability> = effective
+            .iter()
+            .map(narrowed_capability_for_session)
+            .collect();
+
+        // Step 4: Build deny_entries.
+        let deny_entries: Vec<DenyEntry> = effective
+            .iter()
+            .filter(|e| !e.deny.is_empty())
+            .map(|e| {
+                let kind = match &e.source {
+                    Capability::Filesystem(tau_domain::FsCapability::Read { .. }) => "fs.read",
+                    Capability::Filesystem(tau_domain::FsCapability::Write { .. }) => "fs.write",
+                    Capability::Filesystem(tau_domain::FsCapability::Exec { .. }) => "fs.exec",
+                    Capability::Network(tau_domain::NetCapability::Http { .. }) => "net.http",
+                    Capability::Process(tau_domain::ProcessCapability::Spawn { .. }) => {
+                        "process.spawn"
+                    }
+                    _ => "unknown",
+                };
+                DenyEntry::new(kind.to_string(), e.deny.clone())
+            })
+            .collect();
+
+        // Step 5: Resolve LLM backend.
+        let backend = self
+            .resolve_llm_backend(agent_def.id.as_str(), agent_def.llm_backend.as_str())?
+            .clone();
+
+        // Step 6: Build capability-filtered tool_specs.
+        // Tools with unsatisfied capability requirements are dropped from
+        // the LLM prompt — shrinks the prompt and prevents spurious
+        // tool_uses that would be denied at invoke time.
+        let mut tool_specs: Vec<ToolSpec> = Vec::with_capacity(self.tools().len());
+        for (name, tool) in self.tools().iter() {
+            let required = tool.capabilities();
+            if check_capabilities(granted, required).is_none() {
+                tool_specs.push(tool.schema());
+            } else {
+                debug!(
+                    name = "runtime.streaming_tool_filtered",
+                    tool_name = name.as_str(),
+                    "tool filtered out: missing capability",
+                );
+            }
+        }
+
+        // Step 7: Snapshot tools HashMap (Arc-clones — cheap reference-count bump).
+        let tools: HashMap<String, Arc<dyn DynTool>> = self.tools().clone();
+
+        // Step 8: Snapshot tool_validators HashMap (ToolArgsValidator is Clone
+        // via Arc<Validator> internally — cheap reference-count bump).
+        let tool_validators: HashMap<String, crate::tool_args::ToolArgsValidator> =
+            self.tool_validators().clone();
+
+        // Step 9: Construct and return the stream.
+        let stream = crate::stream::run_streaming_inner(
+            backend,
+            agent_def,
+            package_manifest,
+            history,
+            initial_message,
+            options,
+            tools,
+            tool_validators,
+            granted_for_kernel,
+            tool_specs,
+            deny_entries,
+            granted_for_session,
+        );
+        Ok(stream)
+    }
 }
 
 /// Builder for [`Runtime`]. Plugin instances accumulate via the

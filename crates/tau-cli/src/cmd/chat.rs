@@ -42,13 +42,16 @@
 //! `--json` is rejected at handler entry: a streaming, terminal-driven
 //! REPL has no useful JSON projection. (See spec §3.6.)
 
+use std::io::{self, Write as _};
 use std::path::PathBuf;
 
 use anyhow::Context;
+use futures_core::stream::Stream as _;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use tau_domain::{Address, AgentInstanceId, Message, MessagePayload};
 use tau_plugin_protocol::handshake::TraceContext;
+use tau_runtime::stream::RunEvent;
 use tau_runtime::{RunOptions, RunOutcome, TokenUsage};
 
 use crate::cli::ChatArgs;
@@ -176,7 +179,16 @@ pub async fn run(
         .build()
         .context("failed to build runtime from spawned plugins")?;
 
-    let result = run_repl(entry, &agent_def, &manifest, &options, &runtime, output).await;
+    let result = run_repl(
+        entry,
+        &agent_def,
+        &manifest,
+        &options,
+        args.no_stream,
+        &runtime,
+        output,
+    )
+    .await;
 
     // Drop the runtime before flushing recorders so every plugin
     // process is reaped and the host-side write task is quiescent.
@@ -196,6 +208,7 @@ async fn run_repl(
     agent_def: &tau_domain::AgentDefinition,
     manifest: &tau_domain::PackageManifest,
     options: &RunOptions,
+    no_stream: bool,
     runtime: &tau_runtime::Runtime,
     output: &mut Output,
 ) -> anyhow::Result<()> {
@@ -257,49 +270,166 @@ async fn run_repl(
                     Address::Agent(AgentInstanceId::new()),
                     MessagePayload::Text { content: text },
                 );
-                let outcome = runtime
-                    .run_with_history(
-                        agent_def.clone(),
-                        manifest.clone(),
-                        history.clone(),
-                        initial,
-                        options.clone(),
-                    )
-                    .await;
 
-                match outcome {
-                    Ok(RunOutcome::Completed {
-                        final_message,
-                        all_messages,
-                        token_usage,
-                        ..
-                    }) => {
-                        render_final_message(&final_message, output)?;
-                        accumulate_tokens(&mut total_tokens, &token_usage);
-                        history = all_messages;
+                if no_stream {
+                    // ---- Batch (non-streaming) path — unchanged ----
+                    let outcome = runtime
+                        .run_with_history(
+                            agent_def.clone(),
+                            manifest.clone(),
+                            history.clone(),
+                            initial,
+                            options.clone(),
+                        )
+                        .await;
+
+                    match outcome {
+                        Ok(RunOutcome::Completed {
+                            final_message,
+                            all_messages,
+                            token_usage,
+                            ..
+                        }) => {
+                            render_final_message(&final_message, output)?;
+                            accumulate_tokens(&mut total_tokens, &token_usage);
+                            history = all_messages;
+                        }
+                        Ok(RunOutcome::Failed {
+                            status,
+                            all_messages,
+                            token_usage,
+                            ..
+                        }) => {
+                            // Agent-level failure: render in red and let the
+                            // user retry. (Distinct from a kernel error,
+                            // which aborts the REPL below.)
+                            output.error(format!("agent failed: {status:?}"))?;
+                            accumulate_tokens(&mut total_tokens, &token_usage);
+                            history = all_messages;
+                        }
+                        Ok(_) => {
+                            return Err(anyhow::anyhow!("unknown RunOutcome variant"));
+                        }
+                        Err(e) => {
+                            // Kernel/operational error: print and abort the
+                            // REPL with a kernel-error exit. Token usage so
+                            // far is still surfaced.
+                            output.error(format!("kernel error: {e}"))?;
+                            return Err(anyhow::Error::from(e));
+                        }
                     }
-                    Ok(RunOutcome::Failed {
-                        status,
-                        all_messages,
-                        token_usage,
-                        ..
-                    }) => {
-                        // Agent-level failure: render in red and let the
-                        // user retry. (Distinct from a kernel error,
-                        // which aborts the REPL below.)
-                        output.error(format!("agent failed: {status:?}"))?;
-                        accumulate_tokens(&mut total_tokens, &token_usage);
-                        history = all_messages;
-                    }
-                    Ok(_) => {
-                        return Err(anyhow::anyhow!("unknown RunOutcome variant"));
-                    }
-                    Err(e) => {
-                        // Kernel/operational error: print and abort the
-                        // REPL with a kernel-error exit. Token usage so
-                        // far is still surfaced.
-                        output.error(format!("kernel error: {e}"))?;
-                        return Err(anyhow::Error::from(e));
+                } else {
+                    // ---- Streaming path (default) ----
+                    //
+                    // Two-pass rendering per spec §4.5:
+                    //   Pass 1 (during streaming): text deltas via raw
+                    //     print!/flush (typewriter UX); tool annotations
+                    //     to stderr so stdout stays the agent's text.
+                    //   Pass 2 (on RunCompleted): re-render via termimad
+                    //     (render_final_message) so the user sees final
+                    //     formatted markdown after the rough-draft pass.
+                    let stream_result = runtime
+                        .run_streaming_with_history(
+                            agent_def.clone(),
+                            manifest.clone(),
+                            history.clone(),
+                            initial,
+                            options.clone(),
+                        )
+                        .await;
+
+                    let stream = match stream_result {
+                        Ok(s) => s,
+                        Err(e) => {
+                            output.error(format!("kernel error: {e}"))?;
+                            return Err(anyhow::Error::from(e));
+                        }
+                    };
+                    let mut stream = Box::pin(stream);
+                    let mut stdout = io::stdout();
+
+                    loop {
+                        let next = std::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await;
+                        match next {
+                            Some(RunEvent::TextDelta { delta }) => {
+                                // Pass 1: typewriter output — raw print to
+                                // stdout, bypassing Output's writer, so the
+                                // text appears inline without a trailing newline
+                                // until the full message is assembled.
+                                print!("{delta}");
+                                let _ = stdout.flush();
+                            }
+                            Some(RunEvent::ToolCallStarted { name, .. }) => {
+                                // Route tool annotations to stderr so stdout
+                                // remains the agent's clean text stream.
+                                eprintln!("-> calling {name}...");
+                            }
+                            Some(RunEvent::ToolCallCompleted { name, result, .. }) => {
+                                match result {
+                                    Ok(_) => eprintln!("✓ {name} completed"),
+                                    Err(reason) => eprintln!("✗ {name} failed: {reason}"),
+                                }
+                            }
+                            Some(RunEvent::TurnCompleted { .. }) => {
+                                // Nothing during streaming; re-render on
+                                // RunCompleted below.
+                            }
+                            Some(RunEvent::FatalError { kind, detail, .. }) => {
+                                // Kernel-level fatal error: mirror the batch
+                                // path's Err(RuntimeError) handling — print
+                                // and abort the REPL.
+                                println!(); // end the typewriter line
+                                output.error(format!("kernel error ({kind}): {detail}"))?;
+                                return Err(anyhow::anyhow!(
+                                    "streaming fatal error ({kind}): {detail}"
+                                ));
+                            }
+                            Some(RunEvent::RunCompleted { outcome }) => {
+                                // Pass 2: close typewriter line, then
+                                // re-render the final message with termimad
+                                // markdown formatting.
+                                println!();
+                                match outcome {
+                                    RunOutcome::Completed {
+                                        final_message,
+                                        all_messages,
+                                        token_usage,
+                                        ..
+                                    } => {
+                                        render_final_message(&final_message, output)?;
+                                        accumulate_tokens(&mut total_tokens, &token_usage);
+                                        history = all_messages;
+                                    }
+                                    RunOutcome::Failed {
+                                        status,
+                                        all_messages,
+                                        token_usage,
+                                        ..
+                                    } => {
+                                        output.error(format!("agent failed: {status:?}"))?;
+                                        accumulate_tokens(&mut total_tokens, &token_usage);
+                                        history = all_messages;
+                                    }
+                                    _ => {
+                                        return Err(anyhow::anyhow!(
+                                            "unknown RunOutcome variant in streaming path"
+                                        ));
+                                    }
+                                }
+                                break;
+                            }
+                            None => {
+                                // Stream exhausted without RunCompleted — should
+                                // not happen per stream invariants, but handle
+                                // defensively.
+                                println!();
+                                break;
+                            }
+                            // RunEvent is #[non_exhaustive]; ignore unknown
+                            // future variants so forward-compatibility is
+                            // preserved.
+                            Some(_) => {}
+                        }
                     }
                 }
             }

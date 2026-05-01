@@ -157,17 +157,207 @@ pub async fn run(
         },
     );
 
-    let run_outcome = runtime.run(agent_def, manifest, initial, options).await;
+    if args.stream {
+        let result =
+            run_streaming_path(&runtime, agent_def, manifest, initial, options, output).await;
+        drop(runtime);
+        plugin_loader::flush_recorders(recorder_ledger).await;
+        result
+    } else {
+        let run_outcome = runtime.run(agent_def, manifest, initial, options).await;
 
-    // Drop the runtime explicitly before flushing recorders. This
-    // ensures every plugin process is reaped and every host-side write
-    // task has completed, so `flush_recorders` drains a quiescent set
-    // of file buffers rather than racing with in-flight `record(...)`.
-    drop(runtime);
-    plugin_loader::flush_recorders(recorder_ledger).await;
+        // Drop the runtime explicitly before flushing recorders. This
+        // ensures every plugin process is reaped and every host-side write
+        // task has completed, so `flush_recorders` drains a quiescent set
+        // of file buffers rather than racing with in-flight `record(...)`.
+        drop(runtime);
+        plugin_loader::flush_recorders(recorder_ledger).await;
 
-    let outcome = run_outcome.context("running agent")?;
+        let outcome = run_outcome.context("running agent")?;
 
+        match outcome {
+            RunOutcome::Completed {
+                ref final_message,
+                total_turns,
+                ref token_usage,
+                ..
+            } => {
+                if output.is_json() {
+                    let payload = serde_json::json!({
+                        "outcome": "completed",
+                        "final_message": format_message_text(&final_message.payload),
+                        "total_turns": total_turns,
+                        "token_usage": {
+                            "input_tokens": token_usage.input_tokens,
+                            "output_tokens": token_usage.output_tokens,
+                        },
+                    });
+                    output.json(&payload)?;
+                } else {
+                    let text = format_message_text(&final_message.payload);
+                    output.human(&text)?;
+                }
+                Ok(())
+            }
+            RunOutcome::Failed {
+                ref status,
+                total_turns,
+                ref token_usage,
+                ..
+            } => {
+                if output.is_json() {
+                    let payload = serde_json::json!({
+                        "outcome": "failed",
+                        "status": format!("{status:?}"),
+                        "total_turns": total_turns,
+                        "token_usage": {
+                            "input_tokens": token_usage.input_tokens,
+                            "output_tokens": token_usage.output_tokens,
+                        },
+                    });
+                    output.json(&payload)?;
+                } else {
+                    output.error(format!("agent failed: {status:?}"))?;
+                }
+                // Marker error → ExitCode::AgentFailed (1) via downcast in
+                // crate::run_main. Kernel/CLI errors map to ExitCode::Error
+                // (2); this case is the explicit Outcome::Failed bucket.
+                Err(AgentFailed.into())
+            }
+            // RunOutcome is `#[non_exhaustive]`; cross-crate match needs a
+            // wildcard. Any future variant should be classified explicitly
+            // by an ADR amendment; for now, treat unknown outcomes as a
+            // kernel error.
+            _ => Err(anyhow::anyhow!("unknown RunOutcome variant")),
+        }
+    }
+}
+
+/// Consume the `run_streaming` stream and render events as they arrive.
+///
+/// Human mode: text deltas appear inline on stdout (raw `print!` / flush
+/// for typewriter UX); tool annotations go to stderr so stdout stays the
+/// agent's text. A closing newline is printed on `RunCompleted`.
+///
+/// JSON mode (`--json`): one JSON object per event line via
+/// `Output::json`. Shape: `{"event":"<discriminator>", ...}`.
+///
+/// The caller is responsible for `drop(runtime)` and
+/// `flush_recorders` after this function returns (streaming path or
+/// batch path — the drop + flush sequence is the same).
+async fn run_streaming_path(
+    runtime: &tau_runtime::Runtime,
+    agent_def: tau_domain::AgentDefinition,
+    manifest: tau_domain::PackageManifest,
+    initial: tau_domain::Message,
+    options: tau_runtime::RunOptions,
+    output: &mut Output,
+) -> anyhow::Result<()> {
+    use futures_core::stream::Stream as _;
+    use std::io::Write as _;
+    use tau_runtime::{RunEvent, RunOutcome};
+
+    let stream = runtime
+        .run_streaming(agent_def, manifest, initial, options)
+        .await
+        .context("running agent (streaming)")?;
+    let mut stream = Box::pin(stream);
+
+    let mut final_outcome: Option<RunOutcome> = None;
+    let mut fatal: Option<(String, String)> = None;
+
+    loop {
+        let next = std::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await;
+        match next {
+            Some(RunEvent::TextDelta { delta }) => {
+                if output.is_json() {
+                    output.json(&serde_json::json!({
+                        "event": "text_delta",
+                        "delta": delta,
+                    }))?;
+                } else {
+                    print!("{delta}");
+                    std::io::stdout().flush()?;
+                }
+            }
+            Some(RunEvent::ToolCallStarted { id, name, args }) => {
+                if output.is_json() {
+                    output.json(&serde_json::json!({
+                        "event": "tool_call_started",
+                        "id": id,
+                        "name": name,
+                        "args": args,
+                    }))?;
+                } else {
+                    eprintln!("→ calling {name}...");
+                }
+            }
+            Some(RunEvent::ToolCallCompleted { id, name, result }) => {
+                if output.is_json() {
+                    let result_json = match &result {
+                        Ok(_) => serde_json::json!({"ok": true}),
+                        Err(reason) => serde_json::json!({"ok": false, "error": reason}),
+                    };
+                    output.json(&serde_json::json!({
+                        "event": "tool_call_completed",
+                        "id": id,
+                        "name": name,
+                        "result": result_json,
+                    }))?;
+                } else {
+                    match &result {
+                        Ok(_) => eprintln!("✓ {name} completed"),
+                        Err(reason) => eprintln!("✗ {name} failed: {reason}"),
+                    }
+                }
+            }
+            Some(RunEvent::TurnCompleted {
+                stop_reason,
+                usage,
+                turn,
+            }) => {
+                if output.is_json() {
+                    let usage_json = match usage {
+                        Some(u) => serde_json::json!({
+                            "input_tokens": u.input_tokens,
+                            "output_tokens": u.output_tokens,
+                        }),
+                        None => serde_json::Value::Null,
+                    };
+                    output.json(&serde_json::json!({
+                        "event": "turn_completed",
+                        "stop_reason": format!("{stop_reason:?}"),
+                        "usage": usage_json,
+                        "turn": turn,
+                    }))?;
+                }
+                // Human mode: no-op (text deltas already rendered inline).
+            }
+            Some(RunEvent::RunCompleted { outcome }) => {
+                final_outcome = Some(outcome);
+                break;
+            }
+            Some(RunEvent::FatalError { kind, detail, .. }) => {
+                fatal = Some((kind, detail));
+                break;
+            }
+            Some(_) => {
+                // Forward-compatibility for #[non_exhaustive] RunEvent.
+            }
+            None => {
+                return Err(anyhow::anyhow!(
+                    "stream ended without RunCompleted or FatalError"
+                ));
+            }
+        }
+    }
+
+    if let Some((kind, detail)) = fatal {
+        return Err(anyhow::anyhow!("kernel error ({kind}): {detail}"));
+    }
+    let outcome = final_outcome.expect("RunCompleted yielded final_outcome");
+
+    // After streaming completes, emit the same closing summary the batch path emits.
     match outcome {
         RunOutcome::Completed {
             ref final_message,
@@ -176,19 +366,21 @@ pub async fn run(
             ..
         } => {
             if output.is_json() {
-                let payload = serde_json::json!({
-                    "outcome": "completed",
-                    "final_message": format_message_text(&final_message.payload),
-                    "total_turns": total_turns,
-                    "token_usage": {
-                        "input_tokens": token_usage.input_tokens,
-                        "output_tokens": token_usage.output_tokens,
+                output.json(&serde_json::json!({
+                    "event": "run_completed",
+                    "outcome": {
+                        "outcome": "completed",
+                        "final_message": format_message_text(&final_message.payload),
+                        "total_turns": total_turns,
+                        "token_usage": {
+                            "input_tokens": token_usage.input_tokens,
+                            "output_tokens": token_usage.output_tokens,
+                        },
                     },
-                });
-                output.json(&payload)?;
+                }))?;
             } else {
-                let text = format_message_text(&final_message.payload);
-                output.human(&text)?;
+                // Human mode: text already streamed; print closing newline.
+                println!();
             }
             Ok(())
         }
@@ -199,28 +391,23 @@ pub async fn run(
             ..
         } => {
             if output.is_json() {
-                let payload = serde_json::json!({
-                    "outcome": "failed",
-                    "status": format!("{status:?}"),
-                    "total_turns": total_turns,
-                    "token_usage": {
-                        "input_tokens": token_usage.input_tokens,
-                        "output_tokens": token_usage.output_tokens,
+                output.json(&serde_json::json!({
+                    "event": "run_completed",
+                    "outcome": {
+                        "outcome": "failed",
+                        "status": format!("{status:?}"),
+                        "total_turns": total_turns,
+                        "token_usage": {
+                            "input_tokens": token_usage.input_tokens,
+                            "output_tokens": token_usage.output_tokens,
+                        },
                     },
-                });
-                output.json(&payload)?;
+                }))?;
             } else {
                 output.error(format!("agent failed: {status:?}"))?;
             }
-            // Marker error → ExitCode::AgentFailed (1) via downcast in
-            // crate::run_main. Kernel/CLI errors map to ExitCode::Error
-            // (2); this case is the explicit Outcome::Failed bucket.
             Err(AgentFailed.into())
         }
-        // RunOutcome is `#[non_exhaustive]`; cross-crate match needs a
-        // wildcard. Any future variant should be classified explicitly
-        // by an ADR amendment; for now, treat unknown outcomes as a
-        // kernel error.
         _ => Err(anyhow::anyhow!("unknown RunOutcome variant")),
     }
 }

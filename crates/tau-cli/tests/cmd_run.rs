@@ -322,3 +322,106 @@ fn run_json_completed_emits_outcome_payload() {
     assert!(parsed["total_turns"].is_number(), "total_turns: {parsed}");
     assert!(parsed["token_usage"].is_object());
 }
+
+// ---- Streaming integration tests -------------------------------------------
+//
+// Both tests use assert_cmd + the `echo-llm` scripted-LLM plugin from
+// `common::setup_echo_project`. The streaming path calls
+// runtime.run_streaming(...) and renders events as they arrive. The echo-llm
+// plugin emits canned text, which the streaming path renders as TextDelta
+// events followed by a RunCompleted event.
+//
+// Human mode: text deltas land inline on stdout (raw print!/flush), then a
+// closing newline. The test asserts stdout contains the canned text.
+//
+// JSON mode: each event is one JSON object per line. The test parses every
+// line and asserts structural invariants (each line is valid JSON with an
+// "event" field; the terminal line has event=="run_completed").
+
+#[test]
+fn run_stream_human_mode_emits_text_deltas_inline_to_stdout() {
+    let dir = common::setup_echo_project("echo", "canned_text = \"streaming-hello-world\"\n", &[]);
+
+    let output = AssertCmd::cargo_bin("tau")
+        .unwrap()
+        .args(["run", "echo", "hi", "--stream"])
+        .current_dir(dir.path())
+        .env("TAU_HOME", dir.path().join("global"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "expected success; stderr={}\nstdout={}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout),
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("streaming-hello-world"),
+        "stdout should contain the canned text; got: {stdout}"
+    );
+}
+
+#[test]
+fn run_stream_json_mode_emits_one_event_per_line() {
+    let dir =
+        common::setup_echo_project("echo", "canned_text = \"streaming-json-response\"\n", &[]);
+
+    let output = AssertCmd::cargo_bin("tau")
+        .unwrap()
+        .args(["run", "echo", "hi", "--stream", "--json"])
+        .current_dir(dir.path())
+        .env("TAU_HOME", dir.path().join("global"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "expected success; stderr={}\nstdout={}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout),
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    // Every non-empty line should be valid JSON with an "event" field.
+    let event_lines: Vec<serde_json::Value> = stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .unwrap_or_else(|e| panic!("line is not valid JSON: {e}\nline: {line}"))
+        })
+        .collect();
+
+    // At minimum we must have at least one event.
+    assert!(
+        !event_lines.is_empty(),
+        "stdout should contain at least one JSON event line"
+    );
+
+    // Every event line must have an "event" discriminator field.
+    for (i, ev) in event_lines.iter().enumerate() {
+        assert!(
+            ev.get("event").is_some(),
+            "event line {i} missing 'event' field: {ev}"
+        );
+    }
+
+    // There must be a terminal "run_completed" event.
+    let run_completed = event_lines
+        .iter()
+        .find(|ev| ev["event"] == "run_completed")
+        .expect("stream must emit a run_completed event");
+    assert_eq!(
+        run_completed["outcome"]["outcome"], "completed",
+        "run_completed outcome should be 'completed': {run_completed}"
+    );
+
+    // There must be at least one "text_delta" event carrying the canned text.
+    let has_text_delta = event_lines.iter().any(|ev| ev["event"] == "text_delta");
+    assert!(
+        has_text_delta,
+        "stream should have at least one text_delta event"
+    );
+}

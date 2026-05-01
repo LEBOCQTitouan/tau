@@ -31,8 +31,9 @@ impl LlmBackend for OneShotLlm {
     async fn complete(&self, _req: CompletionRequest) -> Result<CompletionResponse, LlmError> {
         Ok(self.response.clone())
     }
-    async fn stream(&self, _req: CompletionRequest) -> Result<CompletionStream, LlmError> {
-        unimplemented!("OneShotLlm only supports complete()")
+    async fn stream(&self, req: CompletionRequest) -> Result<CompletionStream, LlmError> {
+        let resp = self.complete(req).await?;
+        Ok(tau_ports::batch_to_stream(resp))
     }
 }
 

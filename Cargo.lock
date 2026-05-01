@@ -2744,6 +2744,7 @@ dependencies = [
  "assert_cmd",
  "base64",
  "clap",
+ "futures-core",
  "insta",
  "is-terminal",
  "predicates",
@@ -2887,6 +2888,7 @@ dependencies = [
 name = "tau-runtime"
 version = "0.0.0"
 dependencies = [
+ "async-stream",
  "base64",
  "fs-read",
  "futures-core",
