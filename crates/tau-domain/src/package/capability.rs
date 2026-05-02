@@ -146,6 +146,108 @@ pub enum AgentCapability {
     },
 }
 
+/// Typed vocabulary describing the *shape* of enforcement a [`Capability`]
+/// requires from a sandbox adapter. Each variant maps to a distinct
+/// kernel-level enforcement primitive (filesystem read/write, exec gating,
+/// network egress filtering, etc).
+///
+/// Adapters declare a `CapabilityShapeSet` they support; the runtime
+/// cross-checks plan-required vs adapter-supported before spawning a
+/// plugin process.
+///
+/// Variant-level evolution is handled by `#[non_exhaustive]`. Adding a new
+/// shape is **additive** — existing adapters that don't support it report
+/// `SandboxError::ShapeUnsupported`.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum CapabilityShape {
+    /// Plugin needs read access to a filtered set of paths.
+    FilesystemRead,
+    /// Plugin needs write access to a filtered set of paths.
+    FilesystemWrite,
+    /// Plugin needs to exec a binary (covers both `fs.exec` and `process.spawn`
+    /// — same kernel surface).
+    ProcessExec,
+    /// Plugin needs HTTP egress to a filtered host list.
+    NetworkHttp,
+    /// Plugin needs to spawn a sub-agent. (Future: not enforced by OS sandbox
+    /// today; reserved for forward-compat.)
+    AgentSpawn,
+    /// Plugin uses a `Capability::Custom` whose enforcement is plugin-defined.
+    /// Adapters MAY refuse to sandbox `Custom` shapes.
+    /// See: [escape-hatches.md#capability-custom](../../../../../docs/explanation/escape-hatches.md#capability-custom).
+    Custom {
+        /// Custom capability name (`Capability::Custom { name }`).
+        name: String,
+    },
+}
+
+/// A set of [`CapabilityShape`]s, used by adapters to declare what they support
+/// and by the runtime to declare what a plan requires. Subset / membership
+/// queries are O(n) where n is the set size; we expect at most ~6 entries.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CapabilityShapeSet {
+    inner: Vec<CapabilityShape>,
+}
+
+impl CapabilityShapeSet {
+    /// Create an empty set.
+    pub fn new() -> Self {
+        Self { inner: Vec::new() }
+    }
+
+    /// Insert a shape (no-op if already present).
+    pub fn insert(&mut self, shape: CapabilityShape) {
+        if !self.inner.contains(&shape) {
+            self.inner.push(shape);
+        }
+    }
+
+    /// Check whether the set contains a shape.
+    pub fn contains(&self, shape: &CapabilityShape) -> bool {
+        self.inner.contains(shape)
+    }
+
+    /// `true` if every shape in `self` is also in `other`.
+    pub fn is_subset_of(&self, other: &CapabilityShapeSet) -> bool {
+        self.inner.iter().all(|s| other.inner.contains(s))
+    }
+
+    /// Iterate over the shapes.
+    pub fn iter(&self) -> impl Iterator<Item = &CapabilityShape> {
+        self.inner.iter()
+    }
+
+    /// Number of shapes in the set.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// `true` if the set is empty.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+}
+
+impl Capability {
+    /// The [`CapabilityShape`] this capability requires from a sandbox
+    /// adapter. Used by `tau-runtime`'s validation layer to cross-check
+    /// plan-required shapes against adapter-supported shapes.
+    pub fn required_shape(&self) -> CapabilityShape {
+        match self {
+            Capability::Filesystem(FsCapability::Read { .. }) => CapabilityShape::FilesystemRead,
+            Capability::Filesystem(FsCapability::Write { .. }) => CapabilityShape::FilesystemWrite,
+            Capability::Filesystem(FsCapability::Exec { .. }) => CapabilityShape::ProcessExec,
+            Capability::Network(NetCapability::Http { .. }) => CapabilityShape::NetworkHttp,
+            Capability::Process(ProcessCapability::Spawn { .. }) => CapabilityShape::ProcessExec,
+            Capability::Agent(AgentCapability::Spawn { .. }) => CapabilityShape::AgentSpawn,
+            Capability::Custom { name, .. } => CapabilityShape::Custom { name: name.clone() },
+        }
+    }
+}
+
 #[cfg(feature = "serde")]
 mod capability_de {
     use super::*;
@@ -257,6 +359,88 @@ mod capability_de {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use super::*;
+
+    #[test]
+    fn fs_read_required_shape() {
+        let cap = Capability::Filesystem(FsCapability::Read {
+            paths: vec!["/tmp/**".into()],
+        });
+        assert_eq!(cap.required_shape(), CapabilityShape::FilesystemRead);
+    }
+
+    #[test]
+    fn fs_write_required_shape() {
+        let cap = Capability::Filesystem(FsCapability::Write {
+            paths: vec!["/tmp/x".into()],
+            max_bytes: None,
+        });
+        assert_eq!(cap.required_shape(), CapabilityShape::FilesystemWrite);
+    }
+
+    #[test]
+    fn fs_exec_required_shape() {
+        let cap = Capability::Filesystem(FsCapability::Exec {
+            paths: vec!["/usr/bin/git".into()],
+        });
+        assert_eq!(cap.required_shape(), CapabilityShape::ProcessExec);
+    }
+
+    #[test]
+    fn net_http_required_shape() {
+        let cap = Capability::Network(NetCapability::Http {
+            hosts: vec!["api.example.com".into()],
+            methods: vec!["GET".into()],
+        });
+        assert_eq!(cap.required_shape(), CapabilityShape::NetworkHttp);
+    }
+
+    #[test]
+    fn process_spawn_required_shape() {
+        let cap = Capability::Process(ProcessCapability::Spawn {
+            commands: vec!["git".into()],
+        });
+        assert_eq!(cap.required_shape(), CapabilityShape::ProcessExec);
+    }
+
+    #[test]
+    fn agent_spawn_required_shape() {
+        let cap = Capability::Agent(AgentCapability::Spawn {
+            allowed_kinds: vec!["worker".into()],
+        });
+        assert_eq!(cap.required_shape(), CapabilityShape::AgentSpawn);
+    }
+
+    #[test]
+    fn custom_required_shape_is_custom() {
+        let cap = Capability::Custom {
+            name: "mcp.tool.use".into(),
+            params: Default::default(),
+        };
+        match cap.required_shape() {
+            CapabilityShape::Custom { name } => assert_eq!(name, "mcp.tool.use"),
+            other => panic!("expected Custom, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn shape_set_contains_and_is_subset() {
+        let mut a = CapabilityShapeSet::new();
+        a.insert(CapabilityShape::FilesystemRead);
+        a.insert(CapabilityShape::NetworkHttp);
+        let mut b = CapabilityShapeSet::new();
+        b.insert(CapabilityShape::FilesystemRead);
+        b.insert(CapabilityShape::FilesystemWrite);
+        b.insert(CapabilityShape::NetworkHttp);
+        assert!(a.is_subset_of(&b));
+        assert!(!b.is_subset_of(&a));
+        assert!(a.contains(&CapabilityShape::FilesystemRead));
+        assert!(!a.contains(&CapabilityShape::FilesystemWrite));
     }
 }
 

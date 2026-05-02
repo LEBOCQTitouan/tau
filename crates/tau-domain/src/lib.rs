@@ -24,9 +24,9 @@ pub use error::{
 pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
 pub use message::{Address, Message, MessagePayload};
 pub use package::{
-    kinds, AgentCapability, Capability, FsCapability, GitLocation, NetCapability, PackageDep,
-    PackageId, PackageKind, PackageManifest, PackageSource, PluginKind, PluginManifest, PortKind,
-    ProcessCapability, UncheckedManifest,
+    kinds, AgentCapability, Capability, CapabilityShape, CapabilityShapeSet, FsCapability,
+    GitLocation, NetCapability, PackageDep, PackageId, PackageKind, PackageManifest, PackageSource,
+    PluginKind, PluginManifest, PortKind, ProcessCapability, UncheckedManifest,
 };
 pub use value::Value;
 pub use version::{Version, VersionReq};
