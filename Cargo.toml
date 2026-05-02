@@ -65,5 +65,6 @@ reqwest             = { version = "0.12", default-features = false, features = [
 eventsource-stream  = "0.2"
 async-stream        = "0.3"
 secrecy             = "0.10"
-landlock = "0.4"
-nix      = { version = "0.29", default-features = false, features = ["sched", "user", "process", "fs"] }
+landlock     = "0.4"
+nix          = { version = "0.29", default-features = false, features = ["sched", "user", "process", "fs"] }
+seccompiler  = "0.5"

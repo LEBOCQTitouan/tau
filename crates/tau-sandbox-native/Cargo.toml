@@ -16,8 +16,9 @@ tokio      = { workspace = true }
 thiserror  = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-landlock = { workspace = true }
-nix      = { workspace = true }
+landlock    = { workspace = true }
+nix         = { workspace = true }
+seccompiler = { workspace = true }
 
 [dev-dependencies]
 tempfile   = { workspace = true }

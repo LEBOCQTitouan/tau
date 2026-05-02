@@ -11,6 +11,49 @@ use std::process::Command;
 use tau_domain::{Capability, FsCapability};
 use tau_ports::{SandboxError, SandboxHandle, SandboxPlan};
 
+/// Collect and resolve landlock path lists from a plan + command CWD.
+///
+/// Returns `(read_paths, write_paths)` as resolved `PathBuf` vectors.
+/// Shared by `apply_landlock` (Light tier) and `strict::apply_strict` (Strict tier).
+pub(crate) fn collect_landlock_paths(
+    plan: &SandboxPlan,
+    cmd: &Command,
+) -> Result<(Vec<std::path::PathBuf>, Vec<std::path::PathBuf>), SandboxError> {
+    let read_strs = collect_paths(plan, |c| match c {
+        Capability::Filesystem(FsCapability::Read { paths }) => Some(paths.clone()),
+        _ => None,
+    });
+    let write_strs = collect_paths(plan, |c| match c {
+        Capability::Filesystem(FsCapability::Write { paths, .. }) => Some(paths.clone()),
+        _ => None,
+    });
+
+    let cwd = cmd
+        .get_current_dir()
+        .map(std::path::Path::to_path_buf)
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)
+        .map_err(|e| SandboxError::WrapFailed {
+            message: format!("cwd: {e}"),
+        })?;
+
+    Ok((
+        resolve_anchors(&read_strs, &cwd),
+        resolve_anchors(&write_strs, &cwd),
+    ))
+}
+
+/// Install a landlock ruleset from pre-resolved path lists.
+///
+/// Called from inside a `pre_exec` closure (in the child between fork and exec).
+/// Exposed as `pub(crate)` so `strict::apply_strict` can reuse it.
+pub(crate) fn install_landlock_from_plan(
+    read_paths: &[std::path::PathBuf],
+    write_paths: &[std::path::PathBuf],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    install_landlock(read_paths, write_paths)
+}
+
 /// Apply landlock rules to `cmd` via a `pre_exec` hook.
 ///
 /// Rules are derived from the plan's filesystem capabilities. Non-filesystem
@@ -24,29 +67,7 @@ pub(crate) fn apply_landlock(
     plan: &SandboxPlan,
     cmd: &mut Command,
 ) -> Result<SandboxHandle, SandboxError> {
-    let read_paths = collect_paths(plan, |c| match c {
-        Capability::Filesystem(FsCapability::Read { paths }) => Some(paths.clone()),
-        _ => None,
-    });
-    let write_paths = collect_paths(plan, |c| match c {
-        Capability::Filesystem(FsCapability::Write { paths, .. }) => Some(paths.clone()),
-        _ => None,
-    });
-
-    // Resolve glob anchors (`${PROJECT}/...`) to absolute paths.
-    // Prefer the CWD set on the Command (cmd.current_dir) so that callers
-    // who redirect the child's working directory get correct anchor
-    // resolution; fall back to the parent's CWD only when not set.
-    let cwd = cmd
-        .get_current_dir()
-        .map(std::path::Path::to_path_buf)
-        .map(Ok)
-        .unwrap_or_else(std::env::current_dir)
-        .map_err(|e| SandboxError::WrapFailed {
-            message: format!("cwd: {e}"),
-        })?;
-    let read_paths = resolve_anchors(&read_paths, &cwd);
-    let write_paths = resolve_anchors(&write_paths, &cwd);
+    let (read_paths, write_paths) = collect_landlock_paths(plan, cmd)?;
 
     // KNOWN-LIMITATION: this pre_exec closure runs in the child between fork
     // and exec. POSIX guarantees only async-signal-safe operations in that

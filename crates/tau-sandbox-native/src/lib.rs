@@ -17,6 +17,8 @@ mod shape;
 mod light;
 #[cfg(target_os = "linux")]
 mod probe;
+#[cfg(target_os = "linux")]
+mod strict;
 
 #[cfg(not(target_os = "linux"))]
 mod stub;
@@ -99,7 +101,8 @@ impl Sandbox for NativeSandbox {
         #[cfg(target_os = "linux")]
         {
             match self.requested_tier {
-                SandboxTier::Light | SandboxTier::Strict => light::apply_landlock(plan, cmd),
+                SandboxTier::Light => light::apply_landlock(plan, cmd),
+                SandboxTier::Strict => strict::apply_strict(plan, cmd),
                 SandboxTier::None => Ok(SandboxHandle::noop()),
                 other => Err(SandboxError::Unsupported {
                     what: format!("tier {other:?} not implemented"),

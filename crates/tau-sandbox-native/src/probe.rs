@@ -1,8 +1,22 @@
 //! Linux kernel feature probe.
 //!
-//! Uses the landlock crate to check whether the running kernel supports
-//! Landlock V1 (Linux 5.13+). The probe does NOT call `restrict_self()` so
-//! it has no side-effects on the calling process.
+//! Detects which sandbox tier the running kernel can support:
+//! - **Strict**: landlock V1 + seccomp BPF + unprivileged user namespaces.
+//! - **Light**: landlock V1 only.
+//! - **Unavailable**: landlock V1 missing (kernel < 5.13).
+//!
+//! The probe does NOT call `restrict_self()` and does NOT install any filter,
+//! so it has no side-effects on the calling process.
+//!
+//! # Simplification note (v0.1)
+//! - seccomp BPF is assumed available on any Linux kernel ≥ 3.5 (all current
+//!   production kernels qualify). No explicit `prctl(PR_GET_SECCOMP)` probe is
+//!   performed.
+//! - Unprivileged user namespaces are assumed available unless the file
+//!   `/proc/sys/kernel/unprivileged_userns_clone` exists and contains `0`.
+//!   On kernels that do not have this sysctl (i.e. vanilla upstream), unprivileged
+//!   user namespaces are enabled by default. A future task can add a fork-based
+//!   probe for more precise detection.
 
 use tau_ports::{SandboxProbe, SandboxTier};
 
@@ -20,9 +34,17 @@ pub(crate) async fn probe(requested: SandboxTier) -> SandboxProbe {
         SandboxTier::None => SandboxTier::None,
         // Light needs landlock only — already verified above.
         SandboxTier::Light => SandboxTier::Light,
-        // Strict needs seccomp + namespaces — Tasks 4-5 wire those up.
-        // For now (Task 3, Light tier only) we cap at Light.
-        SandboxTier::Strict => SandboxTier::Light,
+        // Strict needs landlock + seccomp + user namespaces.
+        // seccomp is assumed available (Linux 3.5+, see module-level note).
+        // User namespaces are checked via unprivileged_userns_clone sysctl.
+        SandboxTier::Strict => {
+            if user_ns_supported() {
+                SandboxTier::Strict
+            } else {
+                tracing::info!("unprivileged user namespaces disabled; capping Strict -> Light");
+                SandboxTier::Light
+            }
+        }
         // Non-exhaustive arm: unknown future tier — warn and report unavailable.
         other => {
             tracing::warn!(
@@ -36,7 +58,7 @@ pub(crate) async fn probe(requested: SandboxTier) -> SandboxProbe {
     };
     SandboxProbe::Available {
         tier: effective,
-        details: format!("landlock V1 ok (cap to {effective:?})"),
+        details: format!("landlock V1 ok, effective tier: {effective:?}"),
     }
 }
 
@@ -52,4 +74,20 @@ fn landlock_v1_supported() -> bool {
         .handle_access(AccessFs::from_all(ABI::V1))
         .and_then(|r| r.create())
         .is_ok()
+}
+
+/// Check whether unprivileged user namespaces are available.
+///
+/// # Simplification (v0.1)
+/// Reads `/proc/sys/kernel/unprivileged_userns_clone`. If the file exists and
+/// contains `0`, user namespaces are disabled. On kernels that do not expose
+/// this sysctl (mainline upstream), the file is absent and we conservatively
+/// assume user namespaces are enabled. A full probe would `fork()` a child and
+/// attempt `unshare(CLONE_NEWUSER)`, but that adds latency and complexity.
+fn user_ns_supported() -> bool {
+    match std::fs::read_to_string("/proc/sys/kernel/unprivileged_userns_clone") {
+        Ok(contents) => contents.trim() != "0",
+        // File absent: sysctl not present → assume enabled (mainline default).
+        Err(_) => true,
+    }
 }
