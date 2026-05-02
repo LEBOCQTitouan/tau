@@ -3,11 +3,16 @@
 //! The pre_exec hook runs three operations in this exact order:
 //! 1. **Landlock** (`install_landlock`) — uses `landlock_*` syscalls that seccomp
 //!    would block if installed first.
-//! 2. **`unshare(CLONE_NEWUSER | CLONE_NEWNET)`** — drops the child into a fresh
-//!    user namespace (gaining all capabilities within it) and a network namespace
-//!    with no interfaces. Must run before seccomp blocks `unshare(2)`.
+//! 2. **`unshare(flags)`** — drops the child into a fresh user namespace (gaining
+//!    all capabilities within it). Whether `CLONE_NEWNET` is included depends on the
+//!    plan: plans with `Capability::Network(Http)` skip `CLONE_NEWNET` so the child
+//!    inherits the parent's netns (v0.1 limitation; see `net::unshare_flags_for_plan`).
+//!    Must run before seccomp blocks `unshare(2)`.
 //! 3. **seccomp BPF filter** (`apply_filter`) — installed last; once active it
 //!    blocks `unshare`, `landlock_*`, and any other syscall not in the allow-list.
+//!    The allow-list is the baseline extended by capability-conditional rules:
+//!    `exec::extend_with_exec_rules` (v0.1 no-op) and
+//!    `net::extend_with_network_rules` (adds socket-family syscalls for `Network(Http)`).
 //!
 //! The BPF program is **compiled in the parent** (cheap, one-time) and the
 //! compiled byte-slice is moved into the pre_exec closure by value. The child
@@ -246,7 +251,16 @@ pub(crate) fn baseline_syscall_map() -> std::collections::BTreeMap<i64, Vec<Secc
 /// is moved into the pre_exec closure by value. The child only calls `prctl` + `seccomp`.
 pub(crate) fn build_baseline_filter() -> Result<BpfProgram, SandboxError> {
     let rules = baseline_syscall_map();
+    compile_filter(rules)
+}
 
+/// Compile a rules map into a BPF program.
+///
+/// Shared by `build_baseline_filter` (for tests that use the raw baseline) and
+/// `apply_strict` (which extends the baseline before compiling).
+fn compile_filter(
+    rules: std::collections::BTreeMap<i64, Vec<SeccompRule>>,
+) -> Result<BpfProgram, SandboxError> {
     let arch: seccompiler::TargetArch =
         std::env::consts::ARCH
             .try_into()
@@ -278,12 +292,20 @@ pub(crate) fn build_baseline_filter() -> Result<BpfProgram, SandboxError> {
 
 /// Apply Strict-tier isolation to `cmd`:
 /// 1. Landlock filesystem rules (from plan).
-/// 2. `unshare(CLONE_NEWUSER | CLONE_NEWNET)` in the child.
-/// 3. seccomp BPF allow-list filter.
+/// 2. `unshare` with plan-derived flags (CLONE_NEWUSER always; CLONE_NEWNET only when
+///    no `Network(Http)` capability is in the plan — see `net::unshare_flags_for_plan`).
+/// 3. seccomp BPF allow-list filter (baseline extended by exec + network capability rules).
 ///
-/// The BPF program is compiled **once in the parent** before `fork`. The
-/// closure captures the `BpfProgram` by move — no sharing needed since each
-/// `apply_strict` call constructs its own fresh BPF program.
+/// All preparation (path collection, rules extension, BPF compilation) happens in the
+/// **parent** before `fork`. The `pre_exec` closure in the child only calls three
+/// signal-safe operations: landlock, unshare, seccomp.
+///
+/// # Ordering within pre_exec
+///
+/// The order is fixed and must not be changed:
+/// 1. Landlock — uses `landlock_*` syscalls that seccomp would block if installed first.
+/// 2. unshare — must precede seccomp because `unshare(2)` is not in the allow-list.
+/// 3. seccomp — installed last; once active it blocks everything not in the allow-list.
 pub(crate) fn apply_strict(
     plan: &SandboxPlan,
     cmd: &mut Command,
@@ -291,8 +313,17 @@ pub(crate) fn apply_strict(
     // Collect landlock paths from the plan (same logic as light tier).
     let (read_paths, write_paths) = crate::light::collect_landlock_paths(plan, cmd)?;
 
+    // Build the extended rules map: baseline → exec extension → network extension.
+    let mut rules = baseline_syscall_map();
+    crate::exec::extend_with_exec_rules(&mut rules, plan);
+    crate::net::extend_with_network_rules(&mut rules, plan);
+
     // Compile the BPF program in the parent — cheap, deterministic.
-    let bpf: BpfProgram = build_baseline_filter()?;
+    let bpf: BpfProgram = compile_filter(rules)?;
+
+    // Determine unshare flags: drop CLONE_NEWNET when Network(Http) is present so
+    // the child inherits the parent's netns (v0.1 limitation; see net.rs).
+    let unshare_flags = crate::net::unshare_flags_for_plan(plan);
 
     // KNOWN-LIMITATION: async-signal-safety — see light.rs for the full note.
     // Additional operations added here:
@@ -309,8 +340,9 @@ pub(crate) fn apply_strict(
             install_landlock_from_plan(&read_paths, &write_paths)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
-            // Step 2: drop into new user + network namespaces.
-            unshare(CloneFlags::CLONE_NEWUSER | CloneFlags::CLONE_NEWNET)
+            // Step 2: drop into new user namespace (+ network namespace unless plan
+            // has Network(Http) capability — see net::unshare_flags_for_plan).
+            unshare(unshare_flags)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
             // Step 3: install seccomp BPF allow-list (blocks unshare/landlock after this).

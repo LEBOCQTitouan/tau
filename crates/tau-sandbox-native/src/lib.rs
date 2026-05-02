@@ -14,7 +14,11 @@
 mod shape;
 
 #[cfg(target_os = "linux")]
+mod exec;
+#[cfg(target_os = "linux")]
 mod light;
+#[cfg(target_os = "linux")]
+mod net;
 #[cfg(target_os = "linux")]
 mod probe;
 #[cfg(target_os = "linux")]
