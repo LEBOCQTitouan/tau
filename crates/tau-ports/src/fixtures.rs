@@ -24,12 +24,14 @@ use std::time::SystemTime;
 use tau_domain::{AgentInstanceId, Value};
 use uuid::Uuid;
 
+use tau_domain::{CapabilityShape, CapabilityShapeSet};
+
 use crate::error::{LlmError, SandboxError, StorageError, ToolError};
 use crate::llm::{
     batch_to_stream, CompletionChunk, CompletionRequest, CompletionResponse, CompletionStream,
     LlmBackend, LlmProviderMessage, StopReason, TokenUsage, ToolChoice, ToolSpec, ToolUse,
 };
-use crate::sandbox::{Sandbox, SandboxPlan};
+use crate::sandbox::{Sandbox, SandboxHandle, SandboxPlan, SandboxProbe, SandboxTier};
 use crate::storage::{Key, Namespace, Storage};
 use crate::tool::{SessionContext, Tool, ToolContent, ToolResult};
 
@@ -464,21 +466,9 @@ impl Storage for MockStorage {
 // MockSandbox
 // ---------------------------------------------------------------------------
 
-/// **PROVISIONAL** — Mock [`Sandbox`] with no-op handles.
-///
-/// `Handle = ()`: [`Sandbox::create`] returns `Ok(())` for any plan.
-/// The [`Sandbox`] trait itself is provisional at v0.1 (see
-/// `sandbox.rs` module docs); this mock will likely require breaking
-/// changes alongside the trait when Phase-1 sandboxing lands.
-///
-/// # Example
-///
-/// ```ignore
-/// // Illustrative; uses async + non-doctest-friendly setup.
-/// use tau_ports::fixtures::MockSandbox;
-///
-/// let sandbox = MockSandbox::new("mem");
-/// ```
+/// Mock [`Sandbox`] adapter for tests. Reports `Available` with `Tier::None`,
+/// supports every known [`CapabilityShape`] except [`CapabilityShape::Custom`],
+/// and `wrap_spawn` is a no-op.
 pub struct MockSandbox {
     name: String,
 }
@@ -493,13 +483,163 @@ impl MockSandbox {
 }
 
 impl Sandbox for MockSandbox {
-    type Handle = ();
-
     fn name(&self) -> &str {
         &self.name
     }
 
-    async fn create(&self, _plan: SandboxPlan) -> Result<Self::Handle, SandboxError> {
+    async fn probe(&self) -> SandboxProbe {
+        SandboxProbe::Available {
+            tier: SandboxTier::None,
+            details: "mock — no enforcement".into(),
+        }
+    }
+
+    fn supported_shapes(&self) -> CapabilityShapeSet {
+        let mut set = CapabilityShapeSet::new();
+        set.insert(CapabilityShape::FilesystemRead);
+        set.insert(CapabilityShape::FilesystemWrite);
+        set.insert(CapabilityShape::ProcessExec);
+        set.insert(CapabilityShape::NetworkHttp);
+        set.insert(CapabilityShape::AgentSpawn);
+        set
+    }
+
+    fn validate_plan(&self, plan: &SandboxPlan) -> Result<(), SandboxError> {
+        let supported = self.supported_shapes();
+        for cap in &plan.capabilities {
+            let shape = cap.required_shape();
+            if !supported.contains(&shape) {
+                return Err(SandboxError::ShapeUnsupported { shape });
+            }
+        }
         Ok(())
+    }
+
+    async fn wrap_spawn(
+        &self,
+        plan: &SandboxPlan,
+        _cmd: &mut std::process::Command,
+    ) -> Result<SandboxHandle, SandboxError> {
+        self.validate_plan(plan)?;
+        Ok(SandboxHandle::noop())
+    }
+}
+
+#[cfg(test)]
+mod sandbox_v01_tests {
+    use super::*;
+    use tau_domain::{Capability, CapabilityShape};
+
+    fn read_cap() -> Capability {
+        // FsCapability::Read is #[non_exhaustive] so we can't struct-literal it
+        // outside tau-domain; round-trip through JSON using the flat kind-based
+        // format defined in tau_domain's custom serde impl instead.
+        serde_json::from_value::<Capability>(serde_json::json!({
+            "kind": "fs.read",
+            "paths": ["/tmp/**"]
+        }))
+        .expect("decode Capability::Filesystem(Read)")
+    }
+
+    #[tokio::test]
+    async fn mock_probe_is_available() {
+        let mock = MockSandbox::new("mem");
+        let probe = mock.probe().await;
+        assert!(matches!(probe, SandboxProbe::Available { .. }));
+    }
+
+    #[tokio::test]
+    async fn mock_supports_all_known_shapes() {
+        let mock = MockSandbox::new("mem");
+        let supported = mock.supported_shapes();
+        assert!(supported.contains(&CapabilityShape::FilesystemRead));
+        assert!(supported.contains(&CapabilityShape::FilesystemWrite));
+        assert!(supported.contains(&CapabilityShape::ProcessExec));
+        assert!(supported.contains(&CapabilityShape::NetworkHttp));
+        assert!(supported.contains(&CapabilityShape::AgentSpawn));
+    }
+
+    #[tokio::test]
+    async fn mock_validate_plan_accepts_known_shape() {
+        let mock = MockSandbox::new("mem");
+        let plan = SandboxPlan {
+            capabilities: vec![read_cap()],
+            context: None,
+            limits: None,
+        };
+        assert!(mock.validate_plan(&plan).is_ok());
+    }
+
+    #[tokio::test]
+    async fn mock_validate_plan_rejects_custom_shape() {
+        let mock = MockSandbox::new("mem");
+        let plan = SandboxPlan {
+            capabilities: vec![Capability::Custom {
+                name: "weird".into(),
+                params: Default::default(),
+            }],
+            context: None,
+            limits: None,
+        };
+        match mock.validate_plan(&plan) {
+            Err(SandboxError::ShapeUnsupported { shape }) => {
+                assert!(matches!(shape, CapabilityShape::Custom { .. }));
+            }
+            other => panic!("expected ShapeUnsupported, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn mock_wrap_spawn_returns_handle() {
+        let mock = MockSandbox::new("mem");
+        let plan = SandboxPlan {
+            capabilities: vec![read_cap()],
+            context: None,
+            limits: None,
+        };
+        let mut cmd = std::process::Command::new("/bin/true");
+        let handle = mock.wrap_spawn(&plan, &mut cmd).await.unwrap();
+        // MockSandbox handle is unit; just check the type.
+        let _: SandboxHandle = handle;
+    }
+
+    #[test]
+    fn sandbox_handle_runs_cleanup_on_drop() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let flag = Arc::new(AtomicBool::new(false));
+        let f = flag.clone();
+        drop(SandboxHandle::new(move || f.store(true, Ordering::SeqCst)));
+        assert!(
+            flag.load(Ordering::SeqCst),
+            "cleanup closure must run on drop"
+        );
+    }
+
+    #[test]
+    fn sandbox_handle_noop_does_not_panic_on_drop() {
+        drop(SandboxHandle::noop());
+    }
+
+    #[tokio::test]
+    async fn sandbox_tier_ordering() {
+        assert!(SandboxTier::Light < SandboxTier::Strict);
+        assert!(SandboxTier::None < SandboxTier::Light);
+    }
+
+    #[test]
+    fn sandbox_error_unavailable_renders() {
+        let e = SandboxError::Unavailable {
+            reason: "no kernel".into(),
+        };
+        assert!(format!("{e}").contains("unavailable"));
+    }
+
+    #[test]
+    fn sandbox_error_shape_unsupported_renders() {
+        let e = SandboxError::ShapeUnsupported {
+            shape: CapabilityShape::FilesystemRead,
+        };
+        assert!(format!("{e}").contains("unsupported shape"));
     }
 }

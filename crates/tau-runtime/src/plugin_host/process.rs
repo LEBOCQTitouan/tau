@@ -284,7 +284,7 @@ impl PluginProcess {
     /// Send a single outbound frame, tapping the protocol recorder
     /// (if any) before acquiring the writer mutex. Centralizes the
     /// host-side write path so per-port adapters
-    /// (`IpcLlmBackend` / `IpcTool` / `IpcStorage` / `IpcSandbox`) get
+    /// (`IpcLlmBackend` / `IpcTool` / `IpcStorage`) get
     /// recording for free without each having to reach into the
     /// recorder themselves.
     ///

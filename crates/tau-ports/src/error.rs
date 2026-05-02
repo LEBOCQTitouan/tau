@@ -146,31 +146,58 @@ impl StorageError {
     }
 }
 
-/// Errors returned by `crate::sandbox::Sandbox` implementations.
+/// Errors returned by [`crate::sandbox::Sandbox`] implementations.
 ///
-/// **PROVISIONAL (v0.1):** the `Sandbox` trait surface — including this error
-/// type — is provisional and likely to change in Phase 1 when real adapters
-/// land. No `is_retryable()` predicate is provided at v0.1.
+/// Stable as of v0.1 of the sandboxing sub-project. Variant evolution
+/// is handled by `#[non_exhaustive]` at the enum level and on each
+/// struct-style variant.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SandboxError {
+    /// The adapter is not usable on this host (probe returned Unavailable).
+    #[error("sandbox unavailable: {reason}")]
+    Unavailable {
+        /// Reason from [`crate::sandbox::SandboxProbe::Unavailable`].
+        reason: String,
+    },
+    /// The plan requires a capability shape this adapter does not support.
+    #[error("sandbox: unsupported shape {shape:?}")]
+    ShapeUnsupported {
+        /// The shape that was rejected.
+        shape: tau_domain::CapabilityShape,
+    },
+    /// The adapter could not apply sandbox enforcement to the spawn.
+    /// (Examples: landlock syscall failed, seccomp filter compile failed,
+    /// `docker run` returned non-zero.)
+    #[error("sandbox wrap-spawn failed: {message}")]
+    WrapFailed {
+        /// Free-form diagnostic; not part of the stable API surface.
+        message: String,
+    },
+    /// Runtime sandbox violation reported by the kernel
+    /// (SIGSYS from seccomp, EACCES from landlock, etc).
+    #[error("sandbox violation: {detail}")]
+    Violation {
+        /// Detail about the violating syscall / path / host.
+        detail: String,
+    },
     /// The requested feature is not supported by this sandbox.
-    #[error("unsupported: {what}")]
+    #[error("sandbox unsupported: {what}")]
     Unsupported {
         /// Description of the unsupported feature.
         what: String,
     },
     /// A configured resource limit was exceeded.
-    #[error("limit exceeded: {limit}")]
+    #[error("sandbox limit exceeded: {limit}")]
     LimitExceeded {
-        /// Identifier of the limit that was exceeded (e.g. `"cpu_seconds"`).
+        /// Identifier of the limit that was exceeded.
         limit: String,
     },
     /// Plugin internal error.
     ///
     /// See: [escape-hatches.md#sandboxerror-internal](../docs/explanation/escape-hatches.md#sandboxerror-internal).
-    #[error("internal: {message}")]
+    #[error("sandbox internal: {message}")]
     Internal {
         /// Free-form internal-error message; not part of the stable API surface.
         message: String,

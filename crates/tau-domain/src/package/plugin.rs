@@ -35,7 +35,7 @@ pub enum PortKind {
     Tool,
     /// Storage port: provides `storage.get`/`put`/`list`/`delete`.
     Storage,
-    /// Sandbox port: provides `sandbox.run`.
+    /// Sandbox port: reserved (in-process only at v0.1; no wire methods).
     Sandbox,
 }
 

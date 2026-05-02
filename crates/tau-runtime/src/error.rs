@@ -236,8 +236,8 @@ pub enum RuntimeError {
     #[error("storage: {0}")]
     Storage(#[from] tau_ports::StorageError),
 
-    /// Sandbox plugin returned an error. Reserved for forward compat;
-    /// v0.1 doesn't wire `Sandbox::create` (Q7=A from the spec).
+    /// Sandbox adapter returned an error. Reserved for future use;
+    /// v0.1 in-tree adapters (`tau-sandbox-native`, etc.) populate this.
     #[error("sandbox: {0}")]
     Sandbox(#[from] tau_ports::SandboxError),
 
