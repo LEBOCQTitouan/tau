@@ -2961,6 +2961,8 @@ dependencies = [
  "tau-plugin-protocol",
  "tau-plugin-sdk",
  "tau-ports",
+ "tau-sandbox-container",
+ "tau-sandbox-native",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

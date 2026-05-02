@@ -9,10 +9,12 @@ repository.workspace   = true
 authors.workspace      = true
 
 [dependencies]
-tau-domain          = { workspace = true, features = ["serde"] }
-tau-ports           = { workspace = true, features = ["serde"] }
-tau-pkg             = { workspace = true }
-tau-plugin-protocol = { workspace = true }
+tau-domain            = { workspace = true, features = ["serde"] }
+tau-ports             = { workspace = true, features = ["serde"] }
+tau-pkg               = { workspace = true }
+tau-plugin-protocol   = { workspace = true }
+tau-sandbox-native    = { workspace = true }
+tau-sandbox-container = { workspace = true }
 thiserror           = { workspace = true }
 tracing             = { workspace = true }
 # `v4` for session-id minting in `Runtime::run` per spec §3.7; the
@@ -53,7 +55,10 @@ default = []
 # `crates/tau-runtime/tests/plugin_host_ipc_*.rs` can build a
 # `PluginProcess` from a pre-paired reader+writer (no subprocess
 # spawn) and exercise the per-port IPC adapters end-to-end.
-test-support = ["tau-plugin-protocol/test-support"]
+test-support   = ["tau-plugin-protocol/test-support"]
+# Enables the MockSandbox adapter in `sandbox::chain`. Activated automatically
+# by the dev-dep on tau-ports with `test-fixtures`.
+test-fixtures  = ["tau-ports/test-fixtures"]
 
 [dev-dependencies]
 tokio              = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

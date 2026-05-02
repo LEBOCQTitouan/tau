@@ -41,6 +41,8 @@ tau-plugin-protocol = { path = "crates/tau-plugin-protocol", version = "0.0.0" }
 tau-plugin-sdk      = { path = "crates/tau-plugin-sdk", version = "0.0.0" }
 tau-plugin-test-support = { path = "crates/tau-plugin-test-support", version = "0.0.0" }
 tau-plugin-conformance  = { path = "crates/tau-plugin-conformance",  version = "0.0.0" }
+tau-sandbox-native      = { path = "crates/tau-sandbox-native",      version = "0.0.0" }
+tau-sandbox-container   = { path = "crates/tau-sandbox-container",   version = "0.0.0" }
 thiserror       = "2"
 semver          = { version = "1" }
 uuid            = { version = "1", features = ["v7"] }

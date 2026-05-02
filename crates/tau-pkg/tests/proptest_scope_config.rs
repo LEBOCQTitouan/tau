@@ -52,7 +52,7 @@ fn scope_config_rejects_too_new_schema_version() {
         err,
         ScopeError::ConfigSchemaTooNew {
             found: 999,
-            supported: 1,
+            supported: 2,
         }
     ));
 }
