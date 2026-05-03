@@ -24,9 +24,9 @@ pub enum SandboxAdapter {
     Native(NativeSandbox),
     /// `tau-sandbox-container` docker/podman adapter.
     Container(ContainerSandbox),
-    /// `tau_ports::fixtures::MockSandbox` — only when `test-fixtures` feature
-    /// is enabled (always active during `cargo test`).
-    #[cfg(any(test, feature = "test-fixtures"))]
+    /// `tau_ports::fixtures::MockSandbox` — available in all builds but only
+    /// instantiable during `cargo test`, when the `test-fixtures` feature is
+    /// enabled, or when `TAU_TESTING_ALLOW_MOCK_SANDBOX=1` is set.
     Mock(tau_ports::fixtures::MockSandbox),
 }
 
@@ -35,7 +35,6 @@ impl std::fmt::Debug for SandboxAdapter {
         match self {
             SandboxAdapter::Native(_) => f.debug_tuple("SandboxAdapter::Native").finish(),
             SandboxAdapter::Container(_) => f.debug_tuple("SandboxAdapter::Container").finish(),
-            #[cfg(any(test, feature = "test-fixtures"))]
             SandboxAdapter::Mock(_) => f.debug_tuple("SandboxAdapter::Mock").finish(),
         }
     }
@@ -47,7 +46,6 @@ impl SandboxAdapter {
         match self {
             SandboxAdapter::Native(a) => a.name(),
             SandboxAdapter::Container(a) => a.name(),
-            #[cfg(any(test, feature = "test-fixtures"))]
             SandboxAdapter::Mock(a) => a.name(),
         }
     }
@@ -57,7 +55,6 @@ impl SandboxAdapter {
         match self {
             SandboxAdapter::Native(a) => a.probe().await,
             SandboxAdapter::Container(a) => a.probe().await,
-            #[cfg(any(test, feature = "test-fixtures"))]
             SandboxAdapter::Mock(a) => a.probe().await,
         }
     }
@@ -67,7 +64,6 @@ impl SandboxAdapter {
         match self {
             SandboxAdapter::Native(a) => a.supported_shapes(),
             SandboxAdapter::Container(a) => a.supported_shapes(),
-            #[cfg(any(test, feature = "test-fixtures"))]
             SandboxAdapter::Mock(a) => a.supported_shapes(),
         }
     }
@@ -77,7 +73,6 @@ impl SandboxAdapter {
         match self {
             SandboxAdapter::Native(a) => a.validate_plan(plan),
             SandboxAdapter::Container(a) => a.validate_plan(plan),
-            #[cfg(any(test, feature = "test-fixtures"))]
             SandboxAdapter::Mock(a) => a.validate_plan(plan),
         }
     }
@@ -91,7 +86,6 @@ impl SandboxAdapter {
         match self {
             SandboxAdapter::Native(a) => a.wrap_spawn(plan, cmd).await,
             SandboxAdapter::Container(a) => a.wrap_spawn(plan, cmd).await,
-            #[cfg(any(test, feature = "test-fixtures"))]
             SandboxAdapter::Mock(a) => a.wrap_spawn(plan, cmd).await,
         }
     }
@@ -102,7 +96,6 @@ impl Sandbox for SandboxAdapter {
         match self {
             SandboxAdapter::Native(s) => s.name(),
             SandboxAdapter::Container(s) => s.name(),
-            #[cfg(any(test, feature = "test-fixtures"))]
             SandboxAdapter::Mock(s) => s.name(),
         }
     }
@@ -111,7 +104,6 @@ impl Sandbox for SandboxAdapter {
         match self {
             SandboxAdapter::Native(s) => s.probe().await,
             SandboxAdapter::Container(s) => s.probe().await,
-            #[cfg(any(test, feature = "test-fixtures"))]
             SandboxAdapter::Mock(s) => s.probe().await,
         }
     }
@@ -120,7 +112,6 @@ impl Sandbox for SandboxAdapter {
         match self {
             SandboxAdapter::Native(s) => s.supported_shapes(),
             SandboxAdapter::Container(s) => s.supported_shapes(),
-            #[cfg(any(test, feature = "test-fixtures"))]
             SandboxAdapter::Mock(s) => s.supported_shapes(),
         }
     }
@@ -129,7 +120,6 @@ impl Sandbox for SandboxAdapter {
         match self {
             SandboxAdapter::Native(s) => s.validate_plan(plan),
             SandboxAdapter::Container(s) => s.validate_plan(plan),
-            #[cfg(any(test, feature = "test-fixtures"))]
             SandboxAdapter::Mock(s) => s.validate_plan(plan),
         }
     }
@@ -142,7 +132,6 @@ impl Sandbox for SandboxAdapter {
         match self {
             SandboxAdapter::Native(s) => s.wrap_spawn(plan, cmd).await,
             SandboxAdapter::Container(s) => s.wrap_spawn(plan, cmd).await,
-            #[cfg(any(test, feature = "test-fixtures"))]
             SandboxAdapter::Mock(s) => s.wrap_spawn(plan, cmd).await,
         }
     }
@@ -287,14 +276,28 @@ fn instantiate(entry: &SandboxAdapterConfig) -> Result<SandboxAdapter, SandboxCh
                 runtime,
             )))
         }
-        #[cfg(any(test, feature = "test-fixtures"))]
-        SandboxAdapterKind::Mock => Ok(SandboxAdapter::Mock(
-            tau_ports::fixtures::MockSandbox::new("mock"),
-        )),
-        #[cfg(not(any(test, feature = "test-fixtures")))]
-        SandboxAdapterKind::Mock => Err(SandboxChainError::ConfigError {
-            message: "Mock adapter is only available in test builds".into(),
-        }),
+        SandboxAdapterKind::Mock => {
+            // Mock is normally test-only — but tau's CLI integration tests
+            // invoke the real binary via assert_cmd::cargo_bin and need a way
+            // to opt in. The escape hatch is the env var
+            // `TAU_TESTING_ALLOW_MOCK_SANDBOX=1`. Production deployments should
+            // never set this; it's a development/testing affordance.
+            let allowed_in_build = cfg!(any(test, feature = "test-fixtures"));
+            let allowed_via_env = std::env::var("TAU_TESTING_ALLOW_MOCK_SANDBOX")
+                .map(|v| v == "1")
+                .unwrap_or(false);
+            if allowed_in_build || allowed_via_env {
+                // tau-ports' fixtures module is always present (no feature flag);
+                // it's just considered "test scaffolding" by convention.
+                Ok(SandboxAdapter::Mock(tau_ports::fixtures::MockSandbox::new(
+                    "mock",
+                )))
+            } else {
+                Err(SandboxChainError::ConfigError {
+                    message: "Mock adapter is only available in test builds (set TAU_TESTING_ALLOW_MOCK_SANDBOX=1 to override)".into(),
+                })
+            }
+        }
         other => Err(SandboxChainError::ConfigError {
             message: format!("unknown adapter kind: {other:?}"),
         }),

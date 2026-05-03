@@ -13,6 +13,9 @@ Options:
       --dry-run
           Print the resolution plan without fetching anything
 
+      --check-sandbox
+          Run sandbox capability cross-check (Layer 3 validation) against the configured adapter; report any plugin whose plan is rejected. Exit 0 if all OK; exit 2 if any violation OR no adapter available
+
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
 
