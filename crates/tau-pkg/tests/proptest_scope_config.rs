@@ -52,7 +52,26 @@ fn scope_config_rejects_too_new_schema_version() {
         err,
         ScopeError::ConfigSchemaTooNew {
             found: 999,
-            supported: 2,
+            supported: 3,
         }
     ));
+}
+
+#[test]
+fn v2_chain_config_round_trips_via_migration() {
+    let v2_toml = r#"
+schema_version = 2
+kind = "project"
+created_at = "2026-05-04T00:00:00Z"
+created_by_tau_version = "0.0.0"
+
+[sandbox]
+chain = [{ kind = "native" }]
+minimum_tier = "light"
+"#;
+    let parsed = ScopeConfig::read_from_str(v2_toml).expect("v2 should auto-migrate");
+    // schema_version bumped to v3 in memory.
+    assert_eq!(parsed.schema_version, 3);
+    let tier_str = format!("{:?}", parsed.sandbox.required_tier).to_lowercase();
+    assert_eq!(tier_str, "light");
 }
