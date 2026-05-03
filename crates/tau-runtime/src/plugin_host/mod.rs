@@ -124,6 +124,9 @@ pub async fn describe_plugin(
         framer_options,
         options.shutdown_timeout,
         recorder.clone(),
+        // No sandbox for the describe path — this is a one-shot introspection
+        // call that doesn't exercise plugin capabilities.
+        None,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
@@ -339,6 +342,11 @@ pub async fn load_llm_backend(
         framer_options,
         options.shutdown_timeout,
         recorder,
+        // TODO(future): plumb scope-config-driven SandboxAdapter selection here.
+        // v0.1 ships sandbox=None at all four spawn sites; activation is gated on
+        // the runtime kernel adopting `select_adapter` and threading the result
+        // through the plugin host construction.
+        None,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
@@ -406,6 +414,11 @@ pub async fn load_tool(
         framer_options,
         options.shutdown_timeout,
         recorder,
+        // TODO(future): plumb scope-config-driven SandboxAdapter selection here.
+        // v0.1 ships sandbox=None at all four spawn sites; activation is gated on
+        // the runtime kernel adopting `select_adapter` and threading the result
+        // through the plugin host construction.
+        None,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
@@ -497,6 +510,11 @@ pub async fn load_storage(
         framer_options,
         options.shutdown_timeout,
         recorder,
+        // TODO(future): plumb scope-config-driven SandboxAdapter selection here.
+        // v0.1 ships sandbox=None at all four spawn sites; activation is gated on
+        // the runtime kernel adopting `select_adapter` and threading the result
+        // through the plugin host construction.
+        None,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(

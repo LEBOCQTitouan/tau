@@ -22,10 +22,11 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
-use tau_domain::{PackageName, PackageSource, PluginManifest, Version};
+use tau_domain::{CapabilityShape, PackageName, PackageSource, PluginManifest, Version};
 
 use crate::error::RegistryError;
 
@@ -43,7 +44,12 @@ use crate::error::RegistryError;
 ///   v2 lockfiles auto-upgrade to v3 on load (`binary_sha256` defaults
 ///   to `""` for legacy entries via `#[serde(default)]`; these are
 ///   flagged `unverified` by `tau verify`).
-pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 3;
+/// - `4` — Sandbox shapes: `LockedPlugin::required_shapes: Vec<CapabilityShape>`
+///   added. v3 lockfiles auto-upgrade to v4 on load (`required_shapes`
+///   defaults to `vec![]` for legacy entries via `#[serde(default)]`;
+///   the runtime falls back to deriving shapes from the manifest at
+///   startup and logs a warning per affected plugin).
+pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 4;
 
 /// Schema for `tau-lock.toml`.
 ///
@@ -57,17 +63,19 @@ pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 3;
 /// use tau_pkg::lockfile::LockFile;
 ///
 /// let lf = LockFile::default();
-/// assert_eq!(lf.schema_version, 3);
+/// assert_eq!(lf.schema_version, 4);
 /// assert!(lf.packages.is_empty());
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LockFile {
-    /// Schema version. Currently `3`. Bumped on breaking changes only.
-    /// v1/v2 lockfiles are accepted on load and auto-upgraded to v3 on
-    /// the next save (v1→v2: legacy entries get `plugin = None`;
+    /// Schema version. Currently `4`. Bumped on breaking changes only.
+    /// v1/v2/v3 lockfiles are accepted on load and auto-upgraded to v4
+    /// on the next save (v1→v2: legacy entries get `plugin = None`;
     /// v2→v3: `LockedPlugin` entries get `binary_sha256 = ""`
-    /// defaulted via `#[serde(default)]`).
+    /// defaulted via `#[serde(default)]`; v3→v4: `LockedPlugin`
+    /// entries get `required_shapes = []` defaulted via
+    /// `#[serde(default)]` with a per-plugin warning emitted).
     pub schema_version: u32,
     /// `CARGO_PKG_VERSION` of the tau-pkg crate that last wrote this file.
     pub generated_by_tau_version: String,
@@ -161,6 +169,14 @@ pub struct LockedPlugin {
     /// Added in lockfile schema v3.
     #[serde(default)]
     pub binary_sha256: String,
+    /// Required [`CapabilityShape`]s per plugin, populated at install
+    /// time by Layer 2 cross-check (manifest declarations → required
+    /// shapes). Empty vec on lockfiles older than v4 (auto-upgraded
+    /// with a warn logged via [`tracing::warn`]).
+    ///
+    /// Added in lockfile schema v4.
+    #[serde(default)]
+    pub required_shapes: Vec<CapabilityShape>,
 }
 
 impl LockedPlugin {
@@ -178,6 +194,7 @@ impl LockedPlugin {
             binary_path,
             built_at,
             binary_sha256,
+            required_shapes: Vec::new(),
         }
     }
 }
@@ -217,6 +234,32 @@ pub struct LockedVersion {
     /// When this version was installed.
     #[serde(with = "humantime_serde")]
     pub installed_at: SystemTime,
+}
+
+/// Emit a `tracing::warn!` once per process when a plugin is loaded from
+/// a v3 lockfile that has no `required_shapes`.
+///
+/// Uses a single global `std::sync::Once` (not one per plugin name) to
+/// avoid log spam on every `LockFile::load` call during a long-running
+/// session. The first plugin that triggers this path wins the log line;
+/// subsequent missing-shapes plugins are silent. This is intentional —
+/// the generic "re-install to refresh" message is only useful once.
+fn warn_missing_required_shapes(plugin_bin: &str) {
+    // We can't have one Once per plugin name without a global map, which
+    // adds complexity. Instead we use a single global Once: the warning
+    // fires once per process, listing the first plugin that triggers it.
+    // Subsequent missing-shapes plugins are silent. This is the simplest
+    // correct implementation that avoids log spam.
+    static WARN_ONCE: Once = Once::new();
+    let bin = plugin_bin.to_owned();
+    WARN_ONCE.call_once(move || {
+        tracing::warn!(
+            plugin = %bin,
+            "required_shapes missing for plugin {}; falling back to manifest-derived shapes \
+             — re-install to refresh",
+            bin,
+        );
+    });
 }
 
 impl Default for LockFile {
@@ -290,10 +333,28 @@ impl LockFile {
         // it defaults to `""` via `#[serde(default)]`. `tau verify`
         // treats empty `binary_sha256` as `unverified` (not drift).
         //
-        // In both cases we only need to bump the recorded schema version
+        // v3 → v4: `LockedPlugin::required_shapes` was not present in v3;
+        // it defaults to `vec![]` via `#[serde(default)]`. The runtime
+        // falls back to manifest-derived shapes and logs a warning per
+        // affected plugin (once per process to avoid log spam).
+        //
+        // In all cases we only need to bump the recorded schema version
         // so the next `save()` writes the current `MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION`.
+        let was_pre_v4 = parsed.schema_version < 4;
         if parsed.schema_version < MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION {
             parsed.schema_version = MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION;
+        }
+
+        // Emit once-per-process warning for each plugin whose
+        // `required_shapes` is empty because it came from a v3 lockfile.
+        if was_pre_v4 {
+            for pkg in &parsed.packages {
+                if let Some(plugin) = &pkg.plugin {
+                    if plugin.required_shapes.is_empty() {
+                        warn_missing_required_shapes(&plugin.manifest.bin);
+                    }
+                }
+            }
         }
 
         Ok(parsed)
@@ -465,7 +526,7 @@ mod tests {
     fn default_lockfile_has_current_schema_version() {
         let lf = LockFile::default();
         assert_eq!(lf.schema_version, MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION);
-        assert_eq!(lf.schema_version, 3);
+        assert_eq!(lf.schema_version, 4);
     }
 
     #[test]
@@ -657,7 +718,7 @@ mod tests {
             err,
             RegistryError::SchemaTooNew {
                 found: 999,
-                supported: 3,
+                supported: 4,
             }
         ));
     }
@@ -836,5 +897,105 @@ mod tests {
         assert_eq!(lf.packages.len(), 2);
         assert_eq!(lf.packages[0].name.as_str(), "aaa");
         assert_eq!(lf.packages[1].name.as_str(), "ccc");
+    }
+
+    // ---- v4 lockfile schema tests ----
+
+    fn fixture_locked_plugin() -> LockedPlugin {
+        use tau_domain::{PluginKind, PluginManifest, PortKind};
+        let manifest =
+            PluginManifest::new(PortKind::Tool, PluginKind::RustCargo, "test-bin".to_owned());
+        LockedPlugin::new(
+            manifest,
+            PathBuf::from("/tmp/test-bin"),
+            UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+            "abc123".to_owned(),
+        )
+    }
+
+    /// A v3 lockfile (with `[package.plugin]` but no `required_shapes` field)
+    /// must load without error, and the parsed plugin entry must have an
+    /// empty `required_shapes` vec (i.e., `#[serde(default)]` fires correctly).
+    #[test]
+    fn v3_lockfile_loads_with_empty_required_shapes() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tau-lock.toml");
+
+        // Write a v3 lockfile by hand — no `required_shapes` field.
+        let toml_str = r#"
+            schema_version = 3
+            generated_by_tau_version = "0.0.0"
+            generated_at = "2026-04-27T10:00:00Z"
+
+            [[package]]
+            name = "some-tool"
+            active_version = "1.0.0"
+            source = "https://example.com/some-tool.git"
+
+            [[package.versions]]
+            version = "1.0.0"
+            resolved_commit = "0123456789abcdef0123456789abcdef01234567"
+            sha256 = ""
+            installed_at = "2026-04-27T10:00:00Z"
+
+            [package.plugin]
+            binary_path = "/tmp/some-tool"
+            built_at = "2026-04-27T10:00:00Z"
+            binary_sha256 = ""
+
+            [package.plugin.manifest]
+            provides = "tool"
+            kind = "rust-cargo"
+            bin = "some-tool"
+        "#;
+        std::fs::write(&path, toml_str).unwrap();
+
+        let loaded = LockFile::load(&path).unwrap();
+        assert_eq!(loaded.packages.len(), 1);
+        let plugin = loaded.packages[0].plugin.as_ref().unwrap();
+        // v3 entries get required_shapes defaulted to empty vec.
+        assert!(
+            plugin.required_shapes.is_empty(),
+            "required_shapes should default to empty for v3 lockfile entries"
+        );
+        // Schema version is bumped to v4 in memory.
+        assert_eq!(loaded.schema_version, 4);
+    }
+
+    /// A v4 lockfile with `required_shapes` populated must round-trip
+    /// through serialize/deserialize preserving the shapes exactly.
+    #[test]
+    fn lockfile_round_trips_required_shapes() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tau-lock.toml");
+
+        let mut plugin = fixture_locked_plugin();
+        plugin.required_shapes = vec![
+            CapabilityShape::FilesystemRead,
+            CapabilityShape::NetworkHttp,
+        ];
+
+        let mut pkg = fixture_locked_package();
+        pkg.name = "plugged-tool".parse().unwrap();
+        pkg.plugin = Some(plugin);
+
+        let mut lf = LockFile::default();
+        lf.packages.push(pkg);
+
+        // Save and reload.
+        lf.save(&path).unwrap();
+        let loaded = LockFile::load(&path).unwrap();
+
+        assert_eq!(loaded.schema_version, 4);
+        assert_eq!(loaded.packages.len(), 1);
+        let loaded_plugin = loaded.packages[0].plugin.as_ref().unwrap();
+        assert_eq!(
+            loaded_plugin.required_shapes,
+            vec![
+                CapabilityShape::FilesystemRead,
+                CapabilityShape::NetworkHttp
+            ],
+            "required_shapes must round-trip through save/load"
+        );
     }
 }

@@ -108,10 +108,10 @@ fn install_populates_locked_version_sha256() {
     );
 }
 
-/// Task 2: After install, the lockfile schema_version should be bumped to 3
-/// (the version that introduced populated sha256 fields).
+/// After install, the lockfile schema_version should be the current max
+/// (v4 as of the sandboxing sub-project).
 #[test]
-fn install_writes_schema_version_3_lockfile() {
+fn install_writes_current_schema_version_lockfile() {
     if !fixtures::git_available() {
         eprintln!("skipping: `git` not on PATH");
         return;
@@ -122,23 +122,23 @@ fn install_writes_schema_version_3_lockfile() {
     std::fs::create_dir_all(&project_root).unwrap();
     let scope = Scope::new_project(&project_root).unwrap();
 
-    let bare = fixtures::make_fixture_repo(tmp.path(), "schema-v3-tool", "1.0.0", "tool");
+    let bare = fixtures::make_fixture_repo(tmp.path(), "schema-v4-tool", "1.0.0", "tool");
     let source = PackageSource::from_str(&fixtures::file_url(&bare)).unwrap();
 
     install(&source, &scope).unwrap();
 
     // Check the on-disk TOML file directly — this confirms schema_version is
-    // written as 3 (not still 2 from a default that was never bumped).
+    // written as 4 (not still 3 from a default that was never bumped).
     let disk_content = std::fs::read_to_string(scope.lockfile_path()).unwrap();
     assert!(
-        disk_content.contains("schema_version = 3"),
-        "lockfile on disk should contain schema_version = 3 after fresh install;\ngot:\n{disk_content}"
+        disk_content.contains("schema_version = 4"),
+        "lockfile on disk should contain schema_version = 4 after fresh install;\ngot:\n{disk_content}"
     );
 
     let lf = LockFile::load(&scope.lockfile_path()).unwrap();
     assert_eq!(
-        lf.schema_version, 3,
-        "LockFile::load should return schema_version = 3"
+        lf.schema_version, 4,
+        "LockFile::load should return schema_version = 4"
     );
 }
 

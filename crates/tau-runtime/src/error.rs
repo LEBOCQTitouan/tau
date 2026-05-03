@@ -241,6 +241,35 @@ pub enum RuntimeError {
     #[error("sandbox: {0}")]
     Sandbox(#[from] tau_ports::SandboxError),
 
+    /// Sandbox plan validation failed before plugin spawn.
+    ///
+    /// Raised by [`crate::plugin_host`] when
+    /// [`crate::sandbox::validate_plan_against_adapter`] returns one or
+    /// more errors (Layer 3 enforcement at spawn time).
+    #[non_exhaustive]
+    #[error("plugin {plugin}: sandbox validation failed:\n{}",
+        errors.iter().map(|e| format!("  - {e}")).collect::<Vec<_>>().join("\n"))]
+    SandboxValidationFailed {
+        /// Plugin name (from `LockedPlugin::manifest.bin`).
+        plugin: String,
+        /// All validation errors collected in a single pass.
+        errors: Vec<crate::sandbox::SandboxValidationError>,
+    },
+
+    /// Sandbox adapter failed to wrap the spawn command.
+    ///
+    /// Raised by [`crate::plugin_host`] when
+    /// [`crate::sandbox::SandboxAdapter::wrap_spawn`] returns `Err`.
+    #[non_exhaustive]
+    #[error("plugin {plugin}: sandbox wrap-spawn failed: {source}")]
+    SandboxWrapFailed {
+        /// Plugin name (from `LockedPlugin::manifest.bin`).
+        plugin: String,
+        /// Underlying [`tau_ports::SandboxError`].
+        #[source]
+        source: tau_ports::SandboxError,
+    },
+
     /// Manifest validation failed (caller-supplied manifest invalid).
     #[error("manifest validation: {0}")]
     Manifest(#[from] tau_domain::PackageManifestError),
@@ -576,5 +605,30 @@ mod tests {
         let msg = format!("{err}");
         assert!(msg.contains("fs.read"));
         assert!(msg.contains("not a subset"));
+    }
+
+    #[test]
+    fn sandbox_validation_failed_display_includes_all_errors() {
+        use crate::sandbox::SandboxValidationError;
+
+        let plan_json = serde_json::json!({
+            "kind": "fs.read",
+            "paths": ["/tmp/x"]
+        });
+        let cap: tau_domain::Capability =
+            serde_json::from_value(plan_json).expect("decode capability");
+
+        let err = RuntimeError::SandboxValidationFailed {
+            plugin: "foo".into(),
+            errors: vec![
+                SandboxValidationError::new("plug-1", cap.clone(), "shape A unsupported"),
+                SandboxValidationError::new("plug-2", cap, "shape B unsupported"),
+            ],
+        };
+        let rendered = format!("{err}");
+        assert!(rendered.contains("shape A unsupported"), "got: {rendered}");
+        assert!(rendered.contains("shape B unsupported"), "got: {rendered}");
+        assert!(rendered.contains("plug-1"), "got: {rendered}");
+        assert!(rendered.contains("plug-2"), "got: {rendered}");
     }
 }

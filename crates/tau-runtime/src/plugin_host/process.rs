@@ -30,6 +30,7 @@ use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 use tokio::task::JoinHandle;
 
 use super::recording::{Direction, RecorderHandle};
+use crate::sandbox::{validate_plan_against_adapter, SandboxAdapter, SandboxValidationError};
 
 /// Type-erased async writer used by [`PluginProcess`] for outbound
 /// frames. Boxing here lets the same struct wrap a real
@@ -40,6 +41,8 @@ use super::recording::{Direction, RecorderHandle};
 /// `write_all` — negligible against the rmp-serde encode and the
 /// kernel's tokio scheduler hop.
 pub type DynAsyncWriter = Box<dyn AsyncWrite + Send + Unpin>;
+
+use tau_ports::{SandboxHandle, SandboxPlan};
 
 use crate::error::RuntimeError;
 
@@ -118,6 +121,17 @@ pub struct PluginProcess {
     /// Stderr re-emit task join handle. Same drop semantics as
     /// `_read_task`.
     _stderr_task: JoinHandle<()>,
+    /// Holds adapter-side sandbox resources (e.g., container ID).
+    /// Dropped after the child exits, running adapter cleanup via
+    /// `SandboxHandle::drop`. `Option` because test/no-sandbox paths
+    /// construct without one (via `new_for_test`).
+    ///
+    /// Wrapped in `Mutex` because `SandboxHandle` contains a
+    /// `Box<dyn FnOnce()>` which is `!Sync`; the `Mutex` adds the
+    /// `Sync` bound required by `Arc<PluginProcess>` (the `Dyn*`
+    /// port traits are `Send + Sync`).
+    #[allow(dead_code)] // keeps the handle alive; cleanup runs on Mutex drop
+    _sandbox_handle: std::sync::Mutex<Option<SandboxHandle>>,
 }
 
 impl PluginProcess {
@@ -146,9 +160,10 @@ impl PluginProcess {
     /// * [`RuntimeError::PluginSpawnFailed`] if `Command::spawn`
     ///   fails (binary missing, not executable, sandbox denied, …).
     /// * Whatever the `pre_handshake` closure returns.
-    // Eight params (one beyond clippy's default ceiling) is the natural
-    // shape of "spawn + drive handshake" — splitting into a builder
-    // wouldn't simplify the call sites in `crate::plugin_host::load_*`.
+    // Nine params (two beyond clippy's default ceiling) is the natural
+    // shape of "spawn + sandbox + drive handshake" — splitting into a
+    // builder wouldn't simplify the call sites in
+    // `crate::plugin_host::load_*`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_and_handshake<F, T>(
         binary_path: &Path,
@@ -158,6 +173,14 @@ impl PluginProcess {
         framer_options: FramerOptions,
         shutdown_timeout: Duration,
         recorder: Option<RecorderHandle>,
+        // Optional sandbox plan + adapter pair. When `Some((plan, adapter))`:
+        // 1. `validate_plan_against_adapter` is called (Layer 3 cross-check).
+        // 2. `adapter.wrap_spawn(plan, &mut command)` is called to apply
+        //    enforcement. The resulting `SandboxHandle` is stored on the
+        //    `PluginProcess` so its `Drop` runs adapter cleanup on plugin
+        //    exit. When `None`, the spawn proceeds without sandboxing (test
+        //    paths; use `MockSandbox` for behavioral tests instead).
+        sandbox: Option<(&SandboxPlan, &SandboxAdapter)>,
         pre_handshake: F,
     ) -> Result<(Arc<PluginProcess>, T), RuntimeError>
     where
@@ -197,6 +220,35 @@ impl PluginProcess {
             // reproducible across hosts.
             .env("PATH", std::env::var("PATH").unwrap_or_default())
             .kill_on_drop(true);
+
+        // Layer 3 + 4: sandbox validation and enforcement.
+        //
+        // Order is deliberate: validate_plan_against_adapter (Layer 3)
+        // runs BEFORE wrap_spawn (Layer 4) so a bad plan never reaches
+        // the adapter.
+        let sandbox_handle: Option<SandboxHandle> = if let Some((plan, adapter)) = sandbox {
+            // Layer 3: cross-check plan capabilities against adapter shapes.
+            validate_plan_against_adapter(&plugin_name, plan, adapter).map_err(
+                |errors: Vec<SandboxValidationError>| RuntimeError::SandboxValidationFailed {
+                    plugin: plugin_name.clone(),
+                    errors,
+                },
+            )?;
+
+            // Layer 4: apply sandbox enforcement to the Command.
+            // `as_std_mut()` is the bridge between `tokio::process::Command`
+            // and `std::process::Command` required by `Sandbox::wrap_spawn`.
+            let handle = adapter
+                .wrap_spawn(plan, command.as_std_mut())
+                .await
+                .map_err(|source| RuntimeError::SandboxWrapFailed {
+                    plugin: plugin_name.clone(),
+                    source,
+                })?;
+            Some(handle)
+        } else {
+            None
+        };
 
         let mut child = command
             .spawn()
@@ -276,6 +328,7 @@ impl PluginProcess {
             shutdown_timeout,
             _read_task: read_task,
             _stderr_task: stderr_task,
+            _sandbox_handle: std::sync::Mutex::new(sandbox_handle),
         });
 
         Ok((process, handshake_outcome))
@@ -459,6 +512,8 @@ impl PluginProcess {
             shutdown_timeout,
             _read_task: read_task,
             _stderr_task: stderr_task,
+            // Test constructors have no sandbox; cleanup is a no-op.
+            _sandbox_handle: std::sync::Mutex::new(None),
         })
     }
 }
@@ -692,5 +747,100 @@ mod tests {
         emit_plugin_line("echo-llm", "not-json-at-all");
         emit_plugin_line("echo-llm", r#"{"level":"ERROR","fields":{"message":"x"}}"#);
         emit_plugin_line("echo-llm", r#"{"level":"WARN","message":"y"}"#);
+    }
+
+    // ---- sandbox integration tests ----
+
+    /// `spawn_and_handshake` must return `SandboxValidationFailed` (not
+    /// `PluginSpawnFailed`) when the sandbox plan has capabilities that the
+    /// adapter rejects. This proves validate_plan runs BEFORE wrap_spawn and
+    /// BEFORE `Command::spawn` — a binary that doesn't exist would produce
+    /// `PluginSpawnFailed` instead if the order were wrong.
+    ///
+    /// MockSandbox rejects `CapabilityShape::Custom`, so we use a plan with
+    /// a Custom capability to trigger the rejection.
+    #[tokio::test]
+    async fn spawn_fails_on_validation_error() {
+        use tau_domain::Capability;
+        use tau_ports::SandboxPlan;
+
+        use crate::sandbox::SandboxAdapter;
+
+        // A plan with a Custom capability that MockSandbox cannot handle.
+        let custom_cap: Capability = serde_json::from_value(serde_json::json!({
+            "kind": "mcp.tool.use",
+            "tool": "risky-tool"
+        }))
+        .expect("valid Capability JSON");
+        let plan = SandboxPlan::new(vec![custom_cap], None, None);
+
+        // MockSandbox validates correctly — rejects Custom shapes.
+        let adapter = SandboxAdapter::Mock(tau_ports::fixtures::MockSandbox::new("mock"));
+
+        let result = PluginProcess::spawn_and_handshake(
+            // A binary path that doesn't exist — if we reach spawn, we'd
+            // get PluginSpawnFailed instead of SandboxValidationFailed.
+            std::path::Path::new("/nonexistent/plugin-binary"),
+            "test-plugin".to_owned(),
+            "run-id",
+            "agent-id",
+            tau_plugin_protocol::FramerOptions::default(),
+            Duration::from_secs(2),
+            None,
+            Some((&plan, &adapter)),
+            |_reader, _writer| Box::pin(async { Ok(()) }),
+        )
+        .await;
+
+        match result {
+            Err(crate::error::RuntimeError::SandboxValidationFailed { plugin, errors }) => {
+                assert_eq!(plugin, "test-plugin");
+                assert!(!errors.is_empty(), "at least one validation error expected");
+            }
+            Err(other) => panic!("expected SandboxValidationFailed, got: {other:?}"),
+            Ok(_) => panic!("expected Err, got Ok"),
+        }
+    }
+
+    /// Validates ordering: when a VALID plan is used, the spawn proceeds past
+    /// the sandbox checks. Here the binary doesn't exist, so we get
+    /// `PluginSpawnFailed` (proving that validation + wrap_spawn ran first
+    /// without error, and the error came at the actual spawn step).
+    #[tokio::test]
+    async fn spawn_calls_validate_plan_then_wrap_spawn() {
+        use tau_ports::SandboxPlan;
+
+        use crate::sandbox::SandboxAdapter;
+
+        // Empty plan — MockSandbox accepts this unconditionally.
+        let plan = SandboxPlan::new(vec![], None, None);
+        let adapter = SandboxAdapter::Mock(tau_ports::fixtures::MockSandbox::new("mock"));
+
+        let result = PluginProcess::spawn_and_handshake(
+            // Non-existent binary so spawn fails AFTER sandbox succeeds.
+            std::path::Path::new("/nonexistent/plugin-binary"),
+            "test-plugin".to_owned(),
+            "run-id",
+            "agent-id",
+            tau_plugin_protocol::FramerOptions::default(),
+            Duration::from_secs(2),
+            None,
+            Some((&plan, &adapter)),
+            |_reader, _writer| Box::pin(async { Ok(()) }),
+        )
+        .await;
+
+        // The sandbox accepted the plan; spawn failed because the binary
+        // doesn't exist. This proves validate_plan + wrap_spawn both ran
+        // successfully before Command::spawn was called.
+        match result {
+            Err(crate::error::RuntimeError::PluginSpawnFailed { .. }) => {
+                // Expected: sandbox passed, binary missing → spawn failed.
+            }
+            Err(other) => {
+                panic!("expected PluginSpawnFailed (sandbox passed, binary missing), got: {other}")
+            }
+            Ok(_) => panic!("expected Err, got Ok"),
+        }
     }
 }
