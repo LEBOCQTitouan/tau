@@ -57,7 +57,7 @@ pub(crate) fn baseline_syscall_map() -> std::collections::BTreeMap<i64, Vec<Secc
 
     macro_rules! allow {
         ($($nr:expr),+ $(,)?) => {
-            $(rules.entry($nr).or_insert_with(Vec::new);)+
+            $(rules.entry($nr).or_default();)+
         };
     }
 
@@ -249,6 +249,10 @@ pub(crate) fn baseline_syscall_map() -> std::collections::BTreeMap<i64, Vec<Secc
 ///
 /// Compiled in the **parent** process once; the resulting `BpfProgram` (a `Vec<sock_filter>`)
 /// is moved into the pre_exec closure by value. The child only calls `prctl` + `seccomp`.
+///
+/// Used by unit tests (verifying baseline filter compiles); production callers
+/// go through `baseline_syscall_map` + per-plan extensions + `compile_filter`.
+#[allow(dead_code)]
 pub(crate) fn build_baseline_filter() -> Result<BpfProgram, SandboxError> {
     let rules = baseline_syscall_map();
     compile_filter(rules)
@@ -338,16 +342,15 @@ pub(crate) fn apply_strict(
         cmd.pre_exec(move || {
             // Step 1: landlock filesystem isolation.
             install_landlock_from_plan(&read_paths, &write_paths)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
 
             // Step 2: drop into new user namespace (+ network namespace unless plan
             // has Network(Http) capability — see net::unshare_flags_for_plan).
-            unshare(unshare_flags)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            unshare(unshare_flags).map_err(|e| std::io::Error::other(e.to_string()))?;
 
             // Step 3: install seccomp BPF allow-list (blocks unshare/landlock after this).
             seccompiler::apply_filter(bpf.as_slice())
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
 
             Ok(())
         });

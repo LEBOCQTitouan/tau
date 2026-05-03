@@ -132,7 +132,7 @@ pub(crate) fn extend_with_network_rules(
     ];
 
     for &nr in net_syscalls {
-        rules.entry(nr).or_insert_with(Vec::new);
+        rules.entry(nr).or_default();
     }
 }
 

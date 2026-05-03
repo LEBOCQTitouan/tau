@@ -85,7 +85,7 @@ pub(crate) fn apply_landlock(
     unsafe {
         cmd.pre_exec(move || {
             install_landlock(&read_paths, &write_paths)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                .map_err(|e| std::io::Error::other(e.to_string()))
         });
     }
     Ok(SandboxHandle::noop())
@@ -129,6 +129,32 @@ fn install_landlock(
     let mut ruleset = Ruleset::default()
         .handle_access(AccessFs::from_all(abi))?
         .create()?;
+
+    // Always allow read access to system binary + library paths so the
+    // child can `execve` itself and load shared libraries. Without this,
+    // landlock blocks the binary's own load and exec returns EACCES.
+    // The user's plan-derived read_paths still narrow application access;
+    // these system paths exist purely so the runtime mechanics work.
+    let system_read_paths: &[&str] = &[
+        "/bin",
+        "/sbin",
+        "/usr/bin",
+        "/usr/sbin",
+        "/lib",
+        "/lib64",
+        "/usr/lib",
+        "/usr/lib64",
+        "/etc",
+    ];
+    for sys_path in system_read_paths {
+        if let Ok(fd) = PathFd::new(sys_path) {
+            ruleset = ruleset.add_rule(PathBeneath::new(
+                fd,
+                make_bitflags!(AccessFs::{ReadFile | ReadDir}),
+            ))?;
+        }
+        // Silently skip paths that don't exist on this system.
+    }
 
     for p in read_paths {
         let fd = PathFd::new(p).map_err(|e| format!("landlock read path {}: {e}", p.display()))?;
