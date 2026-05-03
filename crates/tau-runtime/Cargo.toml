@@ -64,6 +64,10 @@ test-support   = ["tau-plugin-protocol/test-support"]
 # Enables the MockSandbox adapter in `sandbox::chain`. Activated automatically
 # by the dev-dep on tau-ports with `test-fixtures`.
 test-fixtures  = ["tau-ports/test-fixtures"]
+# Enables integration tests that require real OS sandboxing primitives
+# (landlock, seccomp, namespaces). Linux-only at v0.1; CI flips this on
+# the ubuntu-latest test slot.
+integration-tests = []
 
 [dev-dependencies]
 tokio              = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
