@@ -2991,6 +2991,7 @@ name = "tau-sandbox-native"
 version = "0.0.0"
 dependencies = [
  "landlock",
+ "libc",
  "nix 0.29.0",
  "seccompiler",
  "serde_json",

@@ -20,7 +20,7 @@ pub(crate) fn collect_landlock_paths(
     cmd: &Command,
 ) -> Result<(Vec<std::path::PathBuf>, Vec<std::path::PathBuf>), SandboxError> {
     let read_strs = collect_paths(plan, |c| match c {
-        Capability::Filesystem(FsCapability::Read { paths }) => Some(paths.clone()),
+        Capability::Filesystem(FsCapability::Read { paths, .. }) => Some(paths.clone()),
         _ => None,
     });
     let write_strs = collect_paths(plan, |c| match c {
@@ -120,7 +120,9 @@ fn install_landlock(
     write_paths: &[PathBuf],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use landlock::make_bitflags;
-    use landlock::{AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI};
+    use landlock::{
+        Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI,
+    };
 
     let abi = ABI::V1;
 

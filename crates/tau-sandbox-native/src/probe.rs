@@ -67,7 +67,7 @@ pub(crate) async fn probe(requested: SandboxTier) -> SandboxProbe {
 /// calling `restrict_self()`) is a side-effect-free probe: the kernel FD is
 /// opened and immediately dropped, applying no restrictions to the process.
 fn landlock_v1_supported() -> bool {
-    use landlock::{AccessFs, CompatLevel, Compatible, Ruleset, RulesetAttr, ABI};
+    use landlock::{Access, AccessFs, CompatLevel, Compatible, Ruleset, RulesetAttr, ABI};
 
     Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)

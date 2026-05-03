@@ -30,7 +30,7 @@ use std::convert::TryInto;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
-use nix::sched::{unshare, CloneFlags};
+use nix::sched::unshare;
 use seccompiler::{BpfProgram, SeccompAction, SeccompFilter, SeccompRule};
 use tau_ports::{SandboxError, SandboxHandle, SandboxPlan};
 
