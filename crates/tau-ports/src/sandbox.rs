@@ -31,6 +31,24 @@ pub struct SandboxPlan {
     pub limits: Option<ResourceLimits>,
 }
 
+impl SandboxPlan {
+    /// Construct a [`SandboxPlan`].
+    ///
+    /// `#[non_exhaustive]` blocks struct-literal construction outside
+    /// `tau-ports`; use this constructor instead.
+    pub fn new(
+        capabilities: Vec<Capability>,
+        context: Option<WorkingContext>,
+        limits: Option<ResourceLimits>,
+    ) -> Self {
+        Self {
+            capabilities,
+            context,
+            limits,
+        }
+    }
+}
+
 /// Working-context hint for the sandboxed execution.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default)]
