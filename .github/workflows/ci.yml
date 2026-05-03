@@ -54,11 +54,11 @@ jobs:
       # Sandbox integration tests — Linux-only, ignored by default,
       # opt-in via the integration-tests feature.
       - if: matrix.os == 'ubuntu-latest'
-        run: cargo test -p tau-sandbox-native --features integration-tests -- --ignored
+        run: cargo test -p tau-sandbox-native --features integration-tests --tests -- --ignored
       - if: matrix.os == 'ubuntu-latest'
-        run: cargo test -p tau-sandbox-container -- --ignored
+        run: cargo test -p tau-sandbox-container --tests -- --ignored
       - if: matrix.os == 'ubuntu-latest'
-        run: cargo test -p tau-runtime --features integration-tests -- --ignored
+        run: cargo test -p tau-runtime --features integration-tests --tests -- --ignored
 
   no-default-features:
     name: build (no-default-features)
