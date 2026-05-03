@@ -1,0 +1,26 @@
+[package]
+name = "tau-sandbox-container"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Container sandbox adapter (docker/podman shell-out) for tau"
+
+[dependencies]
+tau-domain = { workspace = true, features = ["serde"] }
+tau-ports   = { workspace = true, features = ["serde"] }
+tracing     = { workspace = true }
+tokio       = { workspace = true }
+thiserror   = { workspace = true }
+
+[dev-dependencies]
+tempfile   = { workspace = true }
+serde_json = "1"
+tau-domain = { workspace = true, features = ["serde"] }
+tau-ports  = { workspace = true, features = ["serde"] }
+
+[features]
+default = []
+integration-tests = []

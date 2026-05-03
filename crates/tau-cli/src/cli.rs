@@ -289,6 +289,11 @@ pub struct ResolveArgs {
     /// Print the resolution plan without fetching anything.
     #[arg(long)]
     pub dry_run: bool,
+    /// Run sandbox capability cross-check (Layer 3 validation) against
+    /// the configured adapter; report any plugin whose plan is rejected.
+    /// Exit 0 if all OK; exit 2 if any violation OR no adapter available.
+    #[arg(long)]
+    pub check_sandbox: bool,
 }
 
 /// Arguments for `tau uninstall`.
@@ -515,6 +520,17 @@ mod tests {
             panic!()
         };
         assert!(args.force);
+    }
+
+    #[test]
+    fn parses_resolve_check_sandbox() {
+        let cli = Cli::parse_from(["tau", "resolve", "--check-sandbox"]);
+        let Command::Resolve(args) = cli.command else {
+            panic!("expected Resolve: {:?}", cli.command)
+        };
+        assert!(args.check_sandbox);
+        assert!(!args.no_install);
+        assert!(!args.dry_run);
     }
 
     #[test]

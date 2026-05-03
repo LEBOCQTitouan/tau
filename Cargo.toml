@@ -20,6 +20,8 @@ members = [
     "crates/tau-plugins/openai",
     "crates/tau-plugins/fs-read",
     "crates/tau-plugins/shell",
+    "crates/tau-sandbox-container",
+    "crates/tau-sandbox-native",
 ]
 
 [workspace.package]
@@ -39,6 +41,8 @@ tau-plugin-protocol = { path = "crates/tau-plugin-protocol", version = "0.0.0" }
 tau-plugin-sdk      = { path = "crates/tau-plugin-sdk", version = "0.0.0" }
 tau-plugin-test-support = { path = "crates/tau-plugin-test-support", version = "0.0.0" }
 tau-plugin-conformance  = { path = "crates/tau-plugin-conformance",  version = "0.0.0" }
+tau-sandbox-native      = { path = "crates/tau-sandbox-native",      version = "0.0.0" }
+tau-sandbox-container   = { path = "crates/tau-sandbox-container",   version = "0.0.0" }
 thiserror       = "2"
 semver          = { version = "1" }
 uuid            = { version = "1", features = ["v7"] }
@@ -64,3 +68,7 @@ reqwest             = { version = "0.12", default-features = false, features = [
 eventsource-stream  = "0.2"
 async-stream        = "0.3"
 secrecy             = "0.10"
+landlock     = "0.4"
+libc         = "0.2"
+nix          = { version = "0.29", default-features = false, features = ["sched", "user", "process", "fs"] }
+seccompiler  = "0.5"

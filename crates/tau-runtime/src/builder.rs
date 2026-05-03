@@ -30,10 +30,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use tau_domain::CapabilityShapeSet;
 use tau_ports::{
     CompletionRequest, CompletionResponse, CompletionStream, Key, LlmBackend, LlmError, Namespace,
-    Sandbox, SandboxError, SandboxPlan, SessionContext, Storage, StorageError, Tool, ToolError,
-    ToolResult, ToolSpec,
+    Sandbox, SandboxError, SandboxHandle, SandboxPlan, SandboxProbe, SessionContext, Storage,
+    StorageError, Tool, ToolError, ToolResult, ToolSpec,
 };
 
 use crate::error::{BuildError, PluginKind};
@@ -232,33 +233,58 @@ impl<T: Storage + 'static> DynStorage for T {
     }
 }
 
-/// Object-safe wrapper for [`Sandbox<Handle = ()>`].
+/// Object-safe wrapper for [`Sandbox`].
 ///
-/// **PROVISIONAL** — mirrors [`tau_ports::Sandbox`]'s provisional
-/// status. v0.1 doesn't wire `Sandbox::create` from the run loop;
-/// `DynSandbox` exists so the plugin-host loader signatures
-/// ([`crate::plugin_host::load_sandbox`]) can return the same kind of
-/// `Arc<dyn Dyn*>` shim the kernel uses for the other ports.
-///
-/// Restricts to `Handle = ()` for the same reason [`DynTool`] restricts
-/// to `Session = ()`: dyn-compatible erasure of a generic-handle
-/// `Sandbox` requires a concrete handle type, and at v0.1 the only
-/// implementation is `MockSandbox` (which uses `()`).
+/// Mirrors the new v0.1 trait surface — `probe`, `supported_shapes`,
+/// `validate_plan`, `wrap_spawn` — using boxed futures where needed for
+/// dyn-compatibility. The `IpcSandbox` path is removed: `wrap_spawn`
+/// takes `&mut Command` (a local in-process concept) which cannot be
+/// transmitted over IPC. In-tree adapters (`tau-sandbox-native`,
+/// `tau-sandbox-container`) replace it (Tasks 3, 6).
 pub trait DynSandbox: Send + Sync {
     /// Plugin-visible name (matches [`Sandbox::name`]).
     fn name(&self) -> &str;
 
-    /// Boxed-future wrapper for [`Sandbox::create`] with `Handle = ()`.
-    fn create<'a>(&'a self, plan: SandboxPlan) -> BoxFuture<'a, Result<(), SandboxError>>;
+    /// Boxed-future wrapper for [`Sandbox::probe`].
+    fn probe<'a>(&'a self) -> BoxFuture<'a, SandboxProbe>;
+
+    /// Delegate to [`Sandbox::supported_shapes`].
+    fn supported_shapes(&self) -> CapabilityShapeSet;
+
+    /// Delegate to [`Sandbox::validate_plan`].
+    fn validate_plan(&self, plan: &SandboxPlan) -> Result<(), SandboxError>;
+
+    /// Boxed-future wrapper for [`Sandbox::wrap_spawn`].
+    fn wrap_spawn<'a>(
+        &'a self,
+        plan: &'a SandboxPlan,
+        cmd: &'a mut std::process::Command,
+    ) -> BoxFuture<'a, Result<SandboxHandle, SandboxError>>;
 }
 
-impl<T: Sandbox<Handle = ()> + 'static> DynSandbox for T {
+impl<T: Sandbox + 'static> DynSandbox for T {
     fn name(&self) -> &str {
         Sandbox::name(self)
     }
 
-    fn create<'a>(&'a self, plan: SandboxPlan) -> BoxFuture<'a, Result<(), SandboxError>> {
-        Box::pin(Sandbox::create(self, plan))
+    fn probe<'a>(&'a self) -> BoxFuture<'a, SandboxProbe> {
+        Box::pin(Sandbox::probe(self))
+    }
+
+    fn supported_shapes(&self) -> CapabilityShapeSet {
+        Sandbox::supported_shapes(self)
+    }
+
+    fn validate_plan(&self, plan: &SandboxPlan) -> Result<(), SandboxError> {
+        Sandbox::validate_plan(self, plan)
+    }
+
+    fn wrap_spawn<'a>(
+        &'a self,
+        plan: &'a SandboxPlan,
+        cmd: &'a mut std::process::Command,
+    ) -> BoxFuture<'a, Result<SandboxHandle, SandboxError>> {
+        Box::pin(Sandbox::wrap_spawn(self, plan, cmd))
     }
 }
 

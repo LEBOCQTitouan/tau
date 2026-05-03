@@ -8,16 +8,12 @@
 //! See `docs/superpowers/specs/2026-04-28-plugin-loading-design.md` §5.2.
 
 mod llm_backend;
-mod sandbox;
 mod storage;
 mod tool;
 
 pub use llm_backend::{
     run_llm_backend, run_llm_backend_with_config, run_llm_backend_with_config_with_io,
     run_llm_backend_with_io,
-};
-pub use sandbox::{
-    run_sandbox, run_sandbox_with_config, run_sandbox_with_config_with_io, run_sandbox_with_io,
 };
 pub use storage::{
     run_storage, run_storage_with_config, run_storage_with_config_with_io, run_storage_with_io,

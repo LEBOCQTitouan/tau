@@ -132,7 +132,7 @@ installed_at = "{now_rfc3339}"
 
     let new_lockfile = if existing.is_empty() {
         format!(
-            r#"schema_version = 1
+            r#"schema_version = 4
 generated_by_tau_version = "0.0.0"
 generated_at = "{now_rfc3339}"
 {new_entry}"#
@@ -353,7 +353,7 @@ pub fn setup_echo_project(
 
     let llm_path = toml_path_string(echo_llm);
     let mut lockfile = format!(
-        r#"schema_version = 2
+        r#"schema_version = 4
 generated_by_tau_version = "0.0.0"
 generated_at = "{now}"
 

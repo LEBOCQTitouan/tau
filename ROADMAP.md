@@ -24,8 +24,11 @@ enforcement. **Tier 2 fully complete** as of 2026-05-01: priorities
 8 (streaming LLM responses) all shipped, closing the ADR-0007 §4,
 §5, §1, ADR-0006 §3, and ADR-0006 §5 reservations. Tier 3 priority
 11 (REPL persistence) shipped 2026-05-02 — closing ADR-0006 §16 +
-ADR-0007 §11. Remaining Tier 3: priorities 9 (multi-agent
-orchestration), 10 (workflow runner), and 12 (sandboxing).
+ADR-0007 §11. Tier 3 priority 12 (sandboxing) shipped 2026-05-03 —
+closing ADR-0006 §13 + Constitution G12; ADR-0014 records the design;
+Phase 2 (tau as a compiled language for agentic workflows) is now
+unblocked. Remaining Tier 3: priorities 9 (multi-agent orchestration)
+and 10 (workflow runner).
 
 | # | Sub-project | Produces | Merged |
 |---|---|---|---|
@@ -178,7 +181,28 @@ Tier ordering reflects criticality, not strict implementation order
     `/info` REPL slash command; `/clear` removed (replaced by `/exit`
     + re-run). No tau-runtime changes (NG6 preserved). No new CI jobs
     (23 required checks unchanged).
-12. **Sandboxing implementation** (Constitution G12).
+12. **Sandboxing implementation** ✅ Shipped 2026-05-03 — see
+    [spec](docs/superpowers/specs/2026-05-02-sandboxing-design.md),
+    [vision](docs/explanation/tau-as-language.md), and
+    [ADR-0014](docs/decisions/0014-sandboxing.md). New
+    `tau_ports::Sandbox` port (probe / supported_shapes /
+    validate_plan / wrap_spawn) + typed `CapabilityShape` vocabulary
+    in `tau-domain`. Two adapter crates: `tau-sandbox-native` (Linux
+    landlock + seccomp + namespaces; Light + Strict tiers) and
+    `tau-sandbox-container` (docker/podman shell-out, cross-platform).
+    Adapter chain selection in `tau-runtime::sandbox` via probe-based
+    first-Available-meeting-tier wins; `<scope>/config.toml [sandbox]`
+    section configures the chain (schema v1 → v2, additive). Layer 3
+    pre-flight validation (`build_plan` + `validate_plan_against_adapter`,
+    returns ALL errors per pass). Plugin host integration via
+    `tokio::Command::as_std_mut()` bridge. Lockfile schema v3 → v4
+    (additive `required_shapes` field; v3 entries auto-upgrade with
+    once-per-process migration warning). New `tau resolve --check-sandbox`
+    CLI advisory mode (human + JSON output). macOS / Windows / remote
+    backends, per-command exec gating (landlock V2), per-host network
+    filter (nftables-in-netns), and default activation are tracked as
+    follow-ups in [the followups doc](docs/superpowers/specs/2026-05-03-sandboxing-followups.md).
+    No new CI jobs (23 required checks unchanged).
 
 ### Tier 4 — operational quality
 
@@ -186,6 +210,55 @@ Tier ordering reflects criticality, not strict implementation order
 14. **`cargo audit` + `cargo-deny` in CI** (Constitution QG16).
 15. **Serve mode** (JSON-RPC over stdio; Constitution G6, QG12). Lives
     in `tau-app`.
+
+## Phase 2 — Tau as a compiled language for agentic workflows
+
+The sandboxing sub-project (Tier 3 priority 12, [ADR-0014](docs/decisions/0014-sandboxing.md))
+lays the foundation for tau as a compiled language. See
+[`docs/explanation/tau-as-language.md`](docs/explanation/tau-as-language.md)
+for the full vision: write a "tau program" (project tau.toml + plugin
+manifests + lockfile) once, compile it for a specific target triple
+(`linux-native-strict`, `container-podman`, `wasi-p2`, etc.), and the
+toolchain guarantees the resulting bundle runs anywhere a matching
+adapter exists. The same kind of "if it compiles, it runs" guarantee
+Rust gives developers and Docker gives operators, applied to the
+agent-workflow domain.
+
+Phase 2 sub-projects build on the priority-12 foundation:
+
+- **A. `tau check` standalone command** (~3 weeks). Layer 3 validation
+  as a first-class CLI verb — invocable from CI gates, IDE extensions,
+  pre-commit hooks. Reuses the validation logic from Tier 3 priority 12.
+- **B. Tau target triple registry** (~2 weeks). Formal naming
+  convention + documented capability matrix per supported target. New
+  triples land via ADR amendments.
+- **C. `tau build --target <triple>` + bundle format** (~6 weeks). The
+  deployment artifact: a content-hashed bundle pinning resolved
+  package versions + tree hashes (priority 7's `tree_hash`) + computed
+  capability-effective set per agent (priority 4's `compute_effective`)
+  + required capability shapes per plugin (priority 12) + target sandbox
+  triple. `tau run --bundle <file>` executes a bundle.
+- **D. Capability vocabulary forward-compatibility** (~2 weeks). A
+  bundle compiled against tau v1.2 must continue to run on tau v1.3+
+  with new shapes added. Stability discipline + ADR amendments.
+- **E. Cross-machine reproducibility verification** (~3 weeks). Extends
+  `tau verify` (priority 7) so a deployed bundle on a target machine
+  can be verified to match the bundle the project author built.
+- **F. Remote target backends** (~4-6 weeks per backend). Vercel
+  Sandbox, Sandcastle, generic remote-execution providers. Each is an
+  additional `Sandbox` impl. Major design concerns: authentication,
+  IPC channel networking, cold-start latency budgets.
+- **G. WASM target backend** (~12+ weeks). Most ambitious. Plugins
+  compile to `wasm32-wasip2`. The `tau-plugin-sdk` migrates to
+  support the new ABI. Plugin distribution becomes `.wasm` artifacts.
+  Plausibly a Phase 2 effort in its own right.
+
+These Phase 2 sub-projects are independent of the **immediate
+follow-ups** that close gaps left by v0.1 of priority 12 (default
+activation, plugin compatibility, e2e CI infrastructure, per-command
+exec gating, per-host network filter, fork-server pattern, macOS /
+Windows adapters). Those follow-ups are tracked in
+[`docs/superpowers/specs/2026-05-03-sandboxing-followups.md`](docs/superpowers/specs/2026-05-03-sandboxing-followups.md).
 
 ## Out of scope (forever)
 

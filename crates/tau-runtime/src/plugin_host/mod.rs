@@ -9,12 +9,18 @@
 //!
 //! # Module status
 //!
-//! Task 15 wires spawn + dispatch end-to-end: the four [`load_*`]
+//! Task 15 wires spawn + dispatch end-to-end: the three [`load_*`]
 //! entry points spawn the plugin binary, drive the handshake, and
 //! return an `Arc<dyn Dyn*>` shim backed by an `Ipc*` adapter
-//! (`IpcLlmBackend` / `IpcTool` / `IpcStorage` / `IpcSandbox`).
+//! (`IpcLlmBackend` / `IpcTool` / `IpcStorage`).
 //! Streaming (`llm.stream`) is wired in Task 16; protocol recording
 //! is wired in Task 17.
+//!
+//! Note: `IpcSandbox` and `load_sandbox` were removed in the v0.1 port
+//! refinement. The new `Sandbox::wrap_spawn` takes `&mut Command` (an
+//! in-process concept) which cannot be transmitted over IPC. In-tree
+//! adapters (`tau-sandbox-native`, `tau-sandbox-container`) replace the
+//! IPC route (Tasks 3, 6 of the sandboxing plan).
 //!
 //! See `docs/superpowers/specs/2026-04-28-plugin-loading-design.md` §7
 //! and (forthcoming) ADR-0008 for the design rationale.
@@ -30,12 +36,11 @@ use tau_pkg::LockedPlugin;
 use tau_plugin_protocol::handshake::TraceContext;
 use tau_plugin_protocol::FramerOptions;
 
-use crate::builder::{DynLlmBackend, DynSandbox, DynStorage, DynTool};
+use crate::builder::{DynLlmBackend, DynStorage, DynTool};
 use crate::error::RuntimeError;
 
 mod handshake;
 mod ipc_llm;
-mod ipc_sandbox;
 mod ipc_storage;
 mod ipc_tool;
 mod process;
@@ -52,7 +57,8 @@ mod stream_router;
 /// The non-test items
 /// ([`__internals::drive_handshake`]) are always available; the test
 /// constructors ([`__internals::PluginProcess`],
-/// [`__internals::IpcLlmBackend`], etc.) require the
+/// [`__internals::IpcLlmBackend`], [`__internals::IpcTool`],
+/// [`__internals::IpcStorage`], etc.) require the
 /// `test-support` cargo feature so the production build can drop them.
 #[doc(hidden)]
 pub mod __internals {
@@ -60,8 +66,6 @@ pub mod __internals {
 
     #[cfg(any(test, feature = "test-support"))]
     pub use super::ipc_llm::IpcLlmBackend;
-    #[cfg(any(test, feature = "test-support"))]
-    pub use super::ipc_sandbox::IpcSandbox;
     #[cfg(any(test, feature = "test-support"))]
     pub use super::ipc_storage::IpcStorage;
     #[cfg(any(test, feature = "test-support"))]
@@ -120,6 +124,9 @@ pub async fn describe_plugin(
         framer_options,
         options.shutdown_timeout,
         recorder.clone(),
+        // No sandbox for the describe path — this is a one-shot introspection
+        // call that doesn't exercise plugin capabilities.
+        None,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
@@ -335,6 +342,11 @@ pub async fn load_llm_backend(
         framer_options,
         options.shutdown_timeout,
         recorder,
+        // TODO(future): plumb scope-config-driven SandboxAdapter selection here.
+        // v0.1 ships sandbox=None at all four spawn sites; activation is gated on
+        // the runtime kernel adopting `select_adapter` and threading the result
+        // through the plugin host construction.
+        None,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
@@ -402,6 +414,11 @@ pub async fn load_tool(
         framer_options,
         options.shutdown_timeout,
         recorder,
+        // TODO(future): plumb scope-config-driven SandboxAdapter selection here.
+        // v0.1 ships sandbox=None at all four spawn sites; activation is gated on
+        // the runtime kernel adopting `select_adapter` and threading the result
+        // through the plugin host construction.
+        None,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
@@ -493,6 +510,11 @@ pub async fn load_storage(
         framer_options,
         options.shutdown_timeout,
         recorder,
+        // TODO(future): plumb scope-config-driven SandboxAdapter selection here.
+        // v0.1 ships sandbox=None at all four spawn sites; activation is gated on
+        // the runtime kernel adopting `select_adapter` and threading the result
+        // through the plugin host construction.
+        None,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
@@ -512,68 +534,6 @@ pub async fn load_storage(
     .await?;
 
     Ok(Arc::new(ipc_storage::IpcStorage::new(plugin_name, process)) as Arc<dyn DynStorage>)
-}
-
-/// Load a plugin that provides the `Sandbox` port and return a
-/// kernel-ready `Arc<dyn DynSandbox>` shim.
-///
-/// **PROVISIONAL** — the `Sandbox` port itself is a v0.1 sketch
-/// (see `tau_ports::Sandbox` doc comment). Phase 1 will likely
-/// require breaking changes to the trait and to the wire methods;
-/// this entry point exists so plugin-host wiring is symmetric across
-/// the four ports.
-///
-/// # Implementation
-///
-/// Spawn + handshake against [`tau_domain::PortKind::Sandbox`]; the
-/// host doesn't require any specific methods at handshake time
-/// because the kernel doesn't route through `Sandbox::create` in
-/// v0.1 (per spec §1.1). The returned
-/// [`ipc_sandbox::IpcSandbox`] dispatches `sandbox.run` per call.
-pub async fn load_sandbox(
-    plugin: &LockedPlugin,
-    config: serde_json::Value,
-    trace_context: TraceContext,
-    options: PluginHostOptions,
-) -> Result<Arc<dyn DynSandbox>, RuntimeError> {
-    let plugin_name = plugin.manifest.bin.clone();
-    let run_id = trace_context.run_id.clone();
-    let agent_id = trace_context.agent_id.clone();
-    let trace_for_handshake = trace_context.clone();
-    let config_for_handshake = config;
-    let plugin_name_for_handshake = plugin_name.clone();
-    let handshake_timeout = options.handshake_timeout;
-    let mut framer_options = FramerOptions::default();
-    framer_options.max_message_size = options.max_message_size;
-    let recorder = build_recorder(&plugin_name, &options).await;
-
-    let (process, _handshake_response) = process::PluginProcess::spawn_and_handshake(
-        &plugin.binary_path,
-        plugin_name.clone(),
-        &run_id,
-        &agent_id,
-        framer_options,
-        options.shutdown_timeout,
-        recorder,
-        |reader, writer| {
-            Box::pin(async move {
-                handshake::drive_handshake(
-                    reader,
-                    writer,
-                    &plugin_name_for_handshake,
-                    PortKind::Sandbox,
-                    &[],
-                    config_for_handshake,
-                    trace_for_handshake,
-                    handshake_timeout,
-                )
-                .await
-            })
-        },
-    )
-    .await?;
-
-    Ok(Arc::new(ipc_sandbox::IpcSandbox::new(plugin_name, process)) as Arc<dyn DynSandbox>)
 }
 
 #[cfg(test)]

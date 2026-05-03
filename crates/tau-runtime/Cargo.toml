@@ -9,10 +9,17 @@ repository.workspace   = true
 authors.workspace      = true
 
 [dependencies]
-tau-domain          = { workspace = true, features = ["serde"] }
-tau-ports           = { workspace = true, features = ["serde"] }
-tau-pkg             = { workspace = true }
-tau-plugin-protocol = { workspace = true }
+tau-domain            = { workspace = true, features = ["serde"] }
+# TODO(future): tau-ports/test-fixtures is enabled in production deps to
+# make MockSandbox reachable for the env-var-gated path
+# (TAU_TESTING_ALLOW_MOCK_SANDBOX=1) used by CLI integration tests via
+# cargo_bin("tau"). Future cleanup: move MockSandbox out of fixtures, or
+# build a dedicated test-only binary for the integration test harness.
+tau-ports             = { workspace = true, features = ["serde", "test-fixtures"] }
+tau-pkg               = { workspace = true }
+tau-plugin-protocol   = { workspace = true }
+tau-sandbox-native    = { workspace = true }
+tau-sandbox-container = { workspace = true }
 thiserror           = { workspace = true }
 tracing             = { workspace = true }
 # `v4` for session-id minting in `Runtime::run` per spec §3.7; the
@@ -53,7 +60,14 @@ default = []
 # `crates/tau-runtime/tests/plugin_host_ipc_*.rs` can build a
 # `PluginProcess` from a pre-paired reader+writer (no subprocess
 # spawn) and exercise the per-port IPC adapters end-to-end.
-test-support = ["tau-plugin-protocol/test-support"]
+test-support   = ["tau-plugin-protocol/test-support"]
+# Enables the MockSandbox adapter in `sandbox::chain`. Activated automatically
+# by the dev-dep on tau-ports with `test-fixtures`.
+test-fixtures  = ["tau-ports/test-fixtures"]
+# Enables integration tests that require real OS sandboxing primitives
+# (landlock, seccomp, namespaces). Linux-only at v0.1; CI flips this on
+# the ubuntu-latest test slot.
+integration-tests = []
 
 [dev-dependencies]
 tokio              = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

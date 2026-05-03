@@ -25,7 +25,7 @@ use crate::error::ScopeError;
 /// Maximum `ScopeConfig::schema_version` this tau version recognizes.
 /// A `config.toml` with a higher value rejects with
 /// [`ScopeError::ConfigSchemaTooNew`].
-pub const MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION: u32 = 1;
+pub const MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION: u32 = 2;
 
 /// Distinguishes a global scope (default `~/.tau`) from a project scope
 /// (a `.tau/` directory inside a project's source tree).
@@ -39,6 +39,91 @@ pub enum ScopeKind {
     Global,
     /// Project scope (a `.tau/` directory in the project's source tree).
     Project,
+}
+
+/// Per-scope sandbox configuration.
+///
+/// Lives under `[sandbox]` in `<scope>/config.toml`. Schema version 2.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SandboxConfig {
+    /// Adapter chain — adapters are probed in order; first `Available` wins.
+    /// Empty default chain means "default chain" (the runtime applies a
+    /// platform-appropriate default: `[native, container]` on Linux,
+    /// `[container]` on macOS/Windows).
+    #[serde(default)]
+    pub chain: Vec<SandboxAdapterConfig>,
+    /// Minimum tier the selected adapter must advertise. If set, an adapter
+    /// reporting a lower tier is skipped. None = no minimum.
+    #[serde(default)]
+    pub minimum_tier: Option<SandboxMinimumTier>,
+}
+
+impl SandboxConfig {
+    /// Construct a `SandboxConfig` with an explicit adapter chain and optional
+    /// minimum tier. Prefer [`SandboxConfig::default`] for the most common case
+    /// (empty chain, no minimum tier).
+    pub fn with_chain(
+        chain: Vec<SandboxAdapterConfig>,
+        minimum_tier: Option<SandboxMinimumTier>,
+    ) -> Self {
+        Self {
+            chain,
+            minimum_tier,
+        }
+    }
+}
+
+/// One entry in the sandbox adapter chain.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SandboxAdapterConfig {
+    /// Adapter kind. Determines which crate's adapter to instantiate.
+    pub kind: SandboxAdapterKind,
+    /// Free-form options forwarded to the adapter (e.g. `runtime = "podman"`
+    /// for `kind = "container"`).
+    #[serde(default)]
+    pub options: BTreeMap<String, toml::Value>,
+}
+
+impl SandboxAdapterConfig {
+    /// Construct a new `SandboxAdapterConfig` with an empty options map.
+    pub fn new(kind: SandboxAdapterKind) -> Self {
+        Self {
+            kind,
+            options: BTreeMap::new(),
+        }
+    }
+}
+
+/// Sandbox adapter kind (matches an entry in the workspace's set of
+/// `Sandbox` impls).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SandboxAdapterKind {
+    /// `tau-sandbox-native` — Linux landlock + seccomp + namespaces.
+    Native,
+    /// `tau-sandbox-container` — docker/podman shell-out.
+    Container,
+    /// `tau_ports::fixtures::MockSandbox` — for tests; never used unless
+    /// explicitly listed.
+    Mock,
+}
+
+/// Minimum sandbox tier required of the selected adapter. Mirrors
+/// `tau_ports::SandboxTier` but at the config layer (we don't depend on
+/// tau-ports from tau-pkg). The runtime maps these to `SandboxTier`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SandboxMinimumTier {
+    /// No minimum (any tier).
+    None,
+    /// Filesystem isolation at minimum.
+    Light,
+    /// Full strict tier required.
+    Strict,
 }
 
 /// Schema for `<scope>/config.toml`. Future-grown additively.
@@ -59,7 +144,7 @@ pub enum ScopeKind {
 ///
 /// let cfg = ScopeConfig::new(ScopeKind::Global);
 /// let toml = cfg.to_toml_string().unwrap();
-/// assert!(toml.contains("schema_version = 1"));
+/// assert!(toml.contains("schema_version = 2"));
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -77,11 +162,15 @@ pub struct ScopeConfig {
     /// timeouts, etc.). Empty at v0.1.
     #[serde(default)]
     pub defaults: BTreeMap<String, tau_domain::Value>,
+    /// Sandbox configuration. Empty by default; the runtime applies a
+    /// platform-appropriate default chain when the chain is empty.
+    #[serde(default)]
+    pub sandbox: SandboxConfig,
 }
 
 impl ScopeConfig {
     /// Construct a new `ScopeConfig` with the current time, the current
-    /// crate version, schema version 1, and an empty defaults map.
+    /// crate version, schema version 2, and empty defaults/sandbox fields.
     pub fn new(kind: ScopeKind) -> Self {
         Self {
             schema_version: MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION,
@@ -89,6 +178,7 @@ impl ScopeConfig {
             created_at: SystemTime::now(),
             created_by_tau_version: env!("CARGO_PKG_VERSION").to_owned(),
             defaults: BTreeMap::new(),
+            sandbox: SandboxConfig::default(),
         }
     }
 
@@ -664,10 +754,11 @@ mod tests {
     #[test]
     fn scope_config_new_populates_defaults() {
         let cfg = ScopeConfig::new(ScopeKind::Global);
-        assert_eq!(cfg.schema_version, 1);
+        assert_eq!(cfg.schema_version, 2);
         assert_eq!(cfg.kind, ScopeKind::Global);
         assert_eq!(cfg.created_by_tau_version, env!("CARGO_PKG_VERSION"));
         assert!(cfg.defaults.is_empty());
+        assert_eq!(cfg.sandbox, SandboxConfig::default());
     }
 
     #[test]
@@ -709,7 +800,7 @@ mod tests {
             err,
             ScopeError::ConfigSchemaTooNew {
                 found: 999,
-                supported: 1,
+                supported: 2,
             }
         ));
     }
@@ -731,5 +822,122 @@ mod tests {
         "#;
         let parsed = ScopeConfig::read_from_str(cfg).unwrap();
         assert!(parsed.defaults.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // SandboxConfig tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn sandbox_config_default_is_empty_chain() {
+        let cfg = SandboxConfig::default();
+        assert!(cfg.chain.is_empty());
+        assert!(cfg.minimum_tier.is_none());
+    }
+
+    #[test]
+    fn sandbox_config_round_trips_through_toml() {
+        let toml_str = r#"
+            schema_version = 2
+            kind = "project"
+            created_at = "2026-04-27T10:00:00Z"
+            created_by_tau_version = "0.0.0"
+
+            [[sandbox.chain]]
+            kind = "native"
+
+            [[sandbox.chain]]
+            kind = "container"
+
+            [sandbox.chain.options]
+            runtime = "podman"
+        "#;
+        // Build the expected value manually.
+        let mut options = BTreeMap::new();
+        options.insert("runtime".to_string(), toml::Value::String("podman".into()));
+        let expected = SandboxConfig {
+            chain: vec![
+                SandboxAdapterConfig {
+                    kind: SandboxAdapterKind::Native,
+                    options: BTreeMap::new(),
+                },
+                SandboxAdapterConfig {
+                    kind: SandboxAdapterKind::Container,
+                    options,
+                },
+            ],
+            minimum_tier: None,
+        };
+        let parsed = ScopeConfig::read_from_str(toml_str).unwrap();
+        assert_eq!(parsed.sandbox, expected);
+    }
+
+    #[test]
+    fn v1_config_loads_with_empty_sandbox() {
+        let toml_str = r#"
+            schema_version = 1
+            kind = "global"
+            created_at = "2026-04-27T10:00:00Z"
+            created_by_tau_version = "0.0.0"
+        "#;
+        let parsed = ScopeConfig::read_from_str(toml_str).unwrap();
+        assert_eq!(parsed.schema_version, 1);
+        assert_eq!(parsed.sandbox, SandboxConfig::default());
+        assert!(parsed.sandbox.chain.is_empty());
+        assert!(parsed.sandbox.minimum_tier.is_none());
+    }
+
+    #[test]
+    fn unknown_adapter_kind_rejected() {
+        let toml_str = r#"
+            schema_version = 2
+            kind = "global"
+            created_at = "2026-04-27T10:00:00Z"
+            created_by_tau_version = "0.0.0"
+
+            [[sandbox.chain]]
+            kind = "weird"
+        "#;
+        let err = ScopeConfig::read_from_str(toml_str).unwrap_err();
+        assert!(matches!(err, ScopeError::ConfigParse { .. }));
+    }
+
+    #[test]
+    fn mixed_adapter_chain_round_trips() {
+        let toml_str = r#"
+            schema_version = 2
+            kind = "project"
+            created_at = "2026-04-27T10:00:00Z"
+            created_by_tau_version = "0.0.0"
+
+            [sandbox]
+            minimum_tier = "strict"
+
+            [[sandbox.chain]]
+            kind = "native"
+
+            [sandbox.chain.options]
+            tier = "strict"
+
+            [[sandbox.chain]]
+            kind = "container"
+
+            [[sandbox.chain]]
+            kind = "mock"
+        "#;
+        let parsed = ScopeConfig::read_from_str(toml_str).unwrap();
+        assert_eq!(
+            parsed.sandbox.minimum_tier,
+            Some(SandboxMinimumTier::Strict)
+        );
+        assert_eq!(parsed.sandbox.chain.len(), 3);
+        assert_eq!(parsed.sandbox.chain[0].kind, SandboxAdapterKind::Native);
+        assert_eq!(parsed.sandbox.chain[1].kind, SandboxAdapterKind::Container);
+        assert_eq!(parsed.sandbox.chain[2].kind, SandboxAdapterKind::Mock);
+        // Serialize back and re-parse to verify full round-trip.
+        let scope_cfg = parsed;
+        let serialized = scope_cfg.to_toml_string().unwrap();
+        let reparsed = ScopeConfig::read_from_str(&serialized).unwrap();
+        assert_eq!(reparsed.sandbox, scope_cfg.sandbox);
     }
 }

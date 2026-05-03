@@ -2,7 +2,7 @@
 //! [`tau_runtime::plugin_host::__internals`].
 //!
 //! These tests pair an [`IpcLlmBackend`] / [`IpcTool`] / [`IpcStorage`]
-//! / [`IpcSandbox`] with a [`FakeStdioPeer`] (test-driven plugin side)
+//! with a [`FakeStdioPeer`] (test-driven plugin side)
 //! through two duplex streams, build a [`PluginProcess`] via the
 //! `new_for_test` constructor (no real subprocess), and exercise one
 //! RPC per adapter to verify:
@@ -10,9 +10,9 @@
 //! 1. Wire shape (frame method + params bytes) matches the SDK side.
 //! 2. Response decoding produces the expected typed result.
 //! 3. Wire-level error envelopes surface as
-//!    `{Llm,Tool,Storage,Sandbox}Error::Internal { message }`.
+//!    `{Llm,Tool,Storage}Error::Internal { message }`.
 //!
-//! The DynLlmBackend / DynTool / DynStorage / DynSandbox shim traits
+//! The DynLlmBackend / DynTool / DynStorage shim traits
 //! return `BoxFuture<'a, _>` futures that are deliberately *not*
 //! `Send`-bounded (see `crate::builder` module-level docs), so the
 //! call/peer two-task pattern uses [`tokio::join!`] rather than
@@ -20,6 +20,10 @@
 //!
 //! Streaming + capability filter coverage live in companion test
 //! files.
+//!
+//! Note: `IpcSandbox` was removed in the v0.1 Sandbox port refinement.
+//! The new `Sandbox::wrap_spawn` takes `&mut Command` (in-process only)
+//! and cannot be proxied over IPC.
 
 #![cfg(feature = "test-support")]
 
@@ -30,12 +34,10 @@ use tau_domain::Value;
 use tau_plugin_protocol::test_support::FakeStdioPeer;
 use tau_plugin_protocol::{FramedReader, FramedWriter, FramerOptions};
 use tau_ports::fixtures::{make_completion_response, make_tool_result, make_tool_spec};
-use tau_ports::{
-    CompletionChunk, CompletionRequest, Key, Namespace, SandboxPlan, StopReason, ToolContent,
-};
-use tau_runtime::builder::{DynLlmBackend, DynSandbox, DynStorage, DynTool};
+use tau_ports::{CompletionChunk, CompletionRequest, Key, Namespace, StopReason, ToolContent};
+use tau_runtime::builder::{DynLlmBackend, DynStorage, DynTool};
 use tau_runtime::plugin_host::__internals::{
-    DynAsyncWriter, IpcLlmBackend, IpcSandbox, IpcStorage, IpcTool, PluginProcess,
+    DynAsyncWriter, IpcLlmBackend, IpcStorage, IpcTool, PluginProcess,
 };
 use tokio::io::DuplexStream;
 
@@ -338,31 +340,4 @@ async fn ipc_storage_get_put_delete_list_roundtrip_via_fake_peer() {
     let (listed, ()) = tokio::join!(list_fut, peer_fut);
     let listed = listed.expect("list ok");
     assert_eq!(listed.len(), 2);
-}
-
-#[tokio::test]
-async fn ipc_sandbox_create_roundtrip_via_fake_peer() {
-    let (process, mut peer) = paired_process("nosandbox");
-    let sandbox = IpcSandbox::new("nosandbox".to_string(), process);
-
-    assert_eq!(DynSandbox::name(&sandbox), "nosandbox");
-
-    // `SandboxPlan` is `#[non_exhaustive]` so we can't struct-literal
-    // construct outside `tau-ports`. Deserialize from a JSON literal
-    // through serde_json instead — equivalent canonical form.
-    let plan_json = serde_json::json!({
-        "capabilities": [],
-        "context": null,
-        "limits": null,
-    });
-    let plan: SandboxPlan = serde_json::from_value(plan_json).expect("decode SandboxPlan");
-    let call_fut = sandbox.create(plan);
-    let peer_fut = async {
-        let (msgid, params_bytes) = peer.expect_request("sandbox.run").await;
-        let parsed: Vec<SandboxPlan> = rmp_serde::from_slice(&params_bytes).expect("params decode");
-        assert_eq!(parsed.len(), 1);
-        peer.send_response(msgid, &()).await.unwrap();
-    };
-    let (call_result, ()) = tokio::join!(call_fut, peer_fut);
-    call_result.expect("create ok");
 }

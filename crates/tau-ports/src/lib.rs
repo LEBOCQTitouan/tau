@@ -10,8 +10,8 @@
 //! - [`llm::LlmBackend`] — LLM provider plugins (`kind = "llm-backend"`).
 //! - [`tool::Tool`] — tool plugins (`kind = "tool"`).
 //! - [`storage::Storage`] — storage plugins (`kind = "storage"`).
-//! - [`sandbox::Sandbox`] — sandbox plugins (`kind = "sandbox"`); see the
-//!   module docs for the v0.1 PROVISIONAL caveat.
+//! - [`sandbox::Sandbox`] — sandbox adapters; probe-based adapter selection
+//!   for OS-native and container sandboxing.
 //!
 //! See `docs/decisions/0003-tau-ports.md` for the design rationale.
 
@@ -29,7 +29,9 @@ pub use llm::{
     CompletionStream, ContentBlock, LlmBackend, LlmProviderMessage, StopReason, TokenUsage,
     ToolChoice, ToolSpec, ToolUse, ToolUseAccumulator,
 };
-pub use sandbox::{ResourceLimits, Sandbox, SandboxPlan, WorkingContext};
+pub use sandbox::{
+    ResourceLimits, Sandbox, SandboxHandle, SandboxPlan, SandboxProbe, SandboxTier, WorkingContext,
+};
 pub use storage::{Key, Namespace, Storage};
 pub use tool::{
     DenyEntry, SessionContext, StatelessAdapter, StatelessTool, Tool, ToolContent, ToolResult,
