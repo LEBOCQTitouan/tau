@@ -6,6 +6,12 @@
 
 ## Test coverage assessment
 
+> **Update (post-merge):** an inline test pass added ~30 unit tests to the
+> three previously-zero-test files in `tau-sandbox-native` (`light.rs`,
+> `probe.rs`, `shape.rs`). The inventory below reflects pre-followup state;
+> the "Coverage gaps" section near the bottom of this document tracks the
+> closed gap and the items still outstanding.
+
 Total: **76 sandbox-related tests** across 17 files. Honest read on what's covered and what isn't:
 
 ### Per-file inventory
@@ -115,31 +121,16 @@ Below are concrete sub-project proposals, ordered by priority. Each is sized for
 
 ---
 
-### Sub-project C — Native adapter test gap closure
+### ~~Sub-project C — Native adapter test gap closure~~ ✅ DONE INLINE
 
-**One-line:** Add unit tests to the three currently-zero-test files in `tau-sandbox-native`.
+**Status:** completed in the same branch as priority 12 (post-merge inline pass).
 
-**Scope:**
-1. **`light.rs` unit tests:**
-   - `collect_landlock_paths` with various capability shapes.
-   - `resolve_anchors` with `${PROJECT}` substitution + glob trimming.
-   - `clean_mount_path` corner cases (`/foo/**`, `/foo/`, `/foo/**/bar` — last is a known limitation).
-   - `apply_landlock` mock test: verify it returns `SandboxHandle::noop()` on a valid plan.
-2. **`probe.rs` unit tests:**
-   - Tier capping logic (`Strict` requested + `landlock_only` available → caps to Light).
-   - Unknown tier fail-loud path.
-   - `landlock_v1_supported` factored to allow injection of the kernel call.
-3. **`shape.rs` unit tests:**
-   - `shapes_for_tier(None)` empty.
-   - `shapes_for_tier(Light)` has fs read+write only.
-   - `shapes_for_tier(Strict)` has fs + exec + network.
-4. **`strict.rs::apply_strict` unit test:** with a stubbed installer, verify the rule-build pipeline (baseline → exec extend → net extend → compile_filter).
+**What landed:**
+- `light.rs` — 12 unit tests for `collect_paths`, `resolve_anchors`, `collect_landlock_paths`, plus an `apply_landlock` structural smoke test.
+- `probe.rs` — 11 unit tests for the `decide_probe` pure function (extracted via refactor) covering the full tier-capping decision matrix + monotonicity property test, plus side-effect-free smoke tests for `landlock_v1_supported` / `user_ns_supported`.
+- `shape.rs` — 4 unit tests covering `None` / `Light` / `Strict` tier shape sets + Light-is-strict-subset-of-Strict invariant.
 
-**Test coverage to add:** ~20 unit tests across the three files.
-
-**Estimated scope:** 2-3 days.
-
-**Dependencies:** none.
+**Still gap:** `strict.rs::apply_strict` orchestrator (the rule-build pipeline). Could be unit-tested with a stubbed installer, but for v0.1 the orchestrator is essentially a `?`-chain through three pure helpers (each independently tested) plus a single `cmd.pre_exec` wiring. **Tracked in the gap list below.**
 
 ---
 
@@ -349,7 +340,34 @@ J (macOS), K (Windows) — Phase 2; cross-platform parity
 
 ## Test coverage gaps to track
 
-- **0 tests** in `light.rs`, `probe.rs`, `shape.rs` (sub-project C addresses).
-- **No real-kernel e2e tests on CI** (sub-project D addresses).
-- **No live plugin compatibility tests** (sub-project B addresses).
-- **Layer 2 cross-check has zero tests** because the implementation doesn't exist yet (sub-project B).
+These are the **deferred gaps** that future sub-projects must close. Listed
+explicitly so a future contributor (or future-me) doesn't lose them in the
+noise of follow-up work.
+
+### Closed gaps (no longer outstanding)
+
+- ~~**0 tests in `light.rs`, `probe.rs`, `shape.rs`**~~ — addressed inline in the priority-12 branch (~30 unit tests added across the three files; pure-function logic is now fully covered, kernel-syscall paths are still e2e-only territory).
+
+### Outstanding gaps — must be picked up by named sub-projects
+
+| Gap | Sub-project | Why deferred |
+|---|---|---|
+| **No real-kernel e2e tests on CI.** Validation that landlock actually returns EACCES on an unlisted-path read, that seccomp actually SIGSYS-kills a denied syscall, that namespace unshare actually drops privileges — none of these are exercised by automated CI today. | **D** | Ubuntu CI's `/bin → /usr/bin` symlinks vs landlock V1 path resolution caused the v0.1 e2e tests to fail unrelated to the sandbox logic; needed a controlled-environment test binary. |
+| **No live plugin compatibility tests.** `tau resolve --check-sandbox` and live spawn against the 5 existing plugins (anthropic, ollama, openai, fs-read, shell) is unverified at runtime. | **B** | Depends on sub-project A activating the sandbox; running pre-A would only test mock paths. |
+| **Layer 2 cross-check is unimplemented and untested.** The plan-erratum block deferred the install-time manifest-vs-`CAPABILITIES`-handshake comparison; lockfile `required_shapes` is currently always populated empty by the install path. | **B** | The cross-check needs the install pipeline to be sandbox-aware (depends on A) and to know which adapter to validate against. |
+| **`strict.rs::apply_strict` orchestrator has no direct unit test.** Each of its three helpers (`baseline_syscall_map`, `exec::extend_with_exec_rules`, `net::extend_with_network_rules` + `compile_filter`) is independently tested, but the `?`-chain that wires them isn't unit-tested as a unit. | **C extension** (or rolled into D's e2e work) | At Light tier the orchestrator is trivial; at Strict tier it does enough work that a focused integration test would be valuable. Inline coverage didn't reach this because every wired-up call in the chain is itself well-tested. |
+| **Per-command exec gating is a no-op stub.** `exec::extend_with_exec_rules` does nothing at v0.1; the 4 unit tests verify the no-op behavior. The actual gating logic (landlock V2 `AccessFs::Execute`) is unwritten. | **E** | landlock V2 requires kernel ≥ 5.19; needs feature detection + fallback path. |
+| **Per-host network filtering is over-permissive.** When `Network(Http)` is requested, the child inherits the parent's full netns. The 5 unit tests verify the unshare-flag decision; the actual nftables-in-netns enforcement is unwritten. | **F** | Needs `CAP_NET_ADMIN` + nftables rule generation + DNS resolution; substantial complexity. |
+| **`SandboxHandle` Drop semantics are unit-tested but not integration-tested.** Container adapter relies on `--rm` for cleanup; future cgroup/cidfile-based adapters will need real Drop coverage. | **D** + container e2e | Currently no real-cleanup adapter ships, so the gap is forward-compat only. |
+| **No async-signal-safety verification in `pre_exec` chain.** The KNOWN-LIMITATION comments document the malloc-during-fork hazard; no test confirms the closure body is allocation-free on the success path (and it currently isn't). | **I** | The fork-server pattern is the real fix; testing the current closure for signal-safety would just pin the bug. |
+| **`tau resolve --check-sandbox` integration tests use `MockSandbox` only.** Real adapter coverage at the CLI level requires the env-var opt-in path (`TAU_TESTING_ALLOW_MOCK_SANDBOX=1`) which is itself a debt item. | **H** | Replacing Mock with real Native + Container in CLI integration tests is part of the H cleanup. |
+| **CI doesn't yet exercise the activated runtime path.** Once sub-project A turns sandboxing on by default, the existing CLI integration tests (cmd_chat, cmd_resolve, etc.) will hit the spawn pipeline through `wrap_spawn`. Currently those tests use the `None`-sandbox path. | **A** sequel | Will surface as the activation work happens; flag here so it's not forgotten. |
+
+### Coverage policy going forward
+
+When a sub-project from this doc is picked up, **its definition of done MUST include closing the corresponding gap row above.** A sub-project that ships behavior without ALSO shipping the validating tests is not finished. This is a deliberate response to the v0.1 lesson where 5 e2e test files had to be removed at the last minute because the underlying CI infrastructure wasn't ready — the gap was created at the END of the sub-project, when it should have been part of the design from the START.
+
+Each sub-project's design doc (when written) should explicitly state:
+1. **Test coverage delta** — how many tests are being added, at which layer.
+2. **Gap row(s) closed** — references to this list.
+3. **New gaps introduced** — added to this list when the sub-project ships.

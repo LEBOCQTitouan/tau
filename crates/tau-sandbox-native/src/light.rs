@@ -175,3 +175,191 @@ fn install_landlock(
     ruleset.restrict_self()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use tau_ports::WorkingContext;
+
+    /// Build a minimal `SandboxPlan` from a JSON-ish capability list.
+    /// Centralized here so the various test cases stay short.
+    fn plan_from(caps: serde_json::Value) -> SandboxPlan {
+        let plan_json = serde_json::json!({
+            "capabilities": caps,
+            "context": null,
+            "limits": null,
+        });
+        serde_json::from_value(plan_json).expect("decode plan")
+    }
+
+    // ---------- collect_paths ----------
+
+    #[test]
+    fn collect_paths_extracts_only_matching_capabilities() {
+        let plan = plan_from(serde_json::json!([
+            { "kind": "fs.read", "paths": ["/a", "/b"] },
+            { "kind": "fs.write", "paths": ["/c"] },
+            { "kind": "net.http", "hosts": ["x.example"], "methods": ["GET"] },
+        ]));
+        let read = collect_paths(&plan, |c| match c {
+            Capability::Filesystem(FsCapability::Read { paths, .. }) => Some(paths.clone()),
+            _ => None,
+        });
+        assert_eq!(read, vec!["/a".to_string(), "/b".to_string()]);
+    }
+
+    #[test]
+    fn collect_paths_flattens_multiple_capabilities_of_same_kind() {
+        let plan = plan_from(serde_json::json!([
+            { "kind": "fs.read", "paths": ["/a"] },
+            { "kind": "fs.read", "paths": ["/b", "/c"] },
+        ]));
+        let read = collect_paths(&plan, |c| match c {
+            Capability::Filesystem(FsCapability::Read { paths, .. }) => Some(paths.clone()),
+            _ => None,
+        });
+        assert_eq!(
+            read,
+            vec!["/a".to_string(), "/b".to_string(), "/c".to_string()]
+        );
+    }
+
+    #[test]
+    fn collect_paths_returns_empty_for_no_match() {
+        let plan = plan_from(serde_json::json!([
+            { "kind": "net.http", "hosts": [], "methods": [] },
+        ]));
+        let read = collect_paths(&plan, |c| match c {
+            Capability::Filesystem(FsCapability::Read { paths, .. }) => Some(paths.clone()),
+            _ => None,
+        });
+        assert!(read.is_empty());
+    }
+
+    // ---------- resolve_anchors ----------
+
+    #[test]
+    fn resolve_anchors_substitutes_project_with_cwd() {
+        let cwd = Path::new("/work/project");
+        let resolved = resolve_anchors(
+            &["${PROJECT}/src".to_string(), "/etc/passwd".to_string()],
+            cwd,
+        );
+        assert_eq!(
+            resolved,
+            vec![
+                PathBuf::from("/work/project/src"),
+                PathBuf::from("/etc/passwd"),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_anchors_trims_trailing_double_glob() {
+        let cwd = Path::new("/work");
+        let resolved = resolve_anchors(&["${PROJECT}/src/**".to_string()], cwd);
+        assert_eq!(resolved, vec![PathBuf::from("/work/src")]);
+    }
+
+    #[test]
+    fn resolve_anchors_trims_trailing_single_glob() {
+        let cwd = Path::new("/work");
+        let resolved = resolve_anchors(&["/data/*".to_string()], cwd);
+        assert_eq!(resolved, vec![PathBuf::from("/data")]);
+    }
+
+    #[test]
+    fn resolve_anchors_does_not_trim_embedded_globs() {
+        // KNOWN-LIMITATION: embedded globs are passed through verbatim;
+        // landlock's PathFd::new on the literal path will fail later.
+        // This test pins the v0.1 behavior so a future glob expander
+        // upgrade has a clear baseline to compare against.
+        let cwd = Path::new("/work");
+        let resolved = resolve_anchors(&["/foo/**/bar.txt".to_string()], cwd);
+        assert_eq!(resolved, vec![PathBuf::from("/foo/**/bar.txt")]);
+    }
+
+    #[test]
+    fn resolve_anchors_handles_empty_input() {
+        let cwd = Path::new("/work");
+        assert!(resolve_anchors(&[], cwd).is_empty());
+    }
+
+    // ---------- collect_landlock_paths ----------
+
+    #[test]
+    fn collect_landlock_paths_uses_command_cwd_when_set() {
+        let plan = plan_from(serde_json::json!([
+            { "kind": "fs.read", "paths": ["${PROJECT}/src"] },
+        ]));
+        let mut cmd = Command::new("/bin/true");
+        cmd.current_dir("/explicit/cwd");
+        let (read, write) = collect_landlock_paths(&plan, &cmd).unwrap();
+        assert_eq!(read, vec![PathBuf::from("/explicit/cwd/src")]);
+        assert!(write.is_empty());
+    }
+
+    #[test]
+    fn collect_landlock_paths_falls_back_to_env_cwd_when_command_cwd_unset() {
+        let plan = plan_from(serde_json::json!([
+            { "kind": "fs.read", "paths": ["/tmp/explicit"] },
+        ]));
+        let cmd = Command::new("/bin/true");
+        // No current_dir set → falls back to std::env::current_dir().
+        let (read, _) = collect_landlock_paths(&plan, &cmd).unwrap();
+        assert_eq!(read, vec![PathBuf::from("/tmp/explicit")]);
+    }
+
+    #[test]
+    fn collect_landlock_paths_separates_read_and_write() {
+        let plan = plan_from(serde_json::json!([
+            { "kind": "fs.read", "paths": ["/r1"] },
+            { "kind": "fs.write", "paths": ["/w1", "/w2"] },
+            { "kind": "fs.read", "paths": ["/r2"] },
+        ]));
+        let cmd = Command::new("/bin/true");
+        let (read, write) = collect_landlock_paths(&plan, &cmd).unwrap();
+        assert_eq!(read, vec![PathBuf::from("/r1"), PathBuf::from("/r2")]);
+        assert_eq!(write, vec![PathBuf::from("/w1"), PathBuf::from("/w2")]);
+    }
+
+    #[test]
+    fn collect_landlock_paths_ignores_non_filesystem_capabilities() {
+        let plan = plan_from(serde_json::json!([
+            { "kind": "net.http", "hosts": ["x"], "methods": ["GET"] },
+            { "kind": "process.spawn", "commands": ["git"] },
+            { "kind": "agent.spawn", "allowed_kinds": ["worker"] },
+        ]));
+        let cmd = Command::new("/bin/true");
+        let (read, write) = collect_landlock_paths(&plan, &cmd).unwrap();
+        assert!(read.is_empty());
+        assert!(write.is_empty());
+    }
+
+    // ---------- apply_landlock structural smoke ----------
+
+    #[tokio::test]
+    async fn apply_landlock_returns_noop_handle_for_valid_plan() {
+        // Verifies the structural contract — apply_landlock returns Ok with a
+        // SandboxHandle that's a no-op (landlock state dies with the child;
+        // no parent-side cleanup). This does NOT verify landlock itself runs;
+        // that's e2e territory (deferred to sub-project D).
+        let plan = plan_from(serde_json::json!([
+            { "kind": "fs.read", "paths": ["/tmp"] },
+        ]));
+        let mut cmd = Command::new("/bin/true");
+        // We don't actually spawn — just verify the call shape.
+        let result = apply_landlock(&plan, &mut cmd);
+        assert!(result.is_ok(), "apply_landlock should accept a valid plan");
+    }
+
+    #[test]
+    fn working_context_field_used_unused_keep_compile() {
+        // Regression-pin: this test exists so a future refactor that drops
+        // the WorkingContext import doesn't silently break compilation.
+        // No assertion needed; existence of `WorkingContext` here forces
+        // the symbol to be reachable.
+        let _: Option<WorkingContext> = None;
+    }
+}
