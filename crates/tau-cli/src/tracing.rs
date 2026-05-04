@@ -72,6 +72,8 @@ mod tests {
             color: ColorMode::Auto,
             json: false,
             record_protocol: None,
+            no_sandbox: false,
+            sandbox: None,
         }
     }
 

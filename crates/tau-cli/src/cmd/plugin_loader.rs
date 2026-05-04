@@ -22,7 +22,7 @@ use tau_pkg::scope::ScopeConfig;
 use tau_pkg::{LockFile, LockedPlugin, Scope};
 use tau_plugin_protocol::handshake::TraceContext;
 use tau_runtime::plugin_host::{self, PluginHostOptions, RecorderHandle, RecordingSink};
-use tau_runtime::sandbox::{build_plan, resolve_adapter};
+use tau_runtime::sandbox::{build_plan, resolve_adapter, resolve_adapter_forced};
 use tau_runtime::RuntimeBuilder;
 
 use crate::config::AgentEntry;
@@ -50,8 +50,12 @@ pub(crate) struct LoadedPlugins {
 ///   on exit (Task 20: `--record-protocol` flush wiring).
 /// * If `record_protocol` is `None`, the options carry no recording
 ///   sink and an empty (but still allocated, for symmetry) ledger.
+/// * `force_passthrough` and `force_adapter_kind` come from the
+///   global `--no-sandbox` / `--sandbox <kind>` flags (Task 7).
 pub(crate) fn build_host_options(
     record_protocol: Option<&Path>,
+    force_passthrough: bool,
+    force_adapter_kind: Option<tau_runtime::sandbox::registry::RegistryKind>,
 ) -> (PluginHostOptions, Arc<Mutex<Vec<RecorderHandle>>>) {
     let ledger: Arc<Mutex<Vec<RecorderHandle>>> = Arc::new(Mutex::new(Vec::new()));
     let mut options = PluginHostOptions::default();
@@ -61,6 +65,8 @@ pub(crate) fn build_host_options(
         });
         options.recorder_ledger = Some(ledger.clone());
     }
+    options.force_passthrough = force_passthrough;
+    options.force_adapter_kind = force_adapter_kind;
     (options, ledger)
 }
 
@@ -135,7 +141,7 @@ pub(crate) async fn load_plugins(
     // Read the scope's [sandbox] config; fall back to defaults if config.toml
     // doesn't exist yet (e.g. freshly-created scope without an explicit config).
     let config_path = scope.config_path();
-    let sandbox_requirements = if config_path.exists() {
+    let mut sandbox_requirements = if config_path.exists() {
         let text = std::fs::read_to_string(&config_path)
             .with_context(|| format!("reading scope config at {config_path:?}"))?;
         let scope_config = ScopeConfig::read_from_str(&text)
@@ -144,6 +150,12 @@ pub(crate) async fn load_plugins(
     } else {
         tau_pkg::scope::SandboxRequirements::default()
     };
+
+    // Honor --no-sandbox / --sandbox passthrough: force required_tier=None
+    // so the resolver can pick passthrough, bypassing plugin-tier floors.
+    if host_options.force_passthrough {
+        sandbox_requirements.required_tier = tau_pkg::scope::SandboxRequiredTier::None;
+    }
 
     // Gather plugin-side sandbox requirements from each plugin's on-disk
     // manifest (the full tau.toml carries [sandbox], unlike the lockfile's
@@ -162,12 +174,36 @@ pub(crate) async fn load_plugins(
         }
     }
 
-    let adapter = match resolve_adapter(&sandbox_requirements, &plugin_sandbox_reqs).await {
-        Ok(a) => Arc::new(a),
-        Err(e) => {
-            // Plain anyhow error with Display string. Task 8 will replace
-            // this with guided multi-option rendering.
-            anyhow::bail!("sandbox adapter resolution failed: {e}");
+    // When force_passthrough is set, also override any plugin-tier floors so
+    // the user's explicit opt-out is honoured even when plugins declare Strict.
+    let effective_plugin_reqs = if host_options.force_passthrough {
+        // Replace all plugin requirements with tier=None so passthrough adapter wins.
+        plugin_sandbox_reqs
+            .iter()
+            .map(|r| {
+                let mut p = r.clone();
+                p.required_tier = Some(tau_domain::PluginRequiredTier::None);
+                p
+            })
+            .collect::<Vec<_>>()
+    } else {
+        plugin_sandbox_reqs
+    };
+
+    let adapter = if let Some(kind) = host_options.force_adapter_kind {
+        // Force-mode: instantiate the named kind directly, probe it, accept iff Available.
+        match resolve_adapter_forced(kind).await {
+            Ok(a) => Arc::new(a),
+            Err(e) => anyhow::bail!("--sandbox {:?} failed: {e}", kind),
+        }
+    } else {
+        match resolve_adapter(&sandbox_requirements, &effective_plugin_reqs).await {
+            Ok(a) => Arc::new(a),
+            Err(e) => {
+                // Plain anyhow error with Display string. Task 8 will replace
+                // this with guided multi-option rendering.
+                anyhow::bail!("sandbox adapter resolution failed: {e}");
+            }
         }
     };
     host_options.sandbox_adapter = Some(adapter);

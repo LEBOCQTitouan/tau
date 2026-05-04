@@ -48,6 +48,32 @@ pub struct Cli {
     /// invocation.
     #[arg(long, global = true, value_name = "PATH")]
     pub record_protocol: Option<PathBuf>,
+
+    /// Disable sandboxing entirely for this invocation (shorthand for
+    /// `--sandbox passthrough`). For development and one-off debugging.
+    /// Auditable in shell history.
+    #[arg(long, global = true)]
+    pub no_sandbox: bool,
+
+    /// Force a specific sandbox adapter kind, overriding the resolver.
+    /// `--no-sandbox` is shorthand for `--sandbox passthrough`. Conflicts
+    /// with `--no-sandbox` if both set.
+    #[arg(long, global = true, value_enum, conflicts_with = "no_sandbox")]
+    pub sandbox: Option<SandboxKindArg>,
+}
+
+/// CLI value for `--sandbox <kind>`. Maps to the resolver's adapter
+/// kinds. `passthrough` is exposed so `--sandbox passthrough` is a
+/// fully-spelled equivalent of `--no-sandbox`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum SandboxKindArg {
+    /// Linux landlock + seccomp + namespaces.
+    Native,
+    /// Docker / Podman shell-out.
+    Container,
+    /// No isolation (explicit opt-out).
+    Passthrough,
 }
 
 /// All v0.1 subcommands.

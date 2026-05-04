@@ -110,9 +110,14 @@ pub fn parse_input(line: &str) -> ReplInput {
 /// frame in either direction is mirrored to the JSONL file at `path`;
 /// the recorders are flushed after the runtime drops to ensure
 /// pending writes reach disk.
+///
+/// `force_passthrough` and `force_adapter_kind` come from the global
+/// `--no-sandbox` / `--sandbox <kind>` flags (Task 7).
 pub async fn run(
     args: &ChatArgs,
     record_protocol: Option<PathBuf>,
+    force_passthrough: bool,
+    force_adapter_kind: Option<tau_runtime::sandbox::registry::RegistryKind>,
     output: &mut Output,
 ) -> anyhow::Result<()> {
     if output.is_json() {
@@ -172,7 +177,11 @@ pub async fn run(
             .unwrap_or(0)
     );
     let trace_context = TraceContext::new(run_id, args.agent_id.clone(), "root".to_string());
-    let (host_options, _ledger) = plugin_loader::build_host_options(record_protocol.as_deref());
+    let (host_options, _ledger) = plugin_loader::build_host_options(
+        record_protocol.as_deref(),
+        force_passthrough,
+        force_adapter_kind,
+    );
 
     let loaded = plugin_loader::load_plugins(entry, &scope, trace_context, host_options).await?;
     let recorder_ledger = loaded.recorder_ledger.clone();

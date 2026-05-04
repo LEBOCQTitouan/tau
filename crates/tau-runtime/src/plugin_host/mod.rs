@@ -289,6 +289,16 @@ pub struct PluginHostOptions {
     /// enforcement to take effect — allowing callers to opt-out per plugin
     /// by passing `None` for the plan.
     pub sandbox_adapter: Option<Arc<crate::sandbox::SandboxAdapter>>,
+
+    /// CLI override: force passthrough adapter (no isolation). Set by
+    /// `--no-sandbox` or `--sandbox passthrough`. When `true`, the resolver
+    /// receives `required_tier = None` and ignores plugin-tier floors.
+    pub force_passthrough: bool,
+
+    /// CLI override: force a specific adapter kind. Set by `--sandbox <kind>`
+    /// (other than passthrough). When `Some`, the resolver instantiates and
+    /// probes ONLY that kind. `None` = normal multi-adapter resolution.
+    pub force_adapter_kind: Option<crate::sandbox::registry::RegistryKind>,
 }
 
 impl Default for PluginHostOptions {
@@ -303,6 +313,8 @@ impl Default for PluginHostOptions {
             recording: None,
             recorder_ledger: None,
             sandbox_adapter: None,
+            force_passthrough: false,
+            force_adapter_kind: None,
         }
     }
 }
@@ -351,8 +363,7 @@ pub async fn load_llm_backend(
     // Zip sandbox plan + adapter: both must be present for enforcement.
     // If either is None (legacy callers or no-sandbox config), spawn proceeds
     // without sandboxing, preserving backward compatibility.
-    let sandbox = sandbox_plan
-        .zip(options.sandbox_adapter.as_deref());
+    let sandbox = sandbox_plan.zip(options.sandbox_adapter.as_deref());
 
     let (process, _handshake_response) = process::PluginProcess::spawn_and_handshake(
         &plugin.binary_path,
@@ -424,8 +435,7 @@ pub async fn load_tool(
     let recorder = build_recorder(&plugin_name, &options).await;
 
     // Zip sandbox plan + adapter: both must be present for enforcement.
-    let sandbox = sandbox_plan
-        .zip(options.sandbox_adapter.as_deref());
+    let sandbox = sandbox_plan.zip(options.sandbox_adapter.as_deref());
 
     let (process, _handshake_response) = process::PluginProcess::spawn_and_handshake(
         &plugin.binary_path,
@@ -521,8 +531,7 @@ pub async fn load_storage(
     let recorder = build_recorder(&plugin_name, &options).await;
 
     // Zip sandbox plan + adapter: both must be present for enforcement.
-    let sandbox = sandbox_plan
-        .zip(options.sandbox_adapter.as_deref());
+    let sandbox = sandbox_plan.zip(options.sandbox_adapter.as_deref());
 
     let (process, _handshake_response) = process::PluginProcess::spawn_and_handshake(
         &plugin.binary_path,

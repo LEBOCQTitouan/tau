@@ -387,6 +387,31 @@ pub async fn resolve_adapter(
 }
 
 // ---------------------------------------------------------------------------
+// resolve_adapter_forced — forced single-adapter path for --sandbox <kind>
+// ---------------------------------------------------------------------------
+
+/// Force-instantiate a specific adapter kind, bypassing the registry filter.
+///
+/// Probes the named adapter; returns `Ok(adapter)` iff
+/// [`tau_ports::SandboxProbe::Available`], otherwise
+/// [`ResolutionError::ConfigError`] with a guided message (e.g.
+/// `"--sandbox native is not applicable on macOS"`).
+pub async fn resolve_adapter_forced(kind: RegistryKind) -> Result<SandboxAdapter, ResolutionError> {
+    let adapter = instantiate(kind).map_err(|m| ResolutionError::ConfigError {
+        message: format!("--sandbox {kind:?}: {m}"),
+    })?;
+    match adapter.probe().await {
+        tau_ports::SandboxProbe::Available { .. } => Ok(adapter),
+        tau_ports::SandboxProbe::Unavailable { reason } => Err(ResolutionError::ConfigError {
+            message: format!("--sandbox {kind:?} not applicable: {reason}"),
+        }),
+        other => Err(ResolutionError::ConfigError {
+            message: format!("--sandbox {kind:?}: unexpected probe result: {other:?}"),
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

@@ -47,5 +47,16 @@ Options:
           
           Useful for debugging plugin behavior and replaying via `tau plugin protocol decode <path>`. The recording is best-effort per spec §7.8: write/open failures are logged but never abort the invocation.
 
+      --no-sandbox
+          Disable sandboxing entirely for this invocation (shorthand for `--sandbox passthrough`). For development and one-off debugging. Auditable in shell history
+
+      --sandbox <SANDBOX>
+          Force a specific sandbox adapter kind, overriding the resolver. `--no-sandbox` is shorthand for `--sandbox passthrough`. Conflicts with `--no-sandbox` if both set
+
+          Possible values:
+          - native:      Linux landlock + seccomp + namespaces
+          - container:   Docker / Podman shell-out
+          - passthrough: No isolation (explicit opt-out)
+
   -h, --help
           Print help (see a summary with '-h')
