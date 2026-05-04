@@ -1,0 +1,7 @@
+[project]
+name = "compat-test-openai"
+
+[agents.tester]
+display_name = "openai compat test agent"
+package      = "openai@^0.1"
+llm_backend  = "openai"

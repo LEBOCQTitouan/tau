@@ -1,0 +1,7 @@
+[project]
+name = "compat-test-anthropic"
+
+[agents.tester]
+display_name = "anthropic compat test agent"
+package      = "anthropic@^0.1"
+llm_backend  = "anthropic"

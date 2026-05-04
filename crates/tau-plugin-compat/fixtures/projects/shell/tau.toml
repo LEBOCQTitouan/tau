@@ -1,0 +1,11 @@
+[project]
+name = "compat-test-shell"
+
+[agents.tester]
+display_name = "shell compat test agent"
+package      = "demo@^0.1"
+llm_backend  = "anthropic"
+
+[[agents.tester.requires.tools]]
+name    = "shell"
+source  = "../../../tau-plugins/shell"

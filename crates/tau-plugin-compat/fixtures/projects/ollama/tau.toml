@@ -1,0 +1,7 @@
+[project]
+name = "compat-test-ollama"
+
+[agents.tester]
+display_name = "ollama compat test agent"
+package      = "ollama@^0.1"
+llm_backend  = "ollama"
