@@ -10,3 +10,6 @@ bin      = "fs-read-plugin"
 [[capabilities]]
 kind = "fs.read"
 paths = []
+
+[sandbox]
+required_tier = "strict"

@@ -6,3 +6,6 @@ description = "OpenAI Chat Completions backend for tau."
 provides = "llm_backend"
 kind     = "rust-cargo"
 bin      = "openai-plugin"
+
+[sandbox]
+required_tier = "strict"
