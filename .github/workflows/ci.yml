@@ -240,3 +240,25 @@ jobs:
           cargo test -p anthropic --test conformance -- --nocapture
           cargo test -p ollama    --test conformance -- --nocapture
           cargo test -p openai    --test conformance -- --nocapture
+
+  build-tau-plugin-compat:
+    name: build (tau-plugin-compat)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build tau-plugin-compat
+        run: cargo build -p tau-plugin-compat
+      - name: Build tau-plugin-compat (integration-tests feature)
+        run: cargo build -p tau-plugin-compat --features integration-tests --tests
+
+  test-tau-plugin-compat:
+    name: test (tau-plugin-compat / linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test tau-plugin-compat (integration-tests feature)
+        # Layer 3 tests run; Layer 4 container/native tests are
+        # #[ignore]'d pending sub-project D's e2e infrastructure.
+        run: cargo test -p tau-plugin-compat --features integration-tests --tests
