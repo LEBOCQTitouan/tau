@@ -219,6 +219,16 @@ pub enum InstallError {
     /// or the default discovery (`cargo` on PATH) found nothing.
     #[error("`cargo` not found on PATH; set BuildOptions::cargo_path or install Rust")]
     CargoNotFound,
+    /// Layer 2 cross-check detected a mismatch between the plugin binary's
+    /// claimed capabilities and those declared in the manifest.
+    ///
+    /// The installed binary remains on disk. Users should fix their manifest
+    /// and retry via `tau install --force`.
+    #[error("plugin capability cross-check failed: {message}")]
+    CrossCheck {
+        /// Human-readable description of the cross-check failure.
+        message: String,
+    },
     /// Catch-all for install lifecycle failures not yet covered by typed variants.
     /// Use this only when the failure cannot be reported as `Git`, `Manifest`,
     /// `Registry`, `Scope`, `SourceManifestMismatch`, or `Locked`.
@@ -356,5 +366,21 @@ mod tests {
             "got: {s}"
         );
         assert!(s.contains("/tmp/.tau"), "got: {s}");
+    }
+
+    #[test]
+    fn install_error_cross_check_display_includes_message() {
+        let err = InstallError::CrossCheck {
+            message: "binary claims extra capability".into(),
+        };
+        let s = format!("{err}");
+        assert!(
+            s.contains("cross-check failed"),
+            "display should mention cross-check failed; got: {s}"
+        );
+        assert!(
+            s.contains("binary claims extra capability"),
+            "display should include the message; got: {s}"
+        );
     }
 }
