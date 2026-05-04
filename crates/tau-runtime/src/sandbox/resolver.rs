@@ -393,6 +393,79 @@ pub async fn resolve_adapter(
 }
 
 // ---------------------------------------------------------------------------
+// resolve_strict_for_validation — picks highest-priority non-passthrough adapter
+// ---------------------------------------------------------------------------
+
+/// Walk the registry and pick the highest-priority non-passthrough adapter
+/// that probes `Available` on the current platform.
+///
+/// Used by `tau resolve --check-sandbox` when the project's `required_tier`
+/// is `None` (so the project's actual resolution would yield passthrough) —
+/// `--check-sandbox` should still validate against the strictest available
+/// "real" adapter so users see what would happen if they strengthened the
+/// requirement.
+///
+/// When `TAU_TESTING_ALLOW_MOCK_SANDBOX=1` is set, returns the mock adapter
+/// (same as `resolve_adapter`) so tests remain reliable across platforms.
+pub async fn resolve_strict_for_validation() -> Result<SandboxAdapter, ResolutionError> {
+    // Mock injection — mirrors resolve_adapter behaviour.
+    if std::env::var("TAU_TESTING_ALLOW_MOCK_SANDBOX")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        return Ok(SandboxAdapter::Mock(tau_ports::fixtures::MockSandbox::new(
+            "mock",
+        )));
+    }
+
+    let platform = detect_platform();
+    let mut tried: Vec<(String, ResolutionRejection)> = Vec::new();
+
+    // Collect non-passthrough candidates in priority order (highest first).
+    let mut candidates: Vec<&AdapterRegistration> = REGISTRY
+        .iter()
+        .filter(|r| r.kind != RegistryKind::Passthrough)
+        .collect();
+    candidates.sort_by_key(|r| Reverse(r.priority));
+
+    for entry in candidates {
+        let name = entry.kind.name().to_owned();
+
+        if !entry.platforms.includes(platform) {
+            tried.push((name, ResolutionRejection::PlatformMismatch));
+            continue;
+        }
+
+        let adapter = match instantiate(entry.kind) {
+            Ok(a) => a,
+            Err(msg) => {
+                tried.push((name, ResolutionRejection::ProbeUnavailable(msg)));
+                continue;
+            }
+        };
+
+        match adapter.probe().await {
+            tau_ports::SandboxProbe::Available { .. } => return Ok(adapter),
+            tau_ports::SandboxProbe::Unavailable { reason } => {
+                tried.push((name, ResolutionRejection::ProbeUnavailable(reason)));
+            }
+            other => {
+                tried.push((
+                    name,
+                    ResolutionRejection::ProbeUnavailable(format!("{other:?}")),
+                ));
+            }
+        }
+    }
+
+    Err(ResolutionError::NoAdapterMatches {
+        tried,
+        platform: platform.to_owned(),
+        required_tier: SandboxTier::None,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // resolve_adapter_forced — forced single-adapter path for --sandbox <kind>
 // ---------------------------------------------------------------------------
 

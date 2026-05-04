@@ -50,11 +50,21 @@ pub async fn run(args: &ResolveArgs, output: &mut Output) -> anyhow::Result<()> 
 /// adapter. Reports ✓ / ✗ per plugin (human-readable) or JSON events
 /// when `--json` is set.
 ///
+/// When the project's `required_tier` is `None` (passthrough would be
+/// selected at runtime), `--check-sandbox` skips passthrough as a
+/// validation target and instead uses the highest-priority
+/// non-passthrough adapter available on the current platform. This
+/// surfaces what would happen if the user strengthens their requirement.
+/// If no non-passthrough adapter is available, exits 2 with a clear
+/// error.
+///
 /// Exit 0 if all plugins pass; exit 2 if any fail or no adapter is
 /// available (per ADR-0007 three-bucket exit codes).
 async fn run_check_sandbox(_args: &ResolveArgs, output: &mut Output) -> anyhow::Result<()> {
-    use tau_pkg::scope::{SandboxRequirements, ScopeConfig};
-    use tau_runtime::sandbox::{build_plan, resolve_adapter, validate_plan_against_adapter};
+    use tau_pkg::scope::{SandboxRequiredTier, SandboxRequirements, ScopeConfig};
+    use tau_runtime::sandbox::{
+        build_plan, resolve_adapter, resolve_strict_for_validation, validate_plan_against_adapter,
+    };
 
     // 1. Resolve the scope.
     let cwd = std::env::current_dir()?;
@@ -73,19 +83,45 @@ async fn run_check_sandbox(_args: &ResolveArgs, output: &mut Output) -> anyhow::
     };
 
     // 3. Select the sandbox adapter.
-    let adapter = match resolve_adapter(&sandbox_requirements, &[]).await {
-        Ok(a) => a,
-        Err(e) => {
-            let msg = format!("no sandbox adapter available: {e}");
-            if output.is_json() {
-                output.json(&serde_json::json!({
-                    "event": "error",
-                    "reason": msg,
-                }))?;
-            } else {
-                output.error(&msg)?;
+    //
+    //    If required_tier == None the runtime resolver would pick Passthrough,
+    //    which trivially accepts every plan. --check-sandbox skips passthrough
+    //    and picks the highest-priority non-passthrough adapter instead, so the
+    //    report shows what would happen if the user strengthens the requirement.
+    let adapter = if matches!(
+        sandbox_requirements.required_tier,
+        SandboxRequiredTier::None
+    ) {
+        match resolve_strict_for_validation().await {
+            Ok(a) => a,
+            Err(_) => {
+                let msg = "no non-permissive adapter available to validate against; cannot perform sandbox check";
+                if output.is_json() {
+                    output.json(&serde_json::json!({
+                        "event": "error",
+                        "reason": msg,
+                    }))?;
+                } else {
+                    output.error(msg)?;
+                }
+                std::process::exit(2);
             }
-            std::process::exit(2);
+        }
+    } else {
+        match resolve_adapter(&sandbox_requirements, &[]).await {
+            Ok(a) => a,
+            Err(e) => {
+                let msg = format!("no sandbox adapter available: {e}");
+                if output.is_json() {
+                    output.json(&serde_json::json!({
+                        "event": "error",
+                        "reason": msg,
+                    }))?;
+                } else {
+                    output.error(&msg)?;
+                }
+                std::process::exit(2);
+            }
         }
     };
 
