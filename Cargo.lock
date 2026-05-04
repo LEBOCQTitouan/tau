@@ -2872,6 +2872,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tau-plugin-compat"
+version = "0.0.0"
+dependencies = [
+ "assert_cmd",
+ "serde_json",
+ "tau-domain",
+ "tau-pkg",
+ "tau-runtime",
+ "tau-sandbox-container",
+ "tau-sandbox-native",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "tau-plugin-conformance"
 version = "0.0.0"
 dependencies = [

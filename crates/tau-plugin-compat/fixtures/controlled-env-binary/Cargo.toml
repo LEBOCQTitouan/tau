@@ -1,0 +1,24 @@
+[package]
+name = "tau-controlled-env-binary"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "tau-controlled-env"
+path = "src/main.rs"
+
+[profile.release]
+strip = "symbols"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+
+[dependencies]
+
+# Standalone Cargo project — opt out of being absorbed into the parent
+# workspace (which is rooted at /Users/titouanlebocq/code/tau/Cargo.toml).
+[workspace]
