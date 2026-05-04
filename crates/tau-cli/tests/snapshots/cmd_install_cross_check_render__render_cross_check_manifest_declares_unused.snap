@@ -1,0 +1,15 @@
+---
+source: crates/tau-cli/tests/cmd_install_cross_check_render.rs
+expression: rendered
+---
+✗ install aborted: plugin capability cross-check failed
+
+  Manifest of 'ollama' declares this capability:
+    - Network(Http { hosts: ["api.example.com"], methods: ["GET"] })
+
+  But the binary's tool.describe_capabilities surface does not request it.
+
+  Resolution:
+    1. Remove the unused capability from the plugin manifest.
+    2. Or extend the binary to actually use this capability via tool.describe_capabilities.
+    3. Then retry: tau install --force <plugin>

@@ -1,0 +1,15 @@
+---
+source: crates/tau-cli/tests/cmd_install_cross_check_render.rs
+expression: rendered
+---
+✗ install aborted: plugin capability cross-check failed
+
+  Plugin 'anthropic' calls tool.describe_capabilities and asks for:
+    - Filesystem(Read { paths: ["/etc/passwd"] })
+
+  But the manifest's [[capabilities]] block does not include this capability.
+
+  Resolution:
+    1. Add the missing capability to the plugin manifest's [[capabilities]] block.
+    2. Or remove the capability from the binary's tool.describe_capabilities surface.
+    3. Then retry: tau install --force <plugin>

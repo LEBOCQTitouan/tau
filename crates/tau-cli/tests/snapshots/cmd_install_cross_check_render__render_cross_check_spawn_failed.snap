@@ -1,0 +1,12 @@
+---
+source: crates/tau-cli/tests/cmd_install_cross_check_render.rs
+expression: rendered
+---
+✗ install aborted: plugin capability cross-check failed
+
+  Could not spawn plugin binary: No such file or directory: /tmp/nonexistent-binary
+
+  Resolution:
+    1. Verify the binary builds standalone (cargo build).
+    2. Verify the binary runs (./target/debug/<plugin>).
+    3. Once it runs, retry: tau install --force <plugin>
