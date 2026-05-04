@@ -328,6 +328,33 @@ pub fn setup_echo_project(
     // can read each manifest.
     std::fs::create_dir_all(root.join(".tau")).unwrap();
 
+    // Write a scope config.toml with required_tier = "none" so the
+    // sandbox resolver does not require strict or light isolation.
+    std::fs::write(
+        root.join(".tau").join("config.toml"),
+        r#"schema_version = 2
+kind = "project"
+created_at = "2026-05-01T00:00:00Z"
+created_by_tau_version = "0.0.0"
+
+[sandbox]
+required_tier = "none"
+"#,
+    )
+    .unwrap();
+
+    // Ensure TAU_TESTING_ALLOW_MOCK_SANDBOX=1 is set in the process
+    // environment so spawned tau subprocesses bypass the adapter registry
+    // and use the mock sandbox. This is needed because on machines where
+    // `docker --version` succeeds (CLI installed but daemon not running),
+    // the probe returns Available, the Container adapter wins on priority,
+    // and docker run fails — crashing the plugin before the handshake.
+    //
+    // Set via OnceLock to avoid races between parallel tests calling
+    // std::env::set_var. The env var is inherited by all tau subprocesses
+    // spawned from this test binary.
+    set_mock_sandbox_env_once();
+
     // ---- Per-package tau.toml manifests ----
     write_package_manifest(
         root,
@@ -446,6 +473,19 @@ llm_backend  = "echo-llm"
     std::fs::write(root.join("tau.toml"), project_toml).unwrap();
 
     dir
+}
+
+/// Set `TAU_TESTING_ALLOW_MOCK_SANDBOX=1` exactly once per process, safely
+/// even when called from parallel test threads. All tau subprocesses
+/// spawned from this test binary will inherit the env var.
+fn set_mock_sandbox_env_once() {
+    use std::sync::OnceLock;
+    static MOCK_SANDBOX_SET: OnceLock<()> = OnceLock::new();
+    MOCK_SANDBOX_SET.get_or_init(|| {
+        // Safety: called once per process; test processes are single-user
+        // and the var is test-only (never set in production).
+        unsafe { std::env::set_var("TAU_TESTING_ALLOW_MOCK_SANDBOX", "1") };
+    });
 }
 
 /// Author a package's `tau.toml` at `<root>/.tau/packages/<name>/<version>/tau.toml`.

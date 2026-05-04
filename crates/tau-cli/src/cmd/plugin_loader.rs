@@ -18,9 +18,11 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use tau_domain::PortKind;
+use tau_pkg::scope::ScopeConfig;
 use tau_pkg::{LockFile, LockedPlugin, Scope};
 use tau_plugin_protocol::handshake::TraceContext;
 use tau_runtime::plugin_host::{self, PluginHostOptions, RecorderHandle, RecordingSink};
+use tau_runtime::sandbox::{build_plan, resolve_adapter};
 use tau_runtime::RuntimeBuilder;
 
 use crate::config::AgentEntry;
@@ -120,7 +122,7 @@ pub(crate) async fn load_plugins(
     entry: &AgentEntry,
     scope: &Scope,
     trace_context: TraceContext,
-    host_options: PluginHostOptions,
+    mut host_options: PluginHostOptions,
 ) -> anyhow::Result<LoadedPlugins> {
     let recorder_ledger = host_options
         .recorder_ledger
@@ -129,6 +131,47 @@ pub(crate) async fn load_plugins(
     let lockfile = LockFile::load(&scope.lockfile_path())
         .with_context(|| format!("loading lockfile {}", scope.lockfile_path().display()))?;
 
+    // ---- Resolve sandbox adapter ----
+    // Read the scope's [sandbox] config; fall back to defaults if config.toml
+    // doesn't exist yet (e.g. freshly-created scope without an explicit config).
+    let config_path = scope.config_path();
+    let sandbox_requirements = if config_path.exists() {
+        let text = std::fs::read_to_string(&config_path)
+            .with_context(|| format!("reading scope config at {config_path:?}"))?;
+        let scope_config = ScopeConfig::read_from_str(&text)
+            .with_context(|| format!("parsing scope config at {config_path:?}"))?;
+        scope_config.sandbox
+    } else {
+        tau_pkg::scope::SandboxRequirements::default()
+    };
+
+    // Gather plugin-side sandbox requirements from each plugin's on-disk
+    // manifest (the full tau.toml carries [sandbox], unlike the lockfile's
+    // PluginManifest which only carries provides/kind/bin).
+    let mut plugin_sandbox_reqs: Vec<tau_domain::PluginSandboxRequirements> = Vec::new();
+
+    // LLM backend plugin requirements
+    if let Some(req) = read_plugin_sandbox_req(scope, &lockfile, &entry.llm_backend) {
+        plugin_sandbox_reqs.push(req);
+    }
+
+    // Tool plugin requirements
+    for tool in &entry.requires.tools {
+        if let Some(req) = read_plugin_sandbox_req(scope, &lockfile, tool.name.as_str()) {
+            plugin_sandbox_reqs.push(req);
+        }
+    }
+
+    let adapter = match resolve_adapter(&sandbox_requirements, &plugin_sandbox_reqs).await {
+        Ok(a) => Arc::new(a),
+        Err(e) => {
+            // Plain anyhow error with Display string. Task 8 will replace
+            // this with guided multi-option rendering.
+            anyhow::bail!("sandbox adapter resolution failed: {e}");
+        }
+    };
+    host_options.sandbox_adapter = Some(adapter);
+
     // ---- LLM backend ----
     let llm_plugin = resolve_plugin(
         &lockfile,
@@ -136,6 +179,22 @@ pub(crate) async fn load_plugins(
         PortKind::LlmBackend,
         "llm_backend",
     )?;
+
+    // Build the sandbox plan for the LLM backend plugin, using the
+    // agent's capability_overrides (project-level narrowing).
+    let llm_caps = read_plugin_caps_by_name(scope, &lockfile, &entry.llm_backend);
+    let llm_plan = build_plan(
+        &llm_caps,
+        &entry.capability_overrides,
+        None, // working_context — deferred
+        None, // limits — deferred
+    )
+    .with_context(|| {
+        format!(
+            "building sandbox plan for LLM backend {:?}",
+            entry.llm_backend
+        )
+    })?;
 
     // The agent's per-package config table (a free-form
     // `[agents.<id>.config]` block in the project tau.toml) is passed
@@ -149,6 +208,7 @@ pub(crate) async fn load_plugins(
         llm_config,
         trace_context.clone(),
         host_options.clone(),
+        Some(&llm_plan),
     )
     .await
     .with_context(|| format!("loading LLM backend plugin {:?}", entry.llm_backend))?;
@@ -159,6 +219,13 @@ pub(crate) async fn load_plugins(
     for tool in &entry.requires.tools {
         let tool_name = tool.name.as_str();
         let tool_plugin = resolve_plugin(&lockfile, tool_name, PortKind::Tool, "tool")?;
+
+        // Per-tool capability overrides are not yet addressable in the project
+        // tau.toml at v0.1 — pass empty slice. Deferred.
+        let tool_caps = read_plugin_caps_by_name(scope, &lockfile, tool_name);
+        let tool_plan = build_plan(&tool_caps, &[], None, None)
+            .with_context(|| format!("building sandbox plan for tool plugin {tool_name:?}"))?;
+
         let loaded_tool = plugin_host::load_tool(
             tool_plugin,
             // Per-tool config not addressable from project tau.toml at
@@ -167,6 +234,7 @@ pub(crate) async fn load_plugins(
             serde_json::Value::Null,
             trace_context.clone(),
             host_options.clone(),
+            Some(&tool_plan),
         )
         .await
         .with_context(|| format!("loading tool plugin {tool_name:?}"))?;
@@ -177,6 +245,48 @@ pub(crate) async fn load_plugins(
         builder,
         recorder_ledger,
     })
+}
+
+/// Read the `[sandbox]` requirements from a plugin's on-disk `tau.toml`.
+///
+/// Returns `None` if the package is not in the lockfile or its manifest
+/// cannot be read (treated as "no floor", not an error).
+fn read_plugin_sandbox_req(
+    scope: &Scope,
+    lockfile: &LockFile,
+    package_name: &str,
+) -> Option<tau_domain::PluginSandboxRequirements> {
+    let pkg_name: tau_domain::PackageName = package_name.parse().ok()?;
+    let locked_pkg = lockfile.find(&pkg_name)?;
+    let pkg_dir = scope.package_dir(&locked_pkg.name, &locked_pkg.active_version);
+    match tau_pkg::read_manifest(&pkg_dir.join("tau.toml")) {
+        Ok(manifest) => Some(manifest.sandbox().clone()),
+        Err(_) => Some(tau_domain::PluginSandboxRequirements::default()),
+    }
+}
+
+/// Read the declared [`tau_domain::Capability`] list from a plugin's
+/// on-disk `tau.toml`, used to construct a [`tau_ports::SandboxPlan`].
+///
+/// Returns an empty vec if the package is not in the lockfile or the
+/// manifest cannot be read (matches the pre-v4 lockfile behavior where
+/// `required_shapes` was absent).
+fn read_plugin_caps_by_name(
+    scope: &Scope,
+    lockfile: &LockFile,
+    package_name: &str,
+) -> Vec<tau_domain::Capability> {
+    let Ok(pkg_name) = package_name.parse::<tau_domain::PackageName>() else {
+        return Vec::new();
+    };
+    let Some(locked_pkg) = lockfile.find(&pkg_name) else {
+        return Vec::new();
+    };
+    let pkg_dir = scope.package_dir(&locked_pkg.name, &locked_pkg.active_version);
+    match tau_pkg::read_manifest(&pkg_dir.join("tau.toml")) {
+        Ok(manifest) => manifest.capabilities().to_vec(),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// Resolve a package name to its [`LockedPlugin`], checking that
