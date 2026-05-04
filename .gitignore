@@ -1,5 +1,6 @@
 # Rust
 /target
+**/target
 **/*.rs.bk
 
 # Tau project-local state
@@ -16,3 +17,5 @@
 # Coverage
 *.profraw
 tarpaulin-report.html
+target/agent-*
+target/term
