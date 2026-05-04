@@ -200,9 +200,8 @@ pub(crate) async fn load_plugins(
         match resolve_adapter(&sandbox_requirements, &effective_plugin_reqs).await {
             Ok(a) => Arc::new(a),
             Err(e) => {
-                // Plain anyhow error with Display string. Task 8 will replace
-                // this with guided multi-option rendering.
-                anyhow::bail!("sandbox adapter resolution failed: {e}");
+                let rendered = crate::cmd::error_render::render_resolution_error(&e);
+                anyhow::bail!("\n{rendered}");
             }
         }
     };

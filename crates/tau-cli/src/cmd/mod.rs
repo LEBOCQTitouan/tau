@@ -6,6 +6,7 @@
 //! returning an "unimplemented" error.
 
 pub mod chat;
+pub mod error_render;
 pub mod init;
 pub mod install;
 pub mod list;
