@@ -25,7 +25,7 @@ use crate::error::ScopeError;
 /// Maximum `ScopeConfig::schema_version` this tau version recognizes.
 /// A `config.toml` with a higher value rejects with
 /// [`ScopeError::ConfigSchemaTooNew`].
-pub const MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION: u32 = 2;
+pub const MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION: u32 = 3;
 
 /// Distinguishes a global scope (default `~/.tau`) from a project scope
 /// (a `.tau/` directory inside a project's source tree).
@@ -41,89 +41,132 @@ pub enum ScopeKind {
     Project,
 }
 
-/// Per-scope sandbox configuration.
+/// Per-scope sandbox requirements.
 ///
-/// Lives under `[sandbox]` in `<scope>/config.toml`. Schema version 2.
+/// Lives under `[sandbox]` in `<scope>/config.toml`. Schema version 3.
+///
+/// Replaces the schema-v2 `SandboxConfig` (which used `chain` +
+/// `minimum_tier`). v2 configs auto-migrate at load time with a
+/// `tracing::warn!`. See [`deserialize_sandbox_with_migration`].
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct SandboxConfig {
-    /// Adapter chain — adapters are probed in order; first `Available` wins.
-    /// Empty default chain means "default chain" (the runtime applies a
-    /// platform-appropriate default: `[native, container]` on Linux,
-    /// `[container]` on macOS/Windows).
+pub struct SandboxRequirements {
+    /// Minimum sandbox tier this project requires. Defaults to `Strict`.
+    /// Setting `None` is the persistent opt-out (allows passthrough to satisfy).
     #[serde(default)]
-    pub chain: Vec<SandboxAdapterConfig>,
-    /// Minimum tier the selected adapter must advertise. If set, an adapter
-    /// reporting a lower tier is skipped. None = no minimum.
+    pub required_tier: SandboxRequiredTier,
+    /// Explicit shape requirements. Optional. When empty, the resolver
+    /// auto-derives the union of shapes from each plugin's declared
+    /// capabilities.
     #[serde(default)]
-    pub minimum_tier: Option<SandboxMinimumTier>,
+    pub required_shapes: Vec<tau_domain::CapabilityShape>,
 }
 
-impl SandboxConfig {
-    /// Construct a `SandboxConfig` with an explicit adapter chain and optional
-    /// minimum tier. Prefer [`SandboxConfig::default`] for the most common case
-    /// (empty chain, no minimum tier).
-    pub fn with_chain(
-        chain: Vec<SandboxAdapterConfig>,
-        minimum_tier: Option<SandboxMinimumTier>,
-    ) -> Self {
+impl SandboxRequirements {
+    /// Construct with an explicit tier. Shapes default to empty
+    /// (auto-derive at resolution time).
+    pub fn with_tier(required_tier: SandboxRequiredTier) -> Self {
         Self {
-            chain,
-            minimum_tier,
+            required_tier,
+            required_shapes: Vec::new(),
         }
     }
 }
 
-/// One entry in the sandbox adapter chain.
+/// Required sandbox tier for a project (or plugin). Mirrors
+/// `tau_ports::SandboxTier` but lives at the config layer (we don't
+/// depend on tau-ports from tau-pkg). The runtime maps these to
+/// `SandboxTier`.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SandboxAdapterConfig {
-    /// Adapter kind. Determines which crate's adapter to instantiate.
-    pub kind: SandboxAdapterKind,
-    /// Free-form options forwarded to the adapter (e.g. `runtime = "podman"`
-    /// for `kind = "container"`).
-    #[serde(default)]
-    pub options: BTreeMap<String, toml::Value>,
-}
-
-impl SandboxAdapterConfig {
-    /// Construct a new `SandboxAdapterConfig` with an empty options map.
-    pub fn new(kind: SandboxAdapterKind) -> Self {
-        Self {
-            kind,
-            options: BTreeMap::new(),
-        }
-    }
-}
-
-/// Sandbox adapter kind (matches an entry in the workspace's set of
-/// `Sandbox` impls).
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
 #[serde(rename_all = "kebab-case")]
-pub enum SandboxAdapterKind {
-    /// `tau-sandbox-native` — Linux landlock + seccomp + namespaces.
-    Native,
-    /// `tau-sandbox-container` — docker/podman shell-out.
-    Container,
-    /// `tau_ports::fixtures::MockSandbox` — for tests; never used unless
-    /// explicitly listed.
-    Mock,
-}
-
-/// Minimum sandbox tier required of the selected adapter. Mirrors
-/// `tau_ports::SandboxTier` but at the config layer (we don't depend on
-/// tau-ports from tau-pkg). The runtime maps these to `SandboxTier`.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SandboxMinimumTier {
-    /// No minimum (any tier).
+pub enum SandboxRequiredTier {
+    /// No tier requirement (allows passthrough to satisfy).
     None,
     /// Filesystem isolation at minimum.
     Light,
     /// Full strict tier required.
+    #[default]
     Strict,
+}
+
+/// `serde` `deserialize_with` handler for the `sandbox` field of `ScopeConfig`.
+///
+/// Detects v2 schema (`chain` + `minimum_tier` keys) and best-effort
+/// migrates to v3 (`required_tier`). Emits a once-per-process
+/// `tracing::warn!` on migration. v3 configs (with `required_tier`)
+/// pass through unchanged.
+fn deserialize_sandbox_with_migration<'de, D>(
+    deserializer: D,
+) -> Result<SandboxRequirements, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+
+    // Permissive raw shape that accepts both v2 and v3 keys.
+    #[derive(Deserialize)]
+    struct Raw {
+        // v3 fields
+        #[serde(default)]
+        required_tier: Option<SandboxRequiredTier>,
+        #[serde(default)]
+        required_shapes: Option<Vec<tau_domain::CapabilityShape>>,
+        // v2 fields (best-effort migration)
+        #[serde(default)]
+        chain: Option<toml::Value>,
+        #[serde(default)]
+        minimum_tier: Option<SandboxRequiredTier>, // same names, same serde
+    }
+
+    let raw = Raw::deserialize(deserializer)?;
+
+    // v3 path: required_tier is the canonical signal.
+    if raw.required_tier.is_some() || raw.required_shapes.is_some() {
+        if raw.chain.is_some() || raw.minimum_tier.is_some() {
+            warn_v2_v3_mixed();
+        }
+        return Ok(SandboxRequirements {
+            required_tier: raw.required_tier.unwrap_or_default(),
+            required_shapes: raw.required_shapes.unwrap_or_default(),
+        });
+    }
+
+    // v2 path: derive required_tier from minimum_tier (or default to Strict);
+    // ignore chain entries (the v3 resolver handles platform matching).
+    if raw.chain.is_some() || raw.minimum_tier.is_some() {
+        warn_v2_migration();
+        return Ok(SandboxRequirements {
+            required_tier: raw.minimum_tier.unwrap_or_default(),
+            required_shapes: Vec::new(),
+        });
+    }
+
+    // Empty `[sandbox]` block — pure default.
+    Ok(SandboxRequirements::default())
+}
+
+fn warn_v2_migration() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        tracing::warn!(
+            "scope config uses deprecated v2 [sandbox] schema (chain + minimum_tier). \
+             Auto-migrating to v3 (required_tier derived from minimum_tier). \
+             Run `tau sandbox setup` to rewrite the config in v3 form."
+        );
+    });
+}
+
+fn warn_v2_v3_mixed() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        tracing::warn!(
+            "scope config mixes v2 ([sandbox] chain/minimum_tier) and v3 (required_tier) keys. \
+             Honoring v3 keys; ignoring v2 keys."
+        );
+    });
 }
 
 /// Schema for `<scope>/config.toml`. Future-grown additively.
@@ -144,7 +187,7 @@ pub enum SandboxMinimumTier {
 ///
 /// let cfg = ScopeConfig::new(ScopeKind::Global);
 /// let toml = cfg.to_toml_string().unwrap();
-/// assert!(toml.contains("schema_version = 2"));
+/// assert!(toml.contains("schema_version = 3"));
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -162,15 +205,15 @@ pub struct ScopeConfig {
     /// timeouts, etc.). Empty at v0.1.
     #[serde(default)]
     pub defaults: BTreeMap<String, tau_domain::Value>,
-    /// Sandbox configuration. Empty by default; the runtime applies a
-    /// platform-appropriate default chain when the chain is empty.
-    #[serde(default)]
-    pub sandbox: SandboxConfig,
+    /// Sandbox requirements. Defaults to `required_tier = "strict"` and
+    /// empty `required_shapes` (auto-derive at resolution time).
+    #[serde(default, deserialize_with = "deserialize_sandbox_with_migration")]
+    pub sandbox: SandboxRequirements,
 }
 
 impl ScopeConfig {
     /// Construct a new `ScopeConfig` with the current time, the current
-    /// crate version, schema version 2, and empty defaults/sandbox fields.
+    /// crate version, schema version 3, and default sandbox requirements.
     pub fn new(kind: ScopeKind) -> Self {
         Self {
             schema_version: MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION,
@@ -178,14 +221,14 @@ impl ScopeConfig {
             created_at: SystemTime::now(),
             created_by_tau_version: env!("CARGO_PKG_VERSION").to_owned(),
             defaults: BTreeMap::new(),
-            sandbox: SandboxConfig::default(),
+            sandbox: SandboxRequirements::default(),
         }
     }
 
     /// Parse a `ScopeConfig` from a TOML string. Validates
     /// `schema_version` against [`MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION`].
     pub fn read_from_str(text: &str) -> Result<Self, ScopeError> {
-        let cfg: Self = toml::from_str(text).map_err(|e| ScopeError::ConfigParse {
+        let mut cfg: Self = toml::from_str(text).map_err(|e| ScopeError::ConfigParse {
             reason: e.to_string(),
         })?;
         if cfg.schema_version > MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION {
@@ -193,6 +236,11 @@ impl ScopeConfig {
                 found: cfg.schema_version,
                 supported: MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION,
             });
+        }
+        // Auto-upgrade older configs in memory; next save() writes v3.
+        // Mirrors the lockfile v3 -> v4 migration pattern in lockfile.rs.
+        if cfg.schema_version < MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION {
+            cfg.schema_version = MAX_SUPPORTED_SCOPE_CONFIG_SCHEMA_VERSION;
         }
         Ok(cfg)
     }
@@ -754,11 +802,11 @@ mod tests {
     #[test]
     fn scope_config_new_populates_defaults() {
         let cfg = ScopeConfig::new(ScopeKind::Global);
-        assert_eq!(cfg.schema_version, 2);
+        assert_eq!(cfg.schema_version, 3);
         assert_eq!(cfg.kind, ScopeKind::Global);
         assert_eq!(cfg.created_by_tau_version, env!("CARGO_PKG_VERSION"));
         assert!(cfg.defaults.is_empty());
-        assert_eq!(cfg.sandbox, SandboxConfig::default());
+        assert_eq!(cfg.sandbox, SandboxRequirements::default());
     }
 
     #[test]
@@ -800,7 +848,7 @@ mod tests {
             err,
             ScopeError::ConfigSchemaTooNew {
                 found: 999,
-                supported: 2,
+                supported: 3,
             }
         ));
     }
@@ -825,119 +873,130 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // SandboxConfig tests
+    // SandboxRequirements tests (schema v3)
     // -----------------------------------------------------------------------
 
     #[test]
-    fn sandbox_config_default_is_empty_chain() {
-        let cfg = SandboxConfig::default();
-        assert!(cfg.chain.is_empty());
-        assert!(cfg.minimum_tier.is_none());
+    fn sandbox_requirements_default_is_strict() {
+        let req = SandboxRequirements::default();
+        assert_eq!(req.required_tier, SandboxRequiredTier::Strict);
+        assert!(req.required_shapes.is_empty());
     }
 
     #[test]
-    fn sandbox_config_round_trips_through_toml() {
-        let toml_str = r#"
-            schema_version = 2
-            kind = "project"
-            created_at = "2026-04-27T10:00:00Z"
-            created_by_tau_version = "0.0.0"
-
-            [[sandbox.chain]]
-            kind = "native"
-
-            [[sandbox.chain]]
-            kind = "container"
-
-            [sandbox.chain.options]
-            runtime = "podman"
-        "#;
-        // Build the expected value manually.
-        let mut options = BTreeMap::new();
-        options.insert("runtime".to_string(), toml::Value::String("podman".into()));
-        let expected = SandboxConfig {
-            chain: vec![
-                SandboxAdapterConfig {
-                    kind: SandboxAdapterKind::Native,
-                    options: BTreeMap::new(),
-                },
-                SandboxAdapterConfig {
-                    kind: SandboxAdapterKind::Container,
-                    options,
-                },
-            ],
-            minimum_tier: None,
-        };
-        let parsed = ScopeConfig::read_from_str(toml_str).unwrap();
-        assert_eq!(parsed.sandbox, expected);
+    fn scope_config_default_sandbox_is_strict() {
+        let cfg = ScopeConfig::new(ScopeKind::Project);
+        assert_eq!(cfg.schema_version, 3);
+        assert_eq!(cfg.sandbox.required_tier, SandboxRequiredTier::Strict);
     }
 
     #[test]
-    fn v1_config_loads_with_empty_sandbox() {
-        let toml_str = r#"
-            schema_version = 1
-            kind = "global"
-            created_at = "2026-04-27T10:00:00Z"
-            created_by_tau_version = "0.0.0"
-        "#;
-        let parsed = ScopeConfig::read_from_str(toml_str).unwrap();
-        assert_eq!(parsed.schema_version, 1);
-        assert_eq!(parsed.sandbox, SandboxConfig::default());
-        assert!(parsed.sandbox.chain.is_empty());
-        assert!(parsed.sandbox.minimum_tier.is_none());
+    fn v3_config_round_trips_through_toml() {
+        let cfg = ScopeConfig::new(ScopeKind::Project);
+        let toml = cfg.to_toml_string().unwrap();
+        let parsed = ScopeConfig::read_from_str(&toml).unwrap();
+        assert_eq!(cfg, parsed);
     }
 
     #[test]
-    fn unknown_adapter_kind_rejected() {
-        let toml_str = r#"
-            schema_version = 2
-            kind = "global"
-            created_at = "2026-04-27T10:00:00Z"
-            created_by_tau_version = "0.0.0"
+    fn v3_config_with_explicit_required_shapes() {
+        let toml = r#"
+schema_version = 3
+kind = "project"
+created_at = "2026-05-04T00:00:00Z"
+created_by_tau_version = "0.0.0"
 
-            [[sandbox.chain]]
-            kind = "weird"
-        "#;
-        let err = ScopeConfig::read_from_str(toml_str).unwrap_err();
-        assert!(matches!(err, ScopeError::ConfigParse { .. }));
+[sandbox]
+required_tier = "light"
+required_shapes = ["FilesystemRead", "NetworkHttp"]
+"#;
+        let parsed = ScopeConfig::read_from_str(toml).unwrap();
+        assert_eq!(parsed.sandbox.required_tier, SandboxRequiredTier::Light);
+        assert_eq!(parsed.sandbox.required_shapes.len(), 2);
     }
 
     #[test]
-    fn mixed_adapter_chain_round_trips() {
-        let toml_str = r#"
-            schema_version = 2
-            kind = "project"
-            created_at = "2026-04-27T10:00:00Z"
-            created_by_tau_version = "0.0.0"
+    fn v2_config_with_chain_auto_migrates_to_v3() {
+        let toml = r#"
+schema_version = 2
+kind = "project"
+created_at = "2026-05-04T00:00:00Z"
+created_by_tau_version = "0.0.0"
 
-            [sandbox]
-            minimum_tier = "strict"
-
-            [[sandbox.chain]]
-            kind = "native"
-
-            [sandbox.chain.options]
-            tier = "strict"
-
-            [[sandbox.chain]]
-            kind = "container"
-
-            [[sandbox.chain]]
-            kind = "mock"
-        "#;
-        let parsed = ScopeConfig::read_from_str(toml_str).unwrap();
+[sandbox]
+chain = [{ kind = "native" }, { kind = "container" }]
+minimum_tier = "strict"
+"#;
+        let parsed = ScopeConfig::read_from_str(toml).unwrap();
+        // schema_version is bumped to 3 in memory (next save() writes v3).
         assert_eq!(
-            parsed.sandbox.minimum_tier,
-            Some(SandboxMinimumTier::Strict)
+            parsed.schema_version, 3,
+            "schema_version should bump to 3 in memory"
         );
-        assert_eq!(parsed.sandbox.chain.len(), 3);
-        assert_eq!(parsed.sandbox.chain[0].kind, SandboxAdapterKind::Native);
-        assert_eq!(parsed.sandbox.chain[1].kind, SandboxAdapterKind::Container);
-        assert_eq!(parsed.sandbox.chain[2].kind, SandboxAdapterKind::Mock);
-        // Serialize back and re-parse to verify full round-trip.
-        let scope_cfg = parsed;
-        let serialized = scope_cfg.to_toml_string().unwrap();
-        let reparsed = ScopeConfig::read_from_str(&serialized).unwrap();
-        assert_eq!(reparsed.sandbox, scope_cfg.sandbox);
+        assert_eq!(parsed.sandbox.required_tier, SandboxRequiredTier::Strict);
+    }
+
+    #[test]
+    fn mixed_v2_v3_keys_honor_v3_and_ignore_v2() {
+        let toml = r#"
+schema_version = 3
+kind = "project"
+created_at = "2026-05-04T00:00:00Z"
+created_by_tau_version = "0.0.0"
+
+[sandbox]
+required_tier = "light"
+chain = [{ kind = "native" }]
+minimum_tier = "strict"
+"#;
+        let parsed = ScopeConfig::read_from_str(toml).unwrap();
+        // v3 required_tier wins; v2 minimum_tier is ignored.
+        assert_eq!(parsed.sandbox.required_tier, SandboxRequiredTier::Light);
+        assert!(parsed.sandbox.required_shapes.is_empty());
+    }
+
+    #[test]
+    fn v2_config_without_minimum_tier_defaults_to_strict() {
+        let toml = r#"
+schema_version = 2
+kind = "project"
+created_at = "2026-05-04T00:00:00Z"
+created_by_tau_version = "0.0.0"
+
+[sandbox]
+chain = [{ kind = "native" }]
+"#;
+        let parsed = ScopeConfig::read_from_str(toml).unwrap();
+        assert_eq!(parsed.sandbox.required_tier, SandboxRequiredTier::Strict);
+    }
+
+    #[test]
+    fn v1_config_loads_with_default_v3_sandbox() {
+        let toml = r#"
+schema_version = 1
+kind = "project"
+created_at = "2026-05-04T00:00:00Z"
+created_by_tau_version = "0.0.0"
+"#;
+        let parsed = ScopeConfig::read_from_str(toml).unwrap();
+        assert_eq!(parsed.sandbox.required_tier, SandboxRequiredTier::Strict);
+    }
+
+    #[test]
+    fn schema_too_new_rejected() {
+        let toml = r#"
+schema_version = 999
+kind = "project"
+created_at = "2026-05-04T00:00:00Z"
+created_by_tau_version = "0.0.0"
+"#;
+        let err = ScopeConfig::read_from_str(toml).unwrap_err();
+        assert!(matches!(
+            err,
+            ScopeError::ConfigSchemaTooNew {
+                found: 999,
+                supported: 3
+            }
+        ));
     }
 }

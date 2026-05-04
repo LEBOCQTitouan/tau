@@ -25,10 +25,15 @@ enforcement. **Tier 2 fully complete** as of 2026-05-01: priorities
 §5, §1, ADR-0006 §3, and ADR-0006 §5 reservations. Tier 3 priority
 11 (REPL persistence) shipped 2026-05-02 — closing ADR-0006 §16 +
 ADR-0007 §11. Tier 3 priority 12 (sandboxing) shipped 2026-05-03 —
-closing ADR-0006 §13 + Constitution G12; ADR-0014 records the design;
-Phase 2 (tau as a compiled language for agentic workflows) is now
-unblocked. Remaining Tier 3: priorities 9 (multi-agent orchestration)
-and 10 (workflow runner).
+closing ADR-0006 §13 + Constitution G12; ADR-0014 records the design.
+Sub-project A from the priority-12 followups (sandbox activation by
+default — declarative requirements + adapter registry + resolver)
+shipped 2026-05-04 — ADR-0015 records the design; sandboxing is
+now ON by default for every plugin spawn, with `--no-sandbox` /
+`[sandbox] required_tier = "none"` as the explicit opt-out. Phase 2
+(tau as a compiled language for agentic workflows) is now unblocked.
+Remaining Tier 3: priorities 9 (multi-agent orchestration) and 10
+(workflow runner).
 
 | # | Sub-project | Produces | Merged |
 |---|---|---|---|
@@ -43,6 +48,8 @@ and 10 (workflow runner).
 | 7 | tau update / verify / uninstall ✅ | Tier 2 priority 7 — closes ADR-0007 §1 deferral. New tau_pkg::tree_hash module (walkdir + sha2; excludes .git/, target/, *.tau-tmp/; symlinks contribute target bytes). New tau_pkg::verify module returning structured VerifyReport (Ok / TreeDrift / BinaryDrift / Missing / Unverified). New tau_pkg::update_package library function composing existing source_list + resolver + install + uninstall. Three CLI subcommands: tau update (default latest tag, --version pin, --prune), tau verify (exit 0/2, --json), tau uninstall (permissive + remediation hint). Lockfile schema v2 → v3 additive (LockedPlugin.binary_sha256 field; v2-leftover entries flagged unverified, not drift). Existing tau_pkg::uninstall library function reused unchanged. New ADR-0012. No new CI jobs (23 required checks unchanged). | 2026-05-01 |
 | 11 | REPL persistence ✅ | Tier 3 priority 11 — closes ADR-0006 §16 + ADR-0007 §11 deferrals. New tau-cli/src/session module: SessionId (UUID v7), SessionWriter / SessionReader (JSONL), list_sessions, render_session. Auto-save default with --ephemeral opt-out. tau chat --resume <id-or-prefix> with strict drift validation (agent_id + package.name + package.version + llm_backend match), --force overrides. New tau session subcommand group (list, show, delete, export with jsonl/md/json formats). /clear removed (incoherent with persistence); /info added. Schema v1 baseline. No tau-runtime changes. New ADR-0013. No new CI jobs (23 required checks unchanged). | 2026-05-02 |
 | 8 | Streaming LLM responses ✅ | Tier 2 priority 8 — realizes ADR-0006 §5 deferral closure. New `tau-runtime::stream` module with `RunEvent` enum + `run_streaming_inner` async generator (via `async-stream` crate). Kernel pump translates `CompletionChunk` into higher-level `RunEvent`s (`TextDelta`, `ToolCallStarted`, `ToolCallCompleted`, `TurnCompleted`, `RunCompleted`, `FatalError`). `Runtime::run_streaming` + `run_streaming_with_history` public entry points return `Result<impl Stream + 'static, RuntimeError>`. `Runtime::run`/`run_with_history` REFACTOR as thin stream-drainers (zero behavior change; 100+ existing tests pass unchanged). New `RunEvent::FatalError` variant (with `tool_error_variant` tag) preserves byte-identical batch-API error reconstruction for typed `RuntimeError::*` variants (plan-erratum revision documented in ADR-0011 decision 2). `tau chat` streams by default (`--no-stream` opt-out, two-pass termimad render); `tau run --stream` opt-in flag (human + JSON modes; canonical 5-event JSON shape per spec §4.6). New ADR-0011. No new CI jobs (23 required checks unchanged). | 2026-04-30 |
+| 12 | Sandboxing ✅ | Tier 3 priority 12 — closes ADR-0006 §13 + Constitution G12. New `tau_ports::Sandbox` port + typed `CapabilityShape` vocabulary in `tau-domain`. Two adapter crates: `tau-sandbox-native` (Linux landlock + seccomp + namespaces; Light + Strict tiers) and `tau-sandbox-container` (docker/podman shell-out, cross-platform). Adapter chain selection in `tau-runtime::sandbox` via probe-based first-Available-meeting-tier wins; `<scope>/config.toml [sandbox]` section configures the chain (schema v1 → v2, additive). Layer 3 pre-flight validation. Plugin host integration via `tokio::Command::as_std_mut()` bridge. Lockfile schema v3 → v4 (additive `required_shapes` field). New `tau resolve --check-sandbox` CLI advisory mode (human + JSON output). macOS / Windows / remote backends, per-command exec gating, per-host network filter, and default activation tracked as follow-ups in [the followups doc](docs/superpowers/specs/2026-05-03-sandboxing-followups.md). New ADR-0014. 25 required CI checks gating `main` (was 23). | 2026-05-03 |
+| 12-A | Sandbox activation by default ✅ | Sub-project A from the priority-12 followups — see [spec](docs/superpowers/specs/2026-05-04-sandbox-activation-design.md) and [ADR-0015](docs/decisions/0015-sandbox-activation.md). Sandboxing is now ON by default for every plugin spawn. Scope config schema migrates v2 (chain + minimum_tier) → v3 (declarative `required_tier` + `required_shapes`); v2 lockfiles auto-load with a `tracing::warn!`. Architectural pivot: chain-based selection replaced with Bazel-style `AdapterRegistration` registry + 5-stage `resolve_adapter` filter pipeline (platform → probe → tier → shape → plugin tier). New `passthrough` adapter (~30 LOC) replaces the `Option<None>` "no isolation" branch as a registered first-class adapter. Plugin manifest `[sandbox]` block (`PluginSandboxRequirements`) added to `tau-domain`. `PluginHostOptions` gains `sandbox_adapter` / `force_passthrough` / `force_adapter_kind` fields; CLI integration via `plugin_loader::load_plugins`. Global `--no-sandbox` and `--sandbox <kind>` flags. New subcommands: `tau sandbox status` (diagnostic), `tau sandbox setup` (interactive + `--non-interactive` modes). `tau resolve --check-sandbox` extended to surface plugin-tier mismatches. Hard refuse on resolution failure (exit 2) with guided multi-option diagnostic via `crates/tau-cli/src/cmd/error_render.rs` + insta snapshots. `TAU_TESTING_ALLOW_MOCK_SANDBOX=1` env-var Mock injection preserved. No new CI jobs (25 required checks unchanged from priority 12). | 2026-05-04 |
 
 ## Phase 0 (complete) — bootstrap + foundational sub-projects
 
@@ -202,7 +209,22 @@ Tier ordering reflects criticality, not strict implementation order
     backends, per-command exec gating (landlock V2), per-host network
     filter (nftables-in-netns), and default activation are tracked as
     follow-ups in [the followups doc](docs/superpowers/specs/2026-05-03-sandboxing-followups.md).
-    No new CI jobs (23 required checks unchanged).
+    25 required CI checks gating `main` (was 23).
+    - **Sub-project A: Sandbox activation by default** ✅ Shipped 2026-05-04 — see
+      [spec](docs/superpowers/specs/2026-05-04-sandbox-activation-design.md)
+      and [ADR-0015](docs/decisions/0015-sandbox-activation.md).
+      Sandboxing is now ON by default for every plugin spawn.
+      Architectural pivot: chain-based selection replaced with
+      Bazel-style declarative requirements + adapter registry +
+      5-stage resolver filter pipeline. Schema v2 → v3 migration
+      with auto-loading + `tracing::warn!`. New `passthrough`
+      adapter, plugin manifest `[sandbox]` block, global
+      `--no-sandbox` / `--sandbox <kind>` flags, `tau sandbox
+      status` / `tau sandbox setup` subcommands, hard-refuse on
+      resolution failure with guided multi-option diagnostic. The
+      9 remaining priority-12 follow-ups (B–K minus A) stay
+      tracked in the followups doc. No new CI jobs (25 required
+      checks unchanged).
 
 ### Tier 4 — operational quality
 

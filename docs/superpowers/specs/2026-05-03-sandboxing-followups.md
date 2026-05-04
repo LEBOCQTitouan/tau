@@ -4,6 +4,8 @@
 **Status:** scoping doc for future implementation sessions, not a binding spec.
 **Audience:** future tau contributors picking up where the sandboxing sub-project left off.
 
+> **Update (2026-05-04):** Sub-project A (sandbox activation by default) shipped. See [its design doc](2026-05-04-sandbox-activation-design.md) and [ADR-0015](../../decisions/0015-sandbox-activation.md). Sub-project A's "Status" + "Scope" + "Test coverage to add" sections below are kept for historical reference but are now closed. The 9 remaining sub-projects (B, D, E, F, G, H, I, J, K — and the closed-inline C) remain as listed.
+
 ## Test coverage assessment
 
 > **Update (post-merge):** an inline test pass added ~30 unit tests to the
@@ -75,29 +77,35 @@ Coverage is **adequate for the validation/configuration logic** (Layers 3, chain
 
 Below are concrete sub-project proposals, ordered by priority. Each is sized for a single dedicated implementation session.
 
-### Sub-project A — Activate sandboxing by default (highest priority)
+### ~~Sub-project A — Activate sandboxing by default~~ ✅ DONE 2026-05-04
 
-**One-line:** Wire `select_adapter` into the runtime kernel construction so plugins actually run sandboxed by default.
+**Status:** Shipped 2026-05-04 — see [spec](2026-05-04-sandbox-activation-design.md) and [ADR-0015](../../decisions/0015-sandbox-activation.md). PR #23.
 
-**Status:** All infrastructure shipped in priority 12; activation not done. Plugin spawn sites in `tau-runtime/src/plugin_host/mod.rs` pass `None` for the sandbox argument.
+**What landed (and why it diverged from the original scope above):**
 
-**Scope:**
-1. In `Runtime::builder` (or wherever scope config is loaded at runtime startup), call `tau_runtime::sandbox::select_adapter(&scope_config.sandbox).await`.
-2. Store the resulting `Arc<SandboxAdapter>` on `Runtime`.
-3. Thread it down through plugin host construction so `spawn_and_handshake` receives `Some((&plan, &adapter))`.
-4. Build the `SandboxPlan` per spawn from the plugin's manifest capabilities + project override.
-5. Update the four spawn call sites in `mod.rs` (describe_plugin, load_llm_backend, load_tool, load_storage) — `describe_plugin` may stay None per its TODO comment; the other three should activate.
-6. Default behavior on no-config: macOS/Windows → fail-loud "no adapter available" with actionable message; Linux → use Native chain.
-7. Surface `--no-sandbox` flag on `tau chat` / `tau run` for explicit opt-out (gated by ADR-0014's "Mock adapter is opt-in only").
+The original scope assumed the priority-12 chain model (`select_adapter` against a `[sandbox] chain = [...]` list) would simply be activated. During fresh brainstorming, the chain model was rejected in favor of Bazel-style declarative requirements + adapter registry + resolver. The resulting scope:
 
-**Test coverage to add:**
-- Integration test: project with no `[sandbox]` config on Linux → plugin spawns under Native adapter, `--check-sandbox` confirms.
-- Integration test: project with `[sandbox] chain = [{ kind = "mock" }]` + env opt-in → mock used.
-- Integration test on macOS: no-adapter scenario → exit 2 with clear error.
+1. **Architectural pivot:** removed `tau-runtime::sandbox::chain::select_adapter`; replaced with `tau-runtime::sandbox::resolver::resolve_adapter` against a static `AdapterRegistration` slice. 5-stage filter pipeline (platform → probe → tier → shape → plugin tier) + priority sort.
+2. **Schema migration v2 → v3:** `[sandbox] chain` + `minimum_tier` replaced with `required_tier` + `required_shapes`. v2 lockfiles auto-load with a `tracing::warn!` (best-effort migration); v3 is canonical.
+3. **`passthrough` adapter:** new ~30-LOC adapter replacing the `Option<None>` "no isolation" branch. Registered first-class in the registry with `tier = None`, `priority = 0`. `--no-sandbox` is sugar for forcing it.
+4. **Plugin manifest `[sandbox]` block:** `PluginSandboxRequirements { required_tier, required_shapes }` added to `tau-domain`. Resolver's 5th filter stage rejects adapters below the maximum plugin-required tier.
+5. **`PluginHostOptions` integration:** new `sandbox_adapter: Option<Arc<SandboxAdapter>>`, `force_passthrough: bool`, `force_adapter_kind: Option<SandboxAdapterKind>` fields. CLI integration via `tau-cli/src/cmd/plugin_loader.rs::load_plugins`.
+6. **Hard refuse on resolution failure:** exit 2 with guided multi-option `ResolutionError::NoAdapterMatches { tried }` diagnostic. No silent fall-through.
+7. **CLI surface:**
+   - global `--no-sandbox` flag (forces passthrough)
+   - global `--sandbox <kind>` flag (forces specific adapter)
+   - `tau sandbox status` (read-only diagnostic; probes adapters, prints what would happen)
+   - `tau sandbox setup [--tier ...] [--non-interactive]` (atomic write of `[sandbox]` block)
+   - `tau resolve --check-sandbox` extended to surface plugin-tier mismatches even when project's `required_tier = none`
+8. **Error rendering:** `crates/tau-cli/src/cmd/error_render.rs` with multi-option output and insta snapshot tests.
 
-**Estimated scope:** 2-3 days.
+**What stayed unchanged:**
+- The `Sandbox` port, the two concrete adapters (`tau-sandbox-native`, `tau-sandbox-container`), Layer 3 validation logic (`validate_plan_against_adapter`), `wrap_spawn` integration in plugin_host.
+- The mock adapter in `tau-ports/src/fixtures.rs`. Sub-project H from this doc handles eventual cleanup.
+- `TAU_TESTING_ALLOW_MOCK_SANDBOX=1` env-var injection path (preserved for CLI integration tests).
+- Branch protection at 25 required checks (no new CI jobs).
 
-**Dependencies:** none. Foundation is ready.
+**Tests added:** ~30 unit tests across the workspace (resolver, registry, passthrough, plugin manifest, schema migration, error renderer, CLI subcommands), 3 insta snapshots, 3 new CLI integration tests in `cmd_resolve_check_sandbox.rs`. All 25-job CI matrix green on PR #23.
 
 ---
 
@@ -361,7 +369,7 @@ noise of follow-up work.
 | **`SandboxHandle` Drop semantics are unit-tested but not integration-tested.** Container adapter relies on `--rm` for cleanup; future cgroup/cidfile-based adapters will need real Drop coverage. | **D** + container e2e | Currently no real-cleanup adapter ships, so the gap is forward-compat only. |
 | **No async-signal-safety verification in `pre_exec` chain.** The KNOWN-LIMITATION comments document the malloc-during-fork hazard; no test confirms the closure body is allocation-free on the success path (and it currently isn't). | **I** | The fork-server pattern is the real fix; testing the current closure for signal-safety would just pin the bug. |
 | **`tau resolve --check-sandbox` integration tests use `MockSandbox` only.** Real adapter coverage at the CLI level requires the env-var opt-in path (`TAU_TESTING_ALLOW_MOCK_SANDBOX=1`) which is itself a debt item. | **H** | Replacing Mock with real Native + Container in CLI integration tests is part of the H cleanup. |
-| **CI doesn't yet exercise the activated runtime path.** Once sub-project A turns sandboxing on by default, the existing CLI integration tests (cmd_chat, cmd_resolve, etc.) will hit the spawn pipeline through `wrap_spawn`. Currently those tests use the `None`-sandbox path. | **A** sequel | Will surface as the activation work happens; flag here so it's not forgotten. |
+| ~~**CI doesn't yet exercise the activated runtime path.**~~ ✅ ADDRESSED 2026-05-04 (sub-project A) — the `cmd_resolve_check_sandbox.rs` integration tests now exercise the resolver against the real registry; CLI integration tests that load plugins flow through `wrap_spawn` via the new `PluginHostOptions.sandbox_adapter` field. Real-kernel e2e validation still belongs to sub-project D. | **A** ✅ + **D** for real-kernel | Activation happened; e2e infrastructure for landlock/seccomp still pending. |
 
 ### Coverage policy going forward
 

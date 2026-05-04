@@ -1,0 +1,10 @@
+---
+source: crates/tau-cli/src/cmd/error_render.rs
+expression: rendered
+---
+plugin 'auth-store' requires tier Strict; selected adapter delivers None
+
+  options to proceed:
+    - upgrade required_tier in <scope>/config.toml to match the plugin's floor
+    - remove the plugin from agents that don't actually use it
+    - the plugin author can reduce required_tier (NOT recommended for security-sensitive plugins)

@@ -1,0 +1,18 @@
+---
+source: crates/tau-cli/src/cmd/error_render.rs
+expression: rendered
+---
+no sandbox adapter satisfies project requirements
+
+  required: tier=Strict
+  detected platform: macos
+
+  adapter status on this machine:
+    native:      not applicable on this platform
+    container:   unavailable: neither docker nor podman on PATH
+    passthrough: available, but tier=None below required=Strict
+
+  options to proceed:
+    - install a container runtime (Docker Desktop or Podman)
+    - reduce required_tier in <scope>/config.toml to "light" or "none"
+    - run with --no-sandbox (this invocation only)

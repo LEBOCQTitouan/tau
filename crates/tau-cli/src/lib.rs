@@ -63,14 +63,46 @@ pub async fn run_main() -> std::process::ExitCode {
 }
 
 async fn dispatch(cli: cli::Cli) -> anyhow::Result<()> {
+    use cli::SandboxKindArg;
+    use tau_runtime::sandbox::registry::RegistryKind;
+
     let mut output = Output::from_cli(&cli);
     let record_protocol = cli.record_protocol.clone();
+
+    // Resolve sandbox override flags (--no-sandbox / --sandbox <kind>) once,
+    // so every plugin-loading subcommand gets the same derived values.
+    let force_passthrough =
+        cli.no_sandbox || matches!(cli.sandbox, Some(SandboxKindArg::Passthrough));
+    let force_adapter_kind: Option<RegistryKind> = match cli.sandbox {
+        Some(SandboxKindArg::Native) => Some(RegistryKind::Native),
+        Some(SandboxKindArg::Container) => Some(RegistryKind::Container),
+        Some(SandboxKindArg::Passthrough) | None => None,
+    };
+
     match cli.command {
         cli::Command::Init(args) => cmd::init::run(&args, &mut output).await,
         cli::Command::Install(args) => cmd::install::run(&args, &mut output).await,
         cli::Command::List(args) => cmd::list::run(&args, &mut output).await,
-        cli::Command::Run(args) => cmd::run::run(&args, record_protocol, &mut output).await,
-        cli::Command::Chat(args) => cmd::chat::run(&args, record_protocol, &mut output).await,
+        cli::Command::Run(args) => {
+            cmd::run::run(
+                &args,
+                record_protocol,
+                force_passthrough,
+                force_adapter_kind,
+                &mut output,
+            )
+            .await
+        }
+        cli::Command::Chat(args) => {
+            cmd::chat::run(
+                &args,
+                record_protocol,
+                force_passthrough,
+                force_adapter_kind,
+                &mut output,
+            )
+            .await
+        }
         cli::Command::Resolve(args) => cmd::resolve::run(&args, &mut output).await,
         cli::Command::Uninstall(args) => cmd::uninstall::run(&args, &mut output).await,
         cli::Command::Update(args) => cmd::update::run(&args, &mut output).await,
@@ -79,5 +111,6 @@ async fn dispatch(cli: cli::Cli) -> anyhow::Result<()> {
             cmd::plugin::dispatch(action, record_protocol, &mut output).await
         }
         cli::Command::Session(args) => cmd::session::run(&args, &mut output).await,
+        cli::Command::Sandbox(args) => cmd::sandbox::run(&args, &mut output).await,
     }
 }

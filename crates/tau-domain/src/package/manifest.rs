@@ -226,6 +226,12 @@ pub struct UncheckedManifest {
     /// during install (see plugin-loading spec §6.1, §6.3).
     #[cfg_attr(feature = "serde", serde(default))]
     pub plugin: Option<PluginManifest>,
+    /// Plugin-side sandbox requirements declared via `[sandbox]` table.
+    ///
+    /// Optional. Default = `PluginSandboxRequirements::default()` (no
+    /// tier floor; auto-derived shapes). See [`PluginSandboxRequirements`].
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sandbox: crate::package::sandbox::PluginSandboxRequirements,
 }
 
 /// Validated package manifest. By construction, satisfies all cross-field
@@ -292,6 +298,11 @@ impl PackageManifest {
         self.0.plugin.as_ref()
     }
 
+    /// Plugin-side sandbox requirements (from `[sandbox]` table).
+    pub fn sandbox(&self) -> &crate::package::sandbox::PluginSandboxRequirements {
+        &self.0.sandbox
+    }
+
     /// Wrap a checked `UncheckedManifest` without re-running validation.
     /// Internal use only — public API must go through
     /// [`UncheckedManifest::validate`].
@@ -351,6 +362,7 @@ mod manifest_tests {
             dependencies: vec![],
             capabilities: vec![],
             plugin: None,
+            sandbox: crate::package::sandbox::PluginSandboxRequirements::default(),
         }
     }
 
@@ -368,6 +380,61 @@ mod manifest_tests {
         let u: UncheckedManifest = m.into();
         let m2 = PackageManifest::from_checked(u);
         assert_eq!(m2.name().as_str(), "fs-tools");
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn manifest_with_sandbox_block_parses() {
+        let toml = r#"
+name = "my-plugin"
+version = "0.1.0"
+description = "test"
+authors = []
+source = "https://example.com/my-plugin.git"
+kind = "tool"
+dependencies = []
+
+[[capabilities]]
+kind = "fs.read"
+paths = ["/tmp/**"]
+
+[plugin]
+provides = "tool"
+kind = "rust-cargo"
+bin = "my-plugin"
+
+[sandbox]
+required_tier = "strict"
+"#;
+        let unchecked: UncheckedManifest = toml::from_str(toml).expect("parse");
+        let manifest = unchecked.validate().expect("validate");
+        assert_eq!(
+            manifest.sandbox().required_tier,
+            Some(crate::package::sandbox::PluginRequiredTier::Strict)
+        );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn manifest_without_sandbox_block_defaults() {
+        let toml = r#"
+name = "my-plugin"
+version = "0.1.0"
+description = "test"
+authors = []
+source = "https://example.com/my-plugin.git"
+kind = "tool"
+dependencies = []
+capabilities = []
+
+[plugin]
+provides = "tool"
+kind = "rust-cargo"
+bin = "my-plugin"
+"#;
+        let unchecked: UncheckedManifest = toml::from_str(toml).expect("parse");
+        let manifest = unchecked.validate().expect("validate");
+        assert!(manifest.sandbox().required_tier.is_none());
     }
 }
 
@@ -440,6 +507,7 @@ mod validation_tests {
             dependencies: vec![],
             capabilities: vec![],
             plugin: None,
+            sandbox: crate::package::sandbox::PluginSandboxRequirements::default(),
         }
     }
 

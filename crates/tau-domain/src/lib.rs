@@ -26,7 +26,8 @@ pub use message::{Address, Message, MessagePayload};
 pub use package::{
     kinds, AgentCapability, Capability, CapabilityShape, CapabilityShapeSet, FsCapability,
     GitLocation, NetCapability, PackageDep, PackageId, PackageKind, PackageManifest, PackageSource,
-    PluginKind, PluginManifest, PortKind, ProcessCapability, UncheckedManifest,
+    PluginKind, PluginManifest, PluginRequiredTier, PluginSandboxRequirements, PortKind,
+    ProcessCapability, UncheckedManifest,
 };
 pub use value::Value;
 pub use version::{Version, VersionReq};

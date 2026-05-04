@@ -5,10 +5,15 @@
 //! (always available, supports the 5 standard shapes) so tests pass on
 //! every platform without Docker or Linux kernel requirements.
 //!
-//! The "no adapter" test configures `minimum_tier = "strict"` with only
-//! the mock adapter present, which guarantees `SandboxChainError::
-//! MinimumTierUnsatisfiable` — a reliable way to force exit 2 without
-//! platform-specific hacks.
+//! The "no adapter" test configures `required_tier = "strict"` WITHOUT
+//! `TAU_TESTING_ALLOW_MOCK_SANDBOX=1`, so the real registry runs and
+//! finds no suitable adapter on macOS (native is Linux-only, container
+//! requires Docker which is absent in CI). That gives a reliable exit 2.
+//!
+//! When `required_tier = "none"`, --check-sandbox skips passthrough and
+//! calls `resolve_strict_for_validation()`. When
+//! `TAU_TESTING_ALLOW_MOCK_SANDBOX=1` is set, that function returns mock,
+//! so tests remain platform-independent.
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -32,41 +37,45 @@ llm_backend  = "anthropic"
     .unwrap();
 }
 
-/// Write a scope config.toml that configures the mock sandbox adapter.
-/// Creates `.tau/` dir if needed.
+/// Write a v3 scope config.toml with `required_tier = "none"`.
+///
+/// When paired with `TAU_TESTING_ALLOW_MOCK_SANDBOX=1`, the
+/// `resolve_strict_for_validation()` helper returns the mock adapter, so
+/// validation still runs against a real (mock) adapter rather than
+/// passthrough.
 fn write_mock_sandbox_config(scope_dir: &std::path::Path) {
     std::fs::create_dir_all(scope_dir).unwrap();
     std::fs::write(
         scope_dir.join("config.toml"),
-        r#"schema_version = 2
+        r#"schema_version = 3
 kind = "project"
-created_at = "2026-05-01T00:00:00Z"
+created_at = "2026-05-04T00:00:00Z"
 created_by_tau_version = "0.0.0"
 
-[[sandbox.chain]]
-kind = "mock"
+[sandbox]
+required_tier = "none"
 "#,
     )
     .unwrap();
 }
 
-/// Write a scope config.toml that requires strict tier (but only mock is in
-/// the chain, which advertises None tier). This forces NoAdapterAvailable /
-/// MinimumTierUnsatisfiable.
+/// Write a v3 scope config.toml that requires strict tier.
+///
+/// On macOS without Docker, the resolver finds no suitable adapter and
+/// exits 2. Do NOT set `TAU_TESTING_ALLOW_MOCK_SANDBOX=1` when using
+/// this config if you want to test the "no adapter" error path —
+/// the mock env var bypasses the registry entirely.
 fn write_strict_tier_config(scope_dir: &std::path::Path) {
     std::fs::create_dir_all(scope_dir).unwrap();
     std::fs::write(
         scope_dir.join("config.toml"),
-        r#"schema_version = 2
+        r#"schema_version = 3
 kind = "project"
-created_at = "2026-05-01T00:00:00Z"
+created_at = "2026-05-04T00:00:00Z"
 created_by_tau_version = "0.0.0"
 
 [sandbox]
-minimum_tier = "strict"
-
-[[sandbox.chain]]
-kind = "mock"
+required_tier = "strict"
 "#,
     )
     .unwrap();
@@ -352,15 +361,23 @@ fn json_output_emits_per_line_events() {
 }
 
 // ---- Test 4: no adapter available exits 2 with a clear message -----------
+//
+// Uses `required_tier = "strict"` WITHOUT `TAU_TESTING_ALLOW_MOCK_SANDBOX=1`
+// so the real registry runs. Requires a host where no strict-capable adapter
+// is present (e.g., macOS without Docker Desktop). If Docker or a native
+// sandbox is available, the resolver succeeds and this test would fail —
+// hence `#[ignore]`. Enable in e2e CI where the sandbox-free environment
+// is guaranteed (sub-project D).
 
 #[test]
+#[ignore = "requires a host with no strict-capable sandbox adapter (no Docker, no Linux native); run in sub-project D e2e CI"]
 fn no_adapter_emits_clear_error() {
     let dir = TempDir::new().unwrap();
     let root = dir.path();
 
     std::fs::create_dir_all(root.join(".tau")).unwrap();
     write_tau_toml(root);
-    // Strict tier + only mock in chain → MinimumTierUnsatisfiable → exit 2.
+    // v3 strict tier config — no mock env var, so real registry runs.
     write_strict_tier_config(&root.join(".tau"));
     write_plugin_fixture_with_standard_caps(root, "fs-plugin", "0.1.0");
 
@@ -369,7 +386,8 @@ fn no_adapter_emits_clear_error() {
         .args(["resolve", "--check-sandbox"])
         .current_dir(root)
         .env("TAU_HOME", root.join(".tau-global"))
-        .env("TAU_TESTING_ALLOW_MOCK_SANDBOX", "1")
+        // Explicitly unset mock injection so the real resolver runs.
+        .env_remove("TAU_TESTING_ALLOW_MOCK_SANDBOX")
         .output()
         .unwrap();
 
@@ -378,7 +396,7 @@ fn no_adapter_emits_clear_error() {
 
     assert!(
         !output.status.success(),
-        "expected failure when no adapter meets minimum tier; stdout={stdout} stderr={stderr}"
+        "expected failure when no adapter meets strict tier; stdout={stdout} stderr={stderr}"
     );
     assert_eq!(
         output.status.code(),
@@ -460,4 +478,150 @@ fn check_sandbox_flag_appears_in_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains("--check-sandbox"));
+}
+
+// ---- Test 7: --check-sandbox skips passthrough and validates against mock -
+
+/// When `required_tier = "none"`, the runtime would resolve to passthrough.
+/// `--check-sandbox` must NOT validate against passthrough (every plan
+/// trivially passes). Instead it calls `resolve_strict_for_validation()`,
+/// which returns the mock adapter when `TAU_TESTING_ALLOW_MOCK_SANDBOX=1`.
+/// Standard capabilities still pass against mock, so exit 0 is expected.
+#[test]
+fn check_sandbox_skips_passthrough_to_native_or_container() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join(".tau")).unwrap();
+    write_tau_toml(root);
+    // required_tier = "none" → passthrough at runtime, but --check-sandbox
+    // skips to the next-strict adapter (mock via env var here).
+    write_mock_sandbox_config(&root.join(".tau"));
+    write_plugin_fixture_with_standard_caps(root, "fs-plugin", "0.1.0");
+
+    let output = Command::cargo_bin("tau")
+        .unwrap()
+        .args(["resolve", "--check-sandbox"])
+        .current_dir(root)
+        .env("TAU_HOME", root.join(".tau-global"))
+        .env("TAU_TESTING_ALLOW_MOCK_SANDBOX", "1")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "expected exit 0: required_tier=none + standard caps should pass against mock; stdout={stdout:?} stderr={stderr:?}"
+    );
+    assert!(
+        stdout.contains("✓ fs-plugin"),
+        "expected '✓ fs-plugin' in stdout; got: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 plugins checked: 1 ok, 0 errors"),
+        "expected summary line; got: {stdout}"
+    );
+}
+
+// ---- Test 8: errors when only passthrough is available --------------------
+
+/// When `required_tier = "none"` AND no real (non-passthrough) adapter is
+/// available, `--check-sandbox` must exit 2 with a clear error.
+///
+/// `resolve_strict_for_validation()` finds no non-passthrough adapter and
+/// returns an error, which is surfaced as exit 2 with a descriptive message.
+/// Requires a host with no strict-capable adapter present. Ignored in
+/// regular CI where Docker or native sandbox is typically available.
+#[test]
+#[ignore = "requires a host with no non-passthrough sandbox adapter (no Docker, no Linux native); run in sub-project D e2e CI"]
+fn check_sandbox_errors_when_only_passthrough_available() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join(".tau")).unwrap();
+    write_tau_toml(root);
+    // required_tier = "none" → resolve_strict_for_validation runs.
+    // Without mock env var, no real adapter is found on the target host.
+    write_mock_sandbox_config(&root.join(".tau"));
+    write_plugin_fixture_with_standard_caps(root, "fs-plugin", "0.1.0");
+
+    let output = Command::cargo_bin("tau")
+        .unwrap()
+        .args(["resolve", "--check-sandbox"])
+        .current_dir(root)
+        .env("TAU_HOME", root.join(".tau-global"))
+        .env_remove("TAU_TESTING_ALLOW_MOCK_SANDBOX")
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        !output.status.success(),
+        "expected exit 2 when no non-passthrough adapter available; stdout={stdout} stderr={stderr}"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "exit code must be 2; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("no non-permissive adapter available"),
+        "expected 'no non-permissive adapter available' in stderr; got: {stderr}"
+    );
+}
+
+// ---- Test 9: plugin with custom cap triggers rejection (tier-none config) --
+
+/// Variant of `mock_chain_rejects_custom_capability` that exercises the
+/// passthrough-skip path: `required_tier = "none"` + mock env var
+/// → `resolve_strict_for_validation()` returns mock → custom cap rejected.
+///
+/// This also doubles as a plugin-tier-mismatch surface test: if a plugin's
+/// declared capability is unsupported by the strictest available adapter,
+/// --check-sandbox reports ✗ with a clear reason.
+#[test]
+fn check_sandbox_surfaces_plugin_tier_mismatch() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join(".tau")).unwrap();
+    write_tau_toml(root);
+    // required_tier = "none" → passthrough-skip → resolve_strict_for_validation
+    // returns mock → custom cap is rejected because mock doesn't support Custom.
+    write_mock_sandbox_config(&root.join(".tau"));
+    write_plugin_fixture_with_custom_cap(root, "mcp-plugin", "0.1.0");
+
+    let output = Command::cargo_bin("tau")
+        .unwrap()
+        .args(["resolve", "--check-sandbox"])
+        .current_dir(root)
+        .env("TAU_HOME", root.join(".tau-global"))
+        .env("TAU_TESTING_ALLOW_MOCK_SANDBOX", "1")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !output.status.success(),
+        "expected exit 2: custom cap rejected by mock adapter; stdout={stdout:?} stderr={stderr:?}"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "exit code must be 2; stdout={stdout:?}"
+    );
+    assert!(
+        stdout.contains("✗ mcp-plugin"),
+        "expected '✗ mcp-plugin' in stdout (plugin's capability is unsupported); got: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 plugins checked: 0 ok, 1 errors"),
+        "expected summary with 1 error; got: {stdout}"
+    );
 }

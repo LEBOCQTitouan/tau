@@ -3,6 +3,7 @@
 pub mod capability;
 pub mod manifest;
 pub mod plugin;
+pub mod sandbox;
 pub mod source;
 
 pub use capability::{
@@ -11,4 +12,5 @@ pub use capability::{
 };
 pub use manifest::{kinds, PackageDep, PackageId, PackageKind, PackageManifest, UncheckedManifest};
 pub use plugin::{PluginKind, PluginManifest, PortKind};
+pub use sandbox::{PluginRequiredTier, PluginSandboxRequirements};
 pub use source::{GitLocation, PackageSource};

@@ -35,6 +35,7 @@ use tau_domain::PortKind;
 use tau_pkg::LockedPlugin;
 use tau_plugin_protocol::handshake::TraceContext;
 use tau_plugin_protocol::FramerOptions;
+use tau_ports::SandboxPlan;
 
 use crate::builder::{DynLlmBackend, DynStorage, DynTool};
 use crate::error::RuntimeError;
@@ -277,6 +278,27 @@ pub struct PluginHostOptions {
     /// `cmd::chat` exit paths. Defaults to `None`; non-CLI embedders
     /// don't need it.
     pub recorder_ledger: Option<Arc<std::sync::Mutex<Vec<RecorderHandle>>>>,
+
+    /// Sandbox adapter to wrap each plugin spawn. If `None`, plugins
+    /// run unsandboxed (the legacy default for non-CLI embedders).
+    /// Populated by `tau-cli::cmd::plugin_loader::load_plugins` from
+    /// the scope's `[sandbox]` config + `resolve_adapter`.
+    ///
+    /// At spawn time, this is zipped with the per-call `Option<&SandboxPlan>`
+    /// supplied to each `load_*` function. Both must be `Some` for sandbox
+    /// enforcement to take effect — allowing callers to opt-out per plugin
+    /// by passing `None` for the plan.
+    pub sandbox_adapter: Option<Arc<crate::sandbox::SandboxAdapter>>,
+
+    /// CLI override: force passthrough adapter (no isolation). Set by
+    /// `--no-sandbox` or `--sandbox passthrough`. When `true`, the resolver
+    /// receives `required_tier = None` and ignores plugin-tier floors.
+    pub force_passthrough: bool,
+
+    /// CLI override: force a specific adapter kind. Set by `--sandbox <kind>`
+    /// (other than passthrough). When `Some`, the resolver instantiates and
+    /// probes ONLY that kind. `None` = normal multi-adapter resolution.
+    pub force_adapter_kind: Option<crate::sandbox::registry::RegistryKind>,
 }
 
 impl Default for PluginHostOptions {
@@ -290,6 +312,9 @@ impl Default for PluginHostOptions {
             max_message_size: 64 * 1024 * 1024,
             recording: None,
             recorder_ledger: None,
+            sandbox_adapter: None,
+            force_passthrough: false,
+            force_adapter_kind: None,
         }
     }
 }
@@ -320,6 +345,7 @@ pub async fn load_llm_backend(
     config: serde_json::Value,
     trace_context: TraceContext,
     options: PluginHostOptions,
+    sandbox_plan: Option<&SandboxPlan>,
 ) -> Result<Arc<dyn DynLlmBackend>, RuntimeError> {
     let plugin_name = plugin.manifest.bin.clone();
     let run_id = trace_context.run_id.clone();
@@ -334,6 +360,11 @@ pub async fn load_llm_backend(
     framer_options.max_message_size = options.max_message_size;
     let recorder = build_recorder(&plugin_name, &options).await;
 
+    // Zip sandbox plan + adapter: both must be present for enforcement.
+    // If either is None (legacy callers or no-sandbox config), spawn proceeds
+    // without sandboxing, preserving backward compatibility.
+    let sandbox = sandbox_plan.zip(options.sandbox_adapter.as_deref());
+
     let (process, _handshake_response) = process::PluginProcess::spawn_and_handshake(
         &plugin.binary_path,
         plugin_name.clone(),
@@ -342,11 +373,7 @@ pub async fn load_llm_backend(
         framer_options,
         options.shutdown_timeout,
         recorder,
-        // TODO(future): plumb scope-config-driven SandboxAdapter selection here.
-        // v0.1 ships sandbox=None at all four spawn sites; activation is gated on
-        // the runtime kernel adopting `select_adapter` and threading the result
-        // through the plugin host construction.
-        None,
+        sandbox,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
@@ -394,6 +421,7 @@ pub async fn load_tool(
     config: serde_json::Value,
     trace_context: TraceContext,
     options: PluginHostOptions,
+    sandbox_plan: Option<&SandboxPlan>,
 ) -> Result<Arc<dyn DynTool>, RuntimeError> {
     let plugin_name = plugin.manifest.bin.clone();
     let run_id = trace_context.run_id.clone();
@@ -406,6 +434,9 @@ pub async fn load_tool(
     framer_options.max_message_size = options.max_message_size;
     let recorder = build_recorder(&plugin_name, &options).await;
 
+    // Zip sandbox plan + adapter: both must be present for enforcement.
+    let sandbox = sandbox_plan.zip(options.sandbox_adapter.as_deref());
+
     let (process, _handshake_response) = process::PluginProcess::spawn_and_handshake(
         &plugin.binary_path,
         plugin_name.clone(),
@@ -414,11 +445,7 @@ pub async fn load_tool(
         framer_options,
         options.shutdown_timeout,
         recorder,
-        // TODO(future): plumb scope-config-driven SandboxAdapter selection here.
-        // v0.1 ships sandbox=None at all four spawn sites; activation is gated on
-        // the runtime kernel adopting `select_adapter` and threading the result
-        // through the plugin host construction.
-        None,
+        sandbox,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
@@ -490,6 +517,7 @@ pub async fn load_storage(
     config: serde_json::Value,
     trace_context: TraceContext,
     options: PluginHostOptions,
+    sandbox_plan: Option<&SandboxPlan>,
 ) -> Result<Arc<dyn DynStorage>, RuntimeError> {
     let plugin_name = plugin.manifest.bin.clone();
     let run_id = trace_context.run_id.clone();
@@ -502,6 +530,9 @@ pub async fn load_storage(
     framer_options.max_message_size = options.max_message_size;
     let recorder = build_recorder(&plugin_name, &options).await;
 
+    // Zip sandbox plan + adapter: both must be present for enforcement.
+    let sandbox = sandbox_plan.zip(options.sandbox_adapter.as_deref());
+
     let (process, _handshake_response) = process::PluginProcess::spawn_and_handshake(
         &plugin.binary_path,
         plugin_name.clone(),
@@ -510,11 +541,7 @@ pub async fn load_storage(
         framer_options,
         options.shutdown_timeout,
         recorder,
-        // TODO(future): plumb scope-config-driven SandboxAdapter selection here.
-        // v0.1 ships sandbox=None at all four spawn sites; activation is gated on
-        // the runtime kernel adopting `select_adapter` and threading the result
-        // through the plugin host construction.
-        None,
+        sandbox,
         |reader, writer| {
             Box::pin(async move {
                 handshake::drive_handshake(
