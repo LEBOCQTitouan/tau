@@ -145,10 +145,7 @@ mod tests {
     fn no_adapter_matches_display_includes_count() {
         let e = ResolutionError::NoAdapterMatches {
             tried: vec![
-                (
-                    "native".into(),
-                    ResolutionRejection::PlatformMismatch,
-                ),
+                ("native".into(), ResolutionRejection::PlatformMismatch),
                 (
                     "container".into(),
                     ResolutionRejection::ProbeUnavailable("docker not on PATH".into()),
@@ -221,10 +218,7 @@ mod tests {
             required: SandboxTier::Strict,
         };
         let s = format!("{r}");
-        assert!(
-            s.contains("None"),
-            "TierTooLow: expected 'None' in: {s}"
-        );
+        assert!(s.contains("None"), "TierTooLow: expected 'None' in: {s}");
         assert!(
             s.contains("Strict"),
             "TierTooLow: expected 'Strict' in: {s}"

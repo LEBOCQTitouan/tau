@@ -1,13 +1,13 @@
-//! Runtime sandbox glue — adapter chain selection + plan validation.
+//! Runtime sandbox glue — declarative-requirements resolver + plan validation.
 
-mod chain;
 pub mod passthrough;
 mod plan;
 pub mod registry;
 pub mod resolution_error;
+pub mod resolver;
 mod validation;
 
-pub use chain::{select_adapter, SandboxAdapter, SandboxChainError};
 pub use plan::build_plan;
 pub use resolution_error::{ResolutionError, ResolutionRejection};
+pub use resolver::{resolve_adapter, SandboxAdapter};
 pub use validation::{validate_plan_against_adapter, SandboxValidationError};

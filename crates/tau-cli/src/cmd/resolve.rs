@@ -53,8 +53,8 @@ pub async fn run(args: &ResolveArgs, output: &mut Output) -> anyhow::Result<()> 
 /// Exit 0 if all plugins pass; exit 2 if any fail or no adapter is
 /// available (per ADR-0007 three-bucket exit codes).
 async fn run_check_sandbox(_args: &ResolveArgs, output: &mut Output) -> anyhow::Result<()> {
-    use tau_pkg::scope::ScopeConfig;
-    use tau_runtime::sandbox::{build_plan, select_adapter, validate_plan_against_adapter};
+    use tau_pkg::scope::{SandboxRequirements, ScopeConfig};
+    use tau_runtime::sandbox::{build_plan, resolve_adapter, validate_plan_against_adapter};
 
     // 1. Resolve the scope.
     let cwd = std::env::current_dir()?;
@@ -62,18 +62,18 @@ async fn run_check_sandbox(_args: &ResolveArgs, output: &mut Output) -> anyhow::
 
     // 2. Read scope config for [sandbox] section.
     let config_path = scope.config_path();
-    let sandbox_config = if config_path.exists() {
+    let sandbox_requirements = if config_path.exists() {
         let text = std::fs::read_to_string(&config_path)
             .with_context(|| format!("reading scope config at {config_path:?}"))?;
         let scope_config = ScopeConfig::read_from_str(&text)
             .with_context(|| format!("parsing scope config at {config_path:?}"))?;
         scope_config.sandbox
     } else {
-        tau_pkg::scope::SandboxConfig::default()
+        SandboxRequirements::default()
     };
 
     // 3. Select the sandbox adapter.
-    let adapter = match select_adapter(&sandbox_config).await {
+    let adapter = match resolve_adapter(&sandbox_requirements, &[]).await {
         Ok(a) => a,
         Err(e) => {
             let msg = format!("no sandbox adapter available: {e}");
