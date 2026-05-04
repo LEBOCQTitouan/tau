@@ -174,6 +174,12 @@ impl Sandbox for SandboxAdapter {
 // instantiate helper
 // ---------------------------------------------------------------------------
 
+/// Public wrapper for `instantiate` — used by `tau sandbox status` to
+/// probe each registered adapter regardless of platform compatibility.
+pub fn instantiate_for_probe(kind: RegistryKind) -> Result<SandboxAdapter, String> {
+    instantiate(kind)
+}
+
 fn instantiate(kind: RegistryKind) -> Result<SandboxAdapter, String> {
     // The catch-all arm exists for forward-compat: when a new RegistryKind
     // variant is added before the match arms are updated, the compiler will

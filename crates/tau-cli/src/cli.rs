@@ -107,6 +107,8 @@ pub enum Command {
     },
     /// Session management (list, show, delete, export).
     Session(SessionArgs),
+    /// Sandbox configuration and diagnostics.
+    Sandbox(SandboxArgs),
 }
 
 /// `tau plugin <action>` — debug-tier helpers per spec §9.
@@ -439,6 +441,49 @@ pub enum ColorMode {
     Auto,
     /// Never emit color codes.
     Never,
+}
+
+/// `tau sandbox` subcommand group.
+#[derive(Debug, Args)]
+pub struct SandboxArgs {
+    /// What to do.
+    #[command(subcommand)]
+    pub command: SandboxCommand,
+}
+
+/// `tau sandbox <subcommand>` variants.
+#[derive(Debug, Subcommand)]
+pub enum SandboxCommand {
+    /// Print sandbox configuration + per-adapter probe results.
+    /// Non-mutating; always exits 0.
+    Status,
+    /// Interactive (or non-interactive) wizard to write the [sandbox]
+    /// block in <scope>/config.toml. Implemented in Task 10.
+    Setup(SandboxSetupArgs),
+}
+
+/// Args for `tau sandbox setup`. Filled in by Task 10.
+#[derive(Debug, Args)]
+pub struct SandboxSetupArgs {
+    /// Required tier to write to scope config (skips interactive prompt).
+    #[arg(long, value_enum)]
+    pub tier: Option<SandboxRequiredTierArg>,
+    /// Disable interactive prompts; expects --tier to be provided.
+    #[arg(long)]
+    pub non_interactive: bool,
+}
+
+/// CLI value for `--tier` on `tau sandbox setup`. Mirrors
+/// `tau_pkg::scope::SandboxRequiredTier`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum SandboxRequiredTierArg {
+    /// No isolation required (allows passthrough).
+    None,
+    /// Filesystem isolation at minimum.
+    Light,
+    /// Full strict tier required.
+    Strict,
 }
 
 #[cfg(test)]

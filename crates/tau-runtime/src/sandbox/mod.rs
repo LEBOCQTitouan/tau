@@ -9,5 +9,7 @@ mod validation;
 
 pub use plan::build_plan;
 pub use resolution_error::{ResolutionError, ResolutionRejection};
-pub use resolver::{resolve_adapter, resolve_adapter_forced, SandboxAdapter};
+pub use resolver::{
+    instantiate_for_probe, resolve_adapter, resolve_adapter_forced, SandboxAdapter,
+};
 pub use validation::{validate_plan_against_adapter, SandboxValidationError};
