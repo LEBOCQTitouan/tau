@@ -499,6 +499,13 @@ mod tests {
     use super::*;
     use tau_domain::{PluginRequiredTier, PluginSandboxRequirements};
     use tau_pkg::scope::{SandboxRequiredTier, SandboxRequirements};
+    use tokio::sync::Mutex;
+
+    // Process-wide lock for tests that read or write TAU_TESTING_ALLOW_MOCK_SANDBOX.
+    // cargo test runs tests in parallel within a single process; env vars are
+    // process-global, so any test that touches this env var must serialize.
+    // tokio::sync::Mutex is used (not std) so the guard is Send across .await.
+    static MOCK_ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
     // 1. default_requirements_resolves_to_some_adapter
     //
@@ -507,6 +514,7 @@ mod tests {
     // available; either Ok(_) or NoAdapterMatches is acceptable.
     #[tokio::test]
     async fn default_requirements_resolves_to_some_adapter() {
+        let _g = MOCK_ENV_LOCK.lock().await;
         // Ensure mock env var is NOT set so we exercise the real registry path.
         std::env::remove_var("TAU_TESTING_ALLOW_MOCK_SANDBOX");
 
@@ -524,8 +532,7 @@ mod tests {
     // registry and returns SandboxAdapter::Mock.
     #[tokio::test]
     async fn mock_explicit_via_env_var_resolves_to_mock() {
-        // Set and then restore the env var manually (no serial_test dep needed
-        // for a single-threaded test that sets/removes in-process).
+        let _g = MOCK_ENV_LOCK.lock().await;
         std::env::set_var("TAU_TESTING_ALLOW_MOCK_SANDBOX", "1");
         let result = resolve_adapter(&SandboxRequirements::default(), &[]).await;
         std::env::remove_var("TAU_TESTING_ALLOW_MOCK_SANDBOX");
@@ -545,6 +552,7 @@ mod tests {
     // Linux host — never Ok(Passthrough).
     #[tokio::test]
     async fn required_tier_strict_with_only_passthrough_unsatisfiable() {
+        let _g = MOCK_ENV_LOCK.lock().await;
         std::env::remove_var("TAU_TESTING_ALLOW_MOCK_SANDBOX");
 
         let requirements = SandboxRequirements::with_tier(SandboxRequiredTier::Strict);
@@ -580,6 +588,7 @@ mod tests {
     // unavailable). On Linux, native may win at higher priority — that's fine.
     #[tokio::test]
     async fn required_tier_none_resolves_to_passthrough_when_no_other_match() {
+        let _g = MOCK_ENV_LOCK.lock().await;
         std::env::remove_var("TAU_TESTING_ALLOW_MOCK_SANDBOX");
 
         let requirements = SandboxRequirements::with_tier(SandboxRequiredTier::None);
@@ -598,6 +607,7 @@ mod tests {
     // Expected: NoAdapterMatches on macOS, or Ok(Native/Container) on Linux.
     #[tokio::test]
     async fn plugin_tier_strict_rejects_passthrough_only_chain() {
+        let _g = MOCK_ENV_LOCK.lock().await;
         std::env::remove_var("TAU_TESTING_ALLOW_MOCK_SANDBOX");
 
         let requirements = SandboxRequirements::default(); // Strict
@@ -624,6 +634,7 @@ mod tests {
     // platform is whatever the test runner is on.
     #[tokio::test]
     async fn unknown_platform_smoke_does_not_panic() {
+        let _g = MOCK_ENV_LOCK.lock().await;
         std::env::remove_var("TAU_TESTING_ALLOW_MOCK_SANDBOX");
 
         // Just call the resolver; verify it returns something without panicking.
@@ -636,6 +647,7 @@ mod tests {
     // Extra: verify Debug impl doesn't panic for all variants.
     #[tokio::test]
     async fn sandbox_adapter_debug_impl_all_variants() {
+        let _g = MOCK_ENV_LOCK.lock().await;
         std::env::set_var("TAU_TESTING_ALLOW_MOCK_SANDBOX", "1");
         let mock = resolve_adapter(&SandboxRequirements::default(), &[])
             .await
