@@ -263,7 +263,46 @@ jobs:
         # CARGO_BIN_EXE_tau env var. Building tau-cli first ensures the
         # binary exists in target/debug for the helper to discover.
         run: cargo build -p tau-cli --bin tau
+      - name: Build all real plugin binaries (Layer 4 tests)
+        # Sub-project D Task 5/6/7's Layer 4 tests need the real plugin
+        # binaries pre-built. Build the 5 real plugins in release mode.
+        run: |
+          cargo build -p anthropic --release
+          cargo build -p ollama --release
+          cargo build -p openai --release
+          cargo build -p fs-read --release
+          cargo build -p shell --release
       - name: Test tau-plugin-compat (integration-tests feature)
-        # Layer 3 tests run; Layer 4 container/native tests are
-        # #[ignore]'d pending sub-project D's e2e infrastructure.
+        # Layer 3 tests run; 7 of 10 Layer 4 tests run after sub-project D
+        # (4 tool-plugin × 2 adapters + 3 native HTTP plugin via cassette);
+        # 3 container × HTTP plugin tests stay #[ignore]'d pending F.
         run: cargo test -p tau-plugin-compat --features integration-tests --tests
+
+  test-tau-sandbox-native-e2e:
+    name: test (tau-sandbox-native e2e / linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build controlled-env binary
+        # Sub-project D's e2e tests use this binary as a deterministic
+        # spawn target. Built in release mode with static linking
+        # (lto + strip + panic=abort) per its standalone Cargo.toml.
+        run: cargo build --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml --release
+      - name: Test tau-sandbox-native e2e
+        # Real-kernel landlock + seccomp + network-filter tests gated
+        # cfg(feature = "integration-tests") + cfg(target_os = "linux").
+        run: cargo test -p tau-sandbox-native --features integration-tests --tests
+
+  test-tau-runtime-e2e:
+    name: test (tau-runtime e2e / linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build controlled-env binary
+        run: cargo build --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml --release
+      - name: Test tau-runtime e2e
+        # Runtime-level integration tests: adapter threads through to
+        # plugin spawn; sandbox plan validation runs pre-spawn.
+        run: cargo test -p tau-runtime --features integration-tests --tests
