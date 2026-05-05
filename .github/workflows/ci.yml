@@ -70,13 +70,15 @@ jobs:
       - run: cargo nextest run --workspace --all-targets
       - run: cargo test --workspace --doc
       # Sandbox integration tests — Linux-only, ignored by default,
-      # opt-in via the integration-tests feature.
+      # opt-in via the integration-tests feature. nextest exits 4 when
+      # `--run-ignored only` matches zero tests; --no-tests=pass restores
+      # cargo test's permissive behavior so empty filter sets succeed.
       - if: matrix.os == 'ubuntu-latest'
-        run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests --run-ignored only
+        run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests --run-ignored only --no-tests=pass
       - if: matrix.os == 'ubuntu-latest'
-        run: cargo nextest run -p tau-sandbox-container --tests --run-ignored only
+        run: cargo nextest run -p tau-sandbox-container --tests --run-ignored only --no-tests=pass
       - if: matrix.os == 'ubuntu-latest'
-        run: cargo nextest run -p tau-runtime --features integration-tests --tests --run-ignored only
+        run: cargo nextest run -p tau-runtime --features integration-tests --tests --run-ignored only --no-tests=pass
 
   no-default-features:
     name: build (no-default-features)
