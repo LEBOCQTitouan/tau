@@ -103,6 +103,13 @@ pub struct InstallOptions {
     /// Defaults: build enabled, `cargo` from PATH, no extra args.
     /// Ignored for data-only packages (no `[plugin]` table).
     pub build: BuildOptions,
+    /// If `true`, skip the Layer 2 cross-check at step 8.7 (sub-project B).
+    ///
+    /// Default: `false` — production installs always run the cross-check.
+    /// Tests that build stub plugin binaries which don't implement the
+    /// `meta.handshake` protocol set this to `true` to bypass the
+    /// cross-check.
+    pub skip_cross_check: bool,
 }
 
 impl Default for InstallOptions {
@@ -111,6 +118,7 @@ impl Default for InstallOptions {
             block_on_lock: true,
             force: false,
             build: BuildOptions::default(),
+            skip_cross_check: false,
         }
     }
 }
@@ -337,23 +345,25 @@ pub fn install_with_options(
         // cross_check_plugin_capabilities is async; install_with_options is
         // synchronous. Bridge via a current-thread tokio runtime spun up just
         // for this step.
-        if let Some(ref mut lp) = locked_plugin {
-            let binary_path = lp.binary_path.clone();
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| InstallError::Internal {
-                    message: format!("build tokio runtime for cross-check: {e}"),
-                })?;
-            let shapes = runtime
-                .block_on(crate::sandbox_check::cross_check_plugin_capabilities(
-                    &binary_path,
-                    &manifest,
-                ))
-                .map_err(|e| InstallError::CrossCheck {
-                    message: e.to_string(),
-                })?;
-            lp.required_shapes = shapes;
+        if !options.skip_cross_check {
+            if let Some(ref mut lp) = locked_plugin {
+                let binary_path = lp.binary_path.clone();
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| InstallError::Internal {
+                        message: format!("build tokio runtime for cross-check: {e}"),
+                    })?;
+                let shapes = runtime
+                    .block_on(crate::sandbox_check::cross_check_plugin_capabilities(
+                        &binary_path,
+                        &manifest,
+                    ))
+                    .map_err(|e| InstallError::CrossCheck {
+                        message: e.to_string(),
+                    })?;
+                lp.required_shapes = shapes;
+            }
         }
 
         // Step 9: update lockfile.

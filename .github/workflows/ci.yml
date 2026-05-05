@@ -258,6 +258,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Build tau binary first
+        # Layer 3 tests spawn `tau resolve --check-sandbox` via the
+        # CARGO_BIN_EXE_tau env var. Building tau-cli first ensures the
+        # binary exists in target/debug for the helper to discover.
+        run: cargo build -p tau-cli --bin tau
       - name: Test tau-plugin-compat (integration-tests feature)
         # Layer 3 tests run; Layer 4 container/native tests are
         # #[ignore]'d pending sub-project D's e2e infrastructure.

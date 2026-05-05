@@ -268,16 +268,12 @@ where
     R: tokio::io::AsyncRead + Unpin,
 {
     let mut all: Vec<Capability> = Vec::new();
-    let mut msg_id: u32 = 2;
 
     let params_bytes = rmp_serde::to_vec::<Vec<()>>(&Vec::new()).map_err(|e| {
         CrossCheckError::HandshakeFailed(format!("encode tool.describe_capabilities params: {e}"))
     })?;
 
-    for method in methods.iter().filter(|m| m.starts_with("tool.")) {
-        let id = msg_id;
-        msg_id += 1;
-
+    for (id, method) in (2_u32..).zip(methods.iter().filter(|m| m.starts_with("tool."))) {
         let req_frame = Frame::Request {
             id,
             method: TOOL_DESCRIBE_CAPABILITIES_METHOD.to_string(),
