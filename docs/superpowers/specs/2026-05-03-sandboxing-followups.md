@@ -7,6 +7,8 @@
 > **Update (2026-05-04):** Sub-project A (sandbox activation by default) shipped. See [its design doc](2026-05-04-sandbox-activation-design.md) and [ADR-0015](../../decisions/0015-sandbox-activation.md). Sub-project A's "Status" + "Scope" + "Test coverage to add" sections below are kept for historical reference but are now closed.
 >
 > **Update (2026-05-04):** Sub-project B (plugin compatibility verification) shipped. See [its design doc](2026-05-04-plugin-compat-design.md) and [ADR-0016](../../decisions/0016-plugin-compat-verification.md). Sub-project D's *foundation* (controlled-environment binary + landlock-symlink-fix in `tau-sandbox-native::light::resolve_symlinks_for_landlock`) was absorbed into B; D's remainder is to re-introduce the 5 e2e test files and build the port-aware driver for the 10 `#[ignore]`'d Layer 4 tests in `tau-plugin-compat/tests/layer4_*.rs`. The 8 remaining sub-projects are D (reduced scope), E, F, G, H, I, J, K — plus the closed-inline C.
+>
+> **Update (2026-05-06):** Sub-project D (e2e landlock CI integration + port-aware Layer 4 driver) shipped. See [its design doc](2026-05-05-e2e-landlock-design.md) and [ADR-0017](../../decisions/0017-e2e-landlock-and-driver.md). The 5 e2e kernel-enforcement files are re-introduced and passing on Linux CI; the port-aware driver foundation is in place. **However:** the 10 Layer 4 plugin-compat `#[ignore]`'s did NOT flip — plugins exec under strict-tier landlock but EOF before handshake (their startup-IO surface needs per-plugin cataloging). That work is deferred to a D-followup or sub-project F. Two priority-12 native-adapter bugs were caught and fixed during D (Execute access flag + binary-parent auto-add); D also delivered GitHub Actions caching infrastructure as a bonus. The 7 remaining sub-projects are E, F, G, H, I, J, K — plus the closed-inline C.
 
 ## Test coverage assessment
 
@@ -144,32 +146,40 @@ The original scope assumed the priority-12 chain model (`select_adapter` against
 
 ---
 
-### Sub-project D — End-to-end landlock CI integration
+### ~~Sub-project D — End-to-end landlock CI integration~~ ✅ DONE 2026-05-06 (PARTIAL)
 
-**One-line:** Establish a reliable CI infrastructure for testing real-kernel landlock + seccomp + namespace behavior on Linux.
+**Status:** Shipped 2026-05-06 — see [spec](2026-05-05-e2e-landlock-design.md) and [ADR-0017](../../decisions/0017-e2e-landlock-and-driver.md). PR #25.
 
-**Status:** Reduced scope as of 2026-05-04 — sub-project B absorbed D's foundation. Remaining work: re-introduce the 5 removed e2e test files + build the port-aware driver that flips the 10 `#[ignore]`'d Layer 4 tests in `tau-plugin-compat/tests/layer4_*.rs`.
+**What landed:**
 
-**Foundation already shipped via B:**
-- ~~Investigate landlock + symlink resolution on modern Ubuntu.~~ ✅ Resolved via `tau-sandbox-native/src/light.rs::resolve_symlinks_for_landlock` (canonicalize + add both symlink and canonical target to ruleset).
-- ~~Build a controlled-environment test binary.~~ ✅ Lives at `crates/tau-plugin-compat/fixtures/controlled-env-binary/` (statically linked, isolated from workspace).
+- **5 kernel-enforcement e2e tests** (`light_landlock.rs`, `strict_seccomp.rs`, `strict_net_filter.rs`, `strict_exec_gating.rs` `#[ignore]`'d pending E, `tau-runtime/tests/sandbox_native.rs`) — all passing on Linux CI.
+- **Port-aware test driver** at `tau-plugin-compat/src/driver.rs` wrapping the public `tau_runtime::plugin_host::load_*` functions — foundation in place for future Layer 4 flips.
+- **Two priority-12 native-adapter bug fixes** (real wins not in original scope): (1) `AccessFs::Execute` granted in `install_landlock`; (2) auto-add the spawned binary's parent dir to landlock's read_paths.
+- **GitHub Actions caching** via `Swatinem/rust-cache@v2` + new `.github/actions/setup-rust` composite action; `CARGO_INCREMENTAL=0` workflow-level for sccache compatibility; `CLAUDE.md` Rule 4 added.
 
-**Remaining scope:**
-1. Re-introduce the 5 removed test files using the controlled binary:
-   - `tests/light_landlock.rs` (allowed read + blocked read).
-   - `tests/strict_seccomp.rs` (block socket without Network capability).
-   - `tests/strict_exec_gating.rs` (per-command exec — defer until landlock V2 lands).
-   - `tests/strict_net_filter.rs` (allowed socket with Network capability).
-   - `tests/sandbox_native.rs` (in tau-runtime, runtime e2e).
-2. Build a port-aware driver to flip the 10 `#[ignore]`'d Layer 4 tests in `tau-plugin-compat/tests/layer4_container.rs` and `layer4_native.rs`. The driver must (a) handshake with the correct port for the plugin (tool / llm_backend / storage), (b) for HTTP plugins drive cassette-replay through a sandboxed plugin process, (c) for tool plugins drive a real tool invocation.
-3. CI workflow: confirm the existing `cargo test ... --features integration-tests --tests -- --ignored` step passes reliably on `ubuntu-latest`.
-4. Document supported kernel versions + distro testing matrix.
+**What did NOT land (deferred):**
 
-**Test coverage to add:** 5+ real-kernel e2e tests + 10 flipped-`#[ignore]` Layer 4 plugin compat tests, gated on `integration-tests` feature, run only on Linux CI.
+- **The 10 Layer 4 plugin-compat `#[ignore]`'s persist.** Plugins under strict-tier landlock now successfully spawn and exec (after the bug fixes above), but EOF before sending the meta.handshake response. Each plugin's startup touches filesystem state (config dirs, /tmp, /proc, etc.) that's outside the test's narrow plan. Cataloging per-plugin startup-IO and deriving correct plans is the natural next sub-project — either a D-followup or rolled into sub-project F.
 
-**Estimated scope:** 1 week (foundation already shipped via sub-project B; remaining is mostly mechanical — re-introduce removed tests + write port-aware driver).
+**Branch protection:** rises 27 → 29 (added `test (tau-sandbox-native e2e / linux)` + `test (tau-runtime e2e / linux)`).
 
-**Dependencies:** Sub-project B (foundation already shipped — controlled-env binary + symlink fix).
+### Spinoff — Layer 4 plugin-compat startup-IO cataloging (deferred from D)
+
+**One-line:** Make the 10 `#[ignore]`'d Layer 4 plugin-compat tests in `tau-plugin-compat/tests/layer4_*.rs` actually run.
+
+**Status:** Open. The driver foundation is in place (`tau-plugin-compat/src/driver.rs`) — what's missing is per-plugin startup-IO cataloging. The current test plans cover application-data access only; plugins also need filesystem access for runtime state (config dirs, /tmp, /proc, etc.) which the plans don't grant.
+
+**Scope:**
+1. For each of the 5 real plugins (anthropic, ollama, openai, fs-read, shell), strace or otherwise observe the syscalls/path accesses during plugin startup before handshake.
+2. Codify the observed startup-IO into per-plugin `SandboxPlan` augmentations or test fixture helpers.
+3. Flip each Layer 4 `#[ignore]` once its plan grants the necessary access.
+4. The 3 container × HTTP plugin tests additionally need sub-project F's per-host network filter — those flip when F lands, not during this spinoff.
+
+**Test coverage to flip:** 7 of 10 in this spinoff (4 tool plugins × {native, container} + 3 native HTTP plugins via cassette replay). The 3 container HTTP tests pair with F.
+
+**Estimated scope:** 1 week (mostly per-plugin investigation; could pair with sub-project F if scheduled together).
+
+**Dependencies:** Sub-projects B and D (foundation shipped). Sub-project F for the 3 deferred container HTTP tests.
 
 ---
 
