@@ -192,11 +192,18 @@ fn install_landlock(
         "/usr/lib64",
         "/etc",
     ];
+    // Note: we grant `Execute` alongside `ReadFile | ReadDir` so the
+    // kernel can both READ the binary file (to load it into memory) AND
+    // EXEC it. The Ruleset handles ALL `AccessFs` flags via `from_all`
+    // above; without `Execute` in the granted bitflags, landlock denies
+    // exec of binaries inside the path with EACCES — even if the same
+    // binary is readable. (Priority-12 v0.1 oversight surfaced by
+    // sub-project D's e2e tests on Ubuntu CI.)
     for sys_path in system_read_paths {
         if let Ok(fd) = PathFd::new(sys_path) {
             ruleset = ruleset.add_rule(PathBeneath::new(
                 fd,
-                make_bitflags!(AccessFs::{ReadFile | ReadDir}),
+                make_bitflags!(AccessFs::{ReadFile | ReadDir | Execute}),
             ))?;
         }
         // Silently skip paths that don't exist on this system.
@@ -206,7 +213,7 @@ fn install_landlock(
         let fd = PathFd::new(p).map_err(|e| format!("landlock read path {}: {e}", p.display()))?;
         ruleset = ruleset.add_rule(PathBeneath::new(
             fd,
-            make_bitflags!(AccessFs::{ReadFile | ReadDir}),
+            make_bitflags!(AccessFs::{ReadFile | ReadDir | Execute}),
         ))?;
     }
 
