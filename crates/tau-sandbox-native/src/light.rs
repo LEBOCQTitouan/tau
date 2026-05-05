@@ -433,7 +433,16 @@ mod tests {
         ]));
         let cmd = Command::new("/bin/true");
         let (read, write) = collect_landlock_paths(&plan, &cmd).unwrap();
-        assert!(read.is_empty());
+        // Non-filesystem capabilities don't contribute to fs read paths.
+        // BUT the spawned binary's parent directory is auto-added so the
+        // kernel can read+exec the binary itself (see comment in
+        // collect_landlock_paths). For Command::new("/bin/true"), the
+        // parent is "/bin" — that's the only expected entry.
+        assert!(
+            read.iter().all(|p| p == std::path::Path::new("/bin")
+                || p.canonicalize().ok() == Some(std::path::PathBuf::from("/usr/bin"))),
+            "read should contain only auto-added /bin (or canonical /usr/bin), got: {read:?}"
+        );
         assert!(write.is_empty());
     }
 
