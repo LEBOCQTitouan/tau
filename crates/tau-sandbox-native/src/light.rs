@@ -42,20 +42,37 @@ pub(crate) fn collect_landlock_paths(
 
     // NEW: pass each path through symlink resolution; landlock V1 needs
     // both the link and the canonical target in the ruleset.
-    let read_paths = read_paths
+    let mut read_paths: Vec<std::path::PathBuf> = read_paths
         .into_iter()
         .map(|p| resolve_symlinks_for_landlock(&p))
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .flatten()
         .collect();
-    let write_paths = write_paths
+    let write_paths: Vec<std::path::PathBuf> = write_paths
         .into_iter()
         .map(|p| resolve_symlinks_for_landlock(&p))
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .flatten()
         .collect();
+
+    // Auto-add the spawned binary's parent directory to read_paths so the
+    // kernel can READ the binary file to load it AND EXEC it. Without this,
+    // plugins built into a workspace's `target/release/` (or anywhere
+    // outside /bin, /usr/bin, /lib, etc.) fail to exec under the native
+    // adapter with EACCES — the plan's capabilities cover application data
+    // access, NOT the binary's own load. Applies to both Light and Strict
+    // tiers since both share this collect helper.
+    if let Some(prog_parent) = std::path::Path::new(cmd.get_program()).parent() {
+        if !prog_parent.as_os_str().is_empty() {
+            for resolved in resolve_symlinks_for_landlock(prog_parent).unwrap_or_default() {
+                if !read_paths.contains(&resolved) {
+                    read_paths.push(resolved);
+                }
+            }
+        }
+    }
 
     Ok((read_paths, write_paths))
 }
@@ -84,6 +101,9 @@ pub(crate) fn apply_landlock(
     plan: &SandboxPlan,
     cmd: &mut Command,
 ) -> Result<SandboxHandle, SandboxError> {
+    // collect_landlock_paths now also auto-adds the spawned binary's parent
+    // directory so the kernel can read+exec the binary regardless of where
+    // it lives in the filesystem. See collect_landlock_paths for the comment.
     let (read_paths, write_paths) = collect_landlock_paths(plan, cmd)?;
 
     // KNOWN-LIMITATION: this pre_exec closure runs in the child between fork
@@ -192,11 +212,18 @@ fn install_landlock(
         "/usr/lib64",
         "/etc",
     ];
+    // Note: we grant `Execute` alongside `ReadFile | ReadDir` so the
+    // kernel can both READ the binary file (to load it into memory) AND
+    // EXEC it. The Ruleset handles ALL `AccessFs` flags via `from_all`
+    // above; without `Execute` in the granted bitflags, landlock denies
+    // exec of binaries inside the path with EACCES — even if the same
+    // binary is readable. (Priority-12 v0.1 oversight surfaced by
+    // sub-project D's e2e tests on Ubuntu CI.)
     for sys_path in system_read_paths {
         if let Ok(fd) = PathFd::new(sys_path) {
             ruleset = ruleset.add_rule(PathBeneath::new(
                 fd,
-                make_bitflags!(AccessFs::{ReadFile | ReadDir}),
+                make_bitflags!(AccessFs::{ReadFile | ReadDir | Execute}),
             ))?;
         }
         // Silently skip paths that don't exist on this system.
@@ -206,7 +233,7 @@ fn install_landlock(
         let fd = PathFd::new(p).map_err(|e| format!("landlock read path {}: {e}", p.display()))?;
         ruleset = ruleset.add_rule(PathBeneath::new(
             fd,
-            make_bitflags!(AccessFs::{ReadFile | ReadDir}),
+            make_bitflags!(AccessFs::{ReadFile | ReadDir | Execute}),
         ))?;
     }
 
@@ -406,7 +433,16 @@ mod tests {
         ]));
         let cmd = Command::new("/bin/true");
         let (read, write) = collect_landlock_paths(&plan, &cmd).unwrap();
-        assert!(read.is_empty());
+        // Non-filesystem capabilities don't contribute to fs read paths.
+        // BUT the spawned binary's parent directory is auto-added so the
+        // kernel can read+exec the binary itself (see comment in
+        // collect_landlock_paths). For Command::new("/bin/true"), the
+        // parent is "/bin" — that's the only expected entry.
+        assert!(
+            read.iter().all(|p| p == std::path::Path::new("/bin")
+                || p.canonicalize().ok() == Some(std::path::PathBuf::from("/usr/bin"))),
+            "read should contain only auto-added /bin (or canonical /usr/bin), got: {read:?}"
+        );
         assert!(write.is_empty());
     }
 

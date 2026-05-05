@@ -30,3 +30,5 @@
 //! Helpers added in Tasks 6-8 will live alongside this doc-comment.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
+
+pub mod driver;

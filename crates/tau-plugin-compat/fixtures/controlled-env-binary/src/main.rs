@@ -1,19 +1,20 @@
 //! Controlled-environment test binary for sub-project B's landlock
-//! e2e tests.
+//! e2e tests, extended in sub-project D for seccomp + exec coverage.
 //!
-//! Designed to perform predictable, side-effect-free I/O so landlock V1
-//! path resolution can be exercised without `/bin → /usr/bin` symlink
-//! quirks or dynamic linker probing surprises.
+//! # Mode dispatch
 //!
-//! # Behavior
+//! `TAU_FIXTURE_MODE` env var selects the binary's behavior:
 //!
-//! 1. Reads `${TAU_FIXTURE_INPUT_PATH}` env var. If set, attempts to
-//!    read that file and writes the first 256 bytes (or fewer if smaller)
-//!    to stdout, prefixed with `READ_OK ` and a trailing newline.
-//! 2. If `${TAU_FIXTURE_INPUT_PATH}` is not set, writes
-//!    `CONTROLLED_ENV_OK\n` to stdout.
-//! 3. Exits 0 on success; exits non-zero with a diagnostic on stderr
-//!    on any I/O error.
+//! - `read` (or unset, when `TAU_FIXTURE_INPUT_PATH` is set):
+//!   Read up to 256 bytes from `TAU_FIXTURE_INPUT_PATH`, emit
+//!   `READ_OK <bytes>\n` to stdout, exit 0.
+//! - `open-socket`: call `socket(AF_INET, SOCK_STREAM, 0)`. On success,
+//!   emit `SOCKET_OK\n` and exit 0. On EACCES / EPERM, emit error and
+//!   exit 1. SIGSYS from seccomp → no output, signal exit.
+//! - `exec`: spawn `${TAU_FIXTURE_EXEC_CMD}` with no args, proxy its
+//!   stdout, exit with its exit code.
+//! - `default` (or no env vars set): emit `CONTROLLED_ENV_OK\n`,
+//!   exit 0.
 //!
 //! Statically-linked release builds avoid landlock false positives on
 //! Ubuntu CI's `/bin → /usr/bin` symlink layout.
@@ -21,11 +22,27 @@
 use std::io::{Read, Write};
 
 fn main() {
+    let mode = std::env::var("TAU_FIXTURE_MODE").ok();
     let path = std::env::var("TAU_FIXTURE_INPUT_PATH").ok();
 
-    let result = match path {
-        Some(p) => read_and_emit(&p),
-        None => emit_default(),
+    let result = match mode.as_deref() {
+        Some("read") => match path {
+            Some(p) => read_and_emit(&p),
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "TAU_FIXTURE_MODE=read requires TAU_FIXTURE_INPUT_PATH",
+            )),
+        },
+        Some("open-socket") => open_socket(),
+        Some("exec") => exec_proxy(),
+        Some("default") | None => match path {
+            Some(p) => read_and_emit(&p),
+            None => emit_default(),
+        },
+        Some(other) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("unknown TAU_FIXTURE_MODE: {other}"),
+        )),
     };
 
     if let Err(e) = result {
@@ -52,5 +69,36 @@ fn emit_default() -> std::io::Result<()> {
     let mut handle = stdout.lock();
     handle.write_all(b"CONTROLLED_ENV_OK\n")?;
     handle.flush()?;
+    Ok(())
+}
+
+fn open_socket() -> std::io::Result<()> {
+    // Use libc directly to avoid pulling std::net which may add dynamic deps.
+    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+    if fd < 0 {
+        let err = std::io::Error::last_os_error();
+        return Err(err);
+    }
+    unsafe { libc::close(fd) };
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    handle.write_all(b"SOCKET_OK\n")?;
+    handle.flush()?;
+    Ok(())
+}
+
+fn exec_proxy() -> std::io::Result<()> {
+    let cmd = std::env::var("TAU_FIXTURE_EXEC_CMD").map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "TAU_FIXTURE_MODE=exec requires TAU_FIXTURE_EXEC_CMD",
+        )
+    })?;
+    let output = std::process::Command::new(&cmd).output()?;
+    std::io::stdout().write_all(&output.stdout)?;
+    std::io::stdout().flush()?;
+    if !output.status.success() {
+        std::process::exit(output.status.code().unwrap_or(1));
+    }
     Ok(())
 }

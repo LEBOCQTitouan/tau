@@ -18,6 +18,7 @@ panic = "abort"
 opt-level = 0
 
 [dependencies]
+libc = "0.2"
 
 # Standalone Cargo project — opt out of being absorbed into the parent
 # workspace (which is rooted at /Users/titouanlebocq/code/tau/Cargo.toml).

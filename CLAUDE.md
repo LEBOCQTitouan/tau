@@ -36,7 +36,26 @@ Use `-p <crate>`. Never invoke cargo from the workspace root without `-p`.
 
 Format: `timeout 300 env CARGO_TARGET_DIR=target/main cargo test -p tau-domain`
 
-## Rule 4: Before invoking cargo, check for active builds
+## Rule 4: Always set CARGO_INCREMENTAL=0
+
+Cargo's incremental compilation defaults to `1` (on) for the dev
+profile. sccache cannot deduplicate incremental-compilation outputs
+because they embed compilation-state metadata, so leaving incremental
+on means **0% Rust cache hit rate** through sccache (verified —
+3,907 hits / 2,854 misses without `CARGO_INCREMENTAL=0`, all 2 of the
+hits were Rust). Disabling incremental restores normal sccache
+caching.
+
+Per-agent target dirs (Rule 1) plus sccache (with incremental
+disabled) gives the best of both worlds: each agent has an isolated
+target dir that doesn't collide with the main agent's, but the
+underlying rustc cache is shared via sccache.
+
+Combine with Rule 1:
+
+    timeout 300 env CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=target/agent-<role> cargo test -p <crate>
+
+## Rule 5: Before invoking cargo, check for active builds
 
 If another cargo process is running on a shared target dir, your build
 will queue on the lock. Quick check:
@@ -59,4 +78,4 @@ contention without sacrificing speed.
 
 Copy-paste template, fill in `<role>`, `<crate>`, and the actual cargo args:
 
-    timeout 300 env CARGO_TARGET_DIR=target/agent-<role> cargo test -p <crate>
+    timeout 300 env CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=target/agent-<role> cargo test -p <crate>
