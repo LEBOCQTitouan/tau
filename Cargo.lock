@@ -2880,10 +2880,13 @@ dependencies = [
  "tau-cli",
  "tau-domain",
  "tau-pkg",
+ "tau-plugin-protocol",
+ "tau-ports",
  "tau-runtime",
  "tau-sandbox-container",
  "tau-sandbox-native",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
 ]
 

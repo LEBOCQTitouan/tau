@@ -17,8 +17,12 @@ integration-tests = []
 [dependencies]
 tau-domain = { path = "../tau-domain", features = ["serde"] }
 tau-pkg = { path = "../tau-pkg" }
+tau-plugin-protocol = { path = "../tau-plugin-protocol" }
+tau-ports = { path = "../tau-ports" }
 tau-runtime = { path = "../tau-runtime" }
 tau-sandbox-container = { path = "../tau-sandbox-container" }
+serde_json = "1"
+thiserror = { workspace = true }
 # tau-sandbox-native is Linux-only (per its lib.rs cfg gating); pull it in
 # via target-specific deps so this crate still compiles on macOS/Windows.
 
