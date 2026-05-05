@@ -20,7 +20,6 @@
 
 #![cfg(all(feature = "integration-tests", target_os = "linux"))]
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -251,6 +250,7 @@ async fn sandbox_plan_validation_runs_pre_spawn() {
     if let RuntimeError::SandboxValidationFailed {
         plugin: plugin_name,
         errors,
+        ..
     } = &err
     {
         assert!(
