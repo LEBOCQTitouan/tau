@@ -6,3 +6,6 @@ description = "Anthropic Claude (Messages API) backend for tau."
 provides = "llm_backend"
 kind     = "rust-cargo"
 bin      = "anthropic-plugin"
+
+[sandbox]
+required_tier = "strict"

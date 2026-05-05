@@ -2856,16 +2856,35 @@ dependencies = [
  "fs4",
  "humantime-serde",
  "proptest",
+ "rmp-serde",
  "semver",
  "serde",
  "serde_json",
  "sha2",
  "tau-domain",
+ "tau-plugin-protocol",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "toml",
  "tracing",
  "walkdir",
+]
+
+[[package]]
+name = "tau-plugin-compat"
+version = "0.0.0"
+dependencies = [
+ "assert_cmd",
+ "serde_json",
+ "tau-cli",
+ "tau-domain",
+ "tau-pkg",
+ "tau-runtime",
+ "tau-sandbox-container",
+ "tau-sandbox-native",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

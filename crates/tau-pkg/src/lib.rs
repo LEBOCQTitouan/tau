@@ -25,6 +25,7 @@ pub mod lockfile;
 pub mod manifest;
 pub mod registry;
 pub mod resolve;
+pub mod sandbox_check;
 pub mod scope;
 pub mod source_list;
 pub mod tree_hash;

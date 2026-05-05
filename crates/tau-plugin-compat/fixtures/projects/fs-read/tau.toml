@@ -1,0 +1,11 @@
+[project]
+name = "compat-test-fs-read"
+
+[agents.tester]
+display_name = "fs-read compat test agent"
+package      = "demo@^0.1"
+llm_backend  = "anthropic"
+
+[[agents.tester.requires.tools]]
+name    = "fs-read"
+source  = "../../../tau-plugins/fs-read"

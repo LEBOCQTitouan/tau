@@ -10,3 +10,6 @@ bin      = "shell-plugin"
 [[capabilities]]
 kind = "process.spawn"
 commands = []
+
+[sandbox]
+required_tier = "strict"

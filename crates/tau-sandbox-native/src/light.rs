@@ -37,10 +37,27 @@ pub(crate) fn collect_landlock_paths(
             message: format!("cwd: {e}"),
         })?;
 
-    Ok((
-        resolve_anchors(&read_strs, &cwd),
-        resolve_anchors(&write_strs, &cwd),
-    ))
+    let read_paths = resolve_anchors(&read_strs, &cwd);
+    let write_paths = resolve_anchors(&write_strs, &cwd);
+
+    // NEW: pass each path through symlink resolution; landlock V1 needs
+    // both the link and the canonical target in the ruleset.
+    let read_paths = read_paths
+        .into_iter()
+        .map(|p| resolve_symlinks_for_landlock(&p))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+    let write_paths = write_paths
+        .into_iter()
+        .map(|p| resolve_symlinks_for_landlock(&p))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+
+    Ok((read_paths, write_paths))
 }
 
 /// Install a landlock ruleset from pre-resolved path lists.
@@ -113,6 +130,35 @@ fn resolve_anchors(paths: &[String], cwd: &std::path::Path) -> Vec<PathBuf> {
             PathBuf::from(trimmed)
         })
         .collect()
+}
+
+/// Resolve symlinks for landlock ruleset entries.
+///
+/// Landlock V1 path resolution does not follow symlinks at lookup time;
+/// installing a rule for `/bin` does NOT grant access to `/usr/bin`
+/// when `/bin` is a symlink (the typical Ubuntu layout). Sub-project B
+/// addresses this by adding BOTH the symlink path and its canonical
+/// target to the ruleset.
+///
+/// Returns one path (the input verbatim) for non-symlinks, two paths
+/// (input + canonical target) for symlinks. Returns
+/// `SandboxError::WrapFailed` if `path` cannot be canonicalized
+/// (typically: doesn't exist, permission denied).
+fn resolve_symlinks_for_landlock(
+    path: &std::path::Path,
+) -> Result<Vec<std::path::PathBuf>, SandboxError> {
+    let canonical = std::fs::canonicalize(path).map_err(|e| SandboxError::WrapFailed {
+        message: format!(
+            "could not canonicalize path '{}' for landlock ruleset: {e}",
+            path.display()
+        ),
+    })?;
+
+    if canonical == path {
+        Ok(vec![path.to_path_buf()])
+    } else {
+        Ok(vec![path.to_path_buf(), canonical])
+    }
 }
 
 fn install_landlock(
@@ -290,38 +336,65 @@ mod tests {
 
     #[test]
     fn collect_landlock_paths_uses_command_cwd_when_set() {
+        // Use a real directory that exists so symlink resolution succeeds.
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let src = tmp.path().join("src");
+        std::fs::create_dir(&src).expect("mkdir src");
         let plan = plan_from(serde_json::json!([
             { "kind": "fs.read", "paths": ["${PROJECT}/src"] },
         ]));
         let mut cmd = Command::new("/bin/true");
-        cmd.current_dir("/explicit/cwd");
+        cmd.current_dir(tmp.path());
         let (read, write) = collect_landlock_paths(&plan, &cmd).unwrap();
-        assert_eq!(read, vec![PathBuf::from("/explicit/cwd/src")]);
+        // The resolved path must contain the src directory we created.
+        assert!(
+            read.iter().any(|p| p.ends_with("src")),
+            "expected src in read paths, got {read:?}"
+        );
         assert!(write.is_empty());
     }
 
     #[test]
     fn collect_landlock_paths_falls_back_to_env_cwd_when_command_cwd_unset() {
+        // Use a real path that exists so symlink resolution succeeds.
         let plan = plan_from(serde_json::json!([
-            { "kind": "fs.read", "paths": ["/tmp/explicit"] },
+            { "kind": "fs.read", "paths": ["/tmp"] },
         ]));
         let cmd = Command::new("/bin/true");
         // No current_dir set → falls back to std::env::current_dir().
         let (read, _) = collect_landlock_paths(&plan, &cmd).unwrap();
-        assert_eq!(read, vec![PathBuf::from("/tmp/explicit")]);
+        // /tmp must appear in the read paths (may expand to canonical too).
+        assert!(
+            read.iter().any(|p| p == std::path::Path::new("/tmp")),
+            "expected /tmp in read paths, got {read:?}"
+        );
     }
 
     #[test]
     fn collect_landlock_paths_separates_read_and_write() {
+        // Use real existing directories so symlink resolution succeeds.
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let r1 = tmp.path().join("r1");
+        let r2 = tmp.path().join("r2");
+        let w1 = tmp.path().join("w1");
+        let w2 = tmp.path().join("w2");
+        for d in [&r1, &r2, &w1, &w2] {
+            std::fs::create_dir(d).expect("mkdir");
+        }
         let plan = plan_from(serde_json::json!([
-            { "kind": "fs.read", "paths": ["/r1"] },
-            { "kind": "fs.write", "paths": ["/w1", "/w2"] },
-            { "kind": "fs.read", "paths": ["/r2"] },
+            { "kind": "fs.read", "paths": [r1.to_str().unwrap()] },
+            { "kind": "fs.write", "paths": [w1.to_str().unwrap(), w2.to_str().unwrap()] },
+            { "kind": "fs.read", "paths": [r2.to_str().unwrap()] },
         ]));
         let cmd = Command::new("/bin/true");
         let (read, write) = collect_landlock_paths(&plan, &cmd).unwrap();
-        assert_eq!(read, vec![PathBuf::from("/r1"), PathBuf::from("/r2")]);
-        assert_eq!(write, vec![PathBuf::from("/w1"), PathBuf::from("/w2")]);
+        // Each declared path must appear in the correct list.
+        assert!(read.iter().any(|p| p == &r1), "r1 must be in read");
+        assert!(read.iter().any(|p| p == &r2), "r2 must be in read");
+        assert!(write.iter().any(|p| p == &w1), "w1 must be in write");
+        assert!(write.iter().any(|p| p == &w2), "w2 must be in write");
+        // Write paths must not appear in read list.
+        assert!(!read.iter().any(|p| p == &w1), "w1 must not be in read");
     }
 
     #[test]
@@ -361,5 +434,85 @@ mod tests {
         // No assertion needed; existence of `WorkingContext` here forces
         // the symbol to be reachable.
         let _: Option<WorkingContext> = None;
+    }
+
+    // ---------- resolve_symlinks_for_landlock ----------
+
+    #[test]
+    fn resolve_symlinks_non_symlink_returns_single_entry() {
+        // /tmp is not a symlink on most modern Linux distros; if the test
+        // runs on a system where it is, the assert relaxes to "at least
+        // one entry".
+        let path = std::path::Path::new("/tmp");
+        let resolved = resolve_symlinks_for_landlock(path).expect("/tmp must canonicalize");
+        assert!(!resolved.is_empty());
+        assert!(resolved.contains(&path.to_path_buf()));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn resolve_symlinks_symlink_includes_canonical() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let target = tmp.path().join("target");
+        std::fs::create_dir(&target).expect("mkdir target");
+        let link = tmp.path().join("link");
+        symlink(&target, &link).expect("symlink");
+
+        let resolved = resolve_symlinks_for_landlock(&link).expect("symlink must canonicalize");
+        // Both the symlink path and the canonical target are returned.
+        assert_eq!(resolved.len(), 2);
+        assert!(resolved.contains(&link));
+        assert!(resolved
+            .iter()
+            .any(|p| p.canonicalize().ok() == Some(target.canonicalize().expect("canon target"))));
+    }
+
+    #[test]
+    fn resolve_symlinks_missing_path_returns_wrap_failed() {
+        let nonexistent = std::path::Path::new("/this/path/does/not/exist/12345");
+        let result = resolve_symlinks_for_landlock(nonexistent);
+        match result {
+            Err(SandboxError::WrapFailed { message }) => {
+                assert!(
+                    message.contains("canonicalize"),
+                    "WrapFailed message should mention canonicalize, got: {message}"
+                );
+                assert!(
+                    message.contains("/this/path/does/not/exist/12345"),
+                    "WrapFailed message should mention the failing path, got: {message}"
+                );
+            }
+            other => panic!("expected WrapFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn collect_landlock_paths_includes_canonical_for_symlinks() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let target = tmp.path().join("target");
+        std::fs::create_dir(&target).expect("mkdir target");
+        let link = tmp.path().join("link");
+        symlink(&target, &link).expect("symlink");
+
+        // Build a SandboxPlan that asks for read access at the symlink path.
+        let plan_json = serde_json::json!({
+            "capabilities": [{
+                "kind": "fs.read",
+                "paths": [link.to_str().unwrap()]
+            }],
+            "context": null,
+            "limits": null,
+        });
+        let plan: tau_ports::SandboxPlan = serde_json::from_value(plan_json).expect("valid plan");
+        let cmd = Command::new("/bin/true");
+        let (read_paths, _write_paths) = collect_landlock_paths(&plan, &cmd).expect("collect");
+        // Both the link path and the canonical target should appear.
+        assert!(read_paths.iter().any(|p| p == &link));
+        assert!(read_paths
+            .iter()
+            .any(|p| p.canonicalize().ok() == Some(target.canonicalize().unwrap())));
     }
 }

@@ -1,9 +1,11 @@
-//! Guided multi-option error renderer for sandbox resolution failures.
+//! Guided multi-option error renderer for sandbox resolution failures
+//! and Layer 2 install-time cross-check errors.
 //!
 //! Spec §6 of 2026-05-04-sandbox-activation-design.md.
 
 use std::fmt::Write as _;
 
+use tau_pkg::sandbox_check::CrossCheckError;
 use tau_runtime::sandbox::{ResolutionError, ResolutionRejection};
 
 /// Render a [`ResolutionError`] as a guided multi-option error message.
@@ -105,6 +107,114 @@ pub fn render_plugin_tier_mismatch(
         out,
         "    - the plugin author can reduce required_tier (NOT recommended for security-sensitive plugins)"
     );
+    out
+}
+
+/// Render a `CrossCheckError` from `tau install`'s Layer 2 step 8.7
+/// into multi-line guided diagnostic output.
+///
+/// The output format mirrors `render_resolution_error`: a leading "✗"
+/// marker, the discrepancy laid out, and a numbered "Resolution"
+/// section telling the user how to recover.
+///
+/// # Sub-project B Task 10
+pub fn render_cross_check_error(err: &CrossCheckError) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "✗ install aborted: plugin capability cross-check failed"
+    );
+    let _ = writeln!(out);
+
+    match err {
+        CrossCheckError::SpawnFailed(msg) => {
+            let _ = writeln!(out, "  Could not spawn plugin binary: {msg}");
+            let _ = writeln!(out);
+            let _ = writeln!(out, "  Resolution:");
+            let _ = writeln!(
+                out,
+                "    1. Verify the binary builds standalone (cargo build)."
+            );
+            let _ = writeln!(
+                out,
+                "    2. Verify the binary runs (./target/debug/<plugin>)."
+            );
+            let _ = writeln!(
+                out,
+                "    3. Once it runs, retry: tau install --force <plugin>"
+            );
+        }
+        CrossCheckError::HandshakeFailed(msg) => {
+            let _ = writeln!(out, "  Plugin handshake failed: {msg}");
+            let _ = writeln!(out);
+            let _ = writeln!(out, "  Resolution:");
+            let _ = writeln!(
+                out,
+                "    1. Check that the plugin's binary speaks the expected protocol."
+            );
+            let _ = writeln!(
+                out,
+                "    2. Inspect plugin stderr (run the binary directly)."
+            );
+            let _ = writeln!(
+                out,
+                "    3. After fixing, retry: tau install --force <plugin>"
+            );
+        }
+        CrossCheckError::BinaryClaimsExtra { plugin, claimed } => {
+            let _ = writeln!(
+                out,
+                "  Plugin '{plugin}' calls tool.describe_capabilities and asks for:"
+            );
+            let _ = writeln!(out, "    - {claimed:?}");
+            let _ = writeln!(out);
+            let _ = writeln!(
+                out,
+                "  But the manifest's [[capabilities]] block does not include this capability."
+            );
+            let _ = writeln!(out);
+            let _ = writeln!(out, "  Resolution:");
+            let _ = writeln!(
+                out,
+                "    1. Add the missing capability to the plugin manifest's [[capabilities]] block."
+            );
+            let _ = writeln!(
+                out,
+                "    2. Or remove the capability from the binary's tool.describe_capabilities surface."
+            );
+            let _ = writeln!(out, "    3. Then retry: tau install --force <plugin>");
+        }
+        CrossCheckError::ManifestDeclaresUnused { plugin, declared } => {
+            let _ = writeln!(out, "  Manifest of '{plugin}' declares this capability:");
+            let _ = writeln!(out, "    - {declared:?}");
+            let _ = writeln!(out);
+            let _ = writeln!(
+                out,
+                "  But the binary's tool.describe_capabilities surface does not request it."
+            );
+            let _ = writeln!(out);
+            let _ = writeln!(out, "  Resolution:");
+            let _ = writeln!(
+                out,
+                "    1. Remove the unused capability from the plugin manifest."
+            );
+            let _ = writeln!(
+                out,
+                "    2. Or extend the binary to actually use this capability via tool.describe_capabilities."
+            );
+            let _ = writeln!(out, "    3. Then retry: tau install --force <plugin>");
+        }
+        // CrossCheckError is #[non_exhaustive]; future variants render as
+        // a generic line.
+        _ => {
+            let _ = writeln!(out, "  {err}");
+            let _ = writeln!(out);
+            let _ = writeln!(out, "  Resolution:");
+            let _ = writeln!(out, "    1. Inspect the plugin manifest and binary.");
+            let _ = writeln!(out, "    2. Then retry: tau install --force <plugin>");
+        }
+    }
+
     out
 }
 

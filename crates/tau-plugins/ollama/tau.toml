@@ -6,3 +6,6 @@ description = "Ollama (local LLM runner) backend for tau."
 provides = "llm_backend"
 kind     = "rust-cargo"
 bin      = "ollama-plugin"
+
+[sandbox]
+required_tier = "strict"

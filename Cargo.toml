@@ -13,6 +13,7 @@ members = [
     "crates/tau-plugin-sdk",
     "crates/tau-plugin-test-support",
     "crates/tau-plugin-conformance",
+    "crates/tau-plugin-compat",
     "crates/tau-plugins/echo-llm",
     "crates/tau-plugins/echo-tool",
     "crates/tau-plugins/anthropic",
@@ -22,6 +23,9 @@ members = [
     "crates/tau-plugins/shell",
     "crates/tau-sandbox-container",
     "crates/tau-sandbox-native",
+]
+exclude = [
+    "crates/tau-plugin-compat/fixtures/controlled-env-binary",
 ]
 
 [workspace.package]

@@ -436,6 +436,39 @@ bin = "my-plugin"
         let manifest = unchecked.validate().expect("validate");
         assert!(manifest.sandbox().required_tier.is_none());
     }
+
+    /// Each shipped real plugin's manifest declares `required_tier =
+    /// "strict"` in its `[sandbox]` block (sub-project B Task 1; ADR-0016
+    /// Decision 5). Asserts via file-content check rather than full
+    /// PackageManifest deserialization because plugin `tau.toml` is the
+    /// thinner manifest format consumed at install time and combined
+    /// with install-context metadata to form a `PackageManifest`.
+    #[test]
+    fn shipped_plugin_anthropic_declares_strict_tier() {
+        let toml = include_str!("../../../tau-plugins/anthropic/tau.toml");
+        assert!(
+            toml.contains("[sandbox]") && toml.contains("required_tier = \"strict\""),
+            "anthropic must declare strict tier per ADR-0016",
+        );
+    }
+
+    #[test]
+    fn shipped_plugin_fs_read_declares_strict_tier() {
+        let toml = include_str!("../../../tau-plugins/fs-read/tau.toml");
+        assert!(
+            toml.contains("[sandbox]") && toml.contains("required_tier = \"strict\""),
+            "fs-read must declare strict tier per ADR-0016",
+        );
+    }
+
+    #[test]
+    fn shipped_plugin_shell_declares_strict_tier() {
+        let toml = include_str!("../../../tau-plugins/shell/tau.toml");
+        assert!(
+            toml.contains("[sandbox]") && toml.contains("required_tier = \"strict\""),
+            "shell must declare strict tier per ADR-0016",
+        );
+    }
 }
 
 use crate::error::PackageManifestError;

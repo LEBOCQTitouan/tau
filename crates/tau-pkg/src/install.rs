@@ -103,6 +103,13 @@ pub struct InstallOptions {
     /// Defaults: build enabled, `cargo` from PATH, no extra args.
     /// Ignored for data-only packages (no `[plugin]` table).
     pub build: BuildOptions,
+    /// If `true`, skip the Layer 2 cross-check at step 8.7 (sub-project B).
+    ///
+    /// Default: `false` — production installs always run the cross-check.
+    /// Tests that build stub plugin binaries which don't implement the
+    /// `meta.handshake` protocol set this to `true` to bypass the
+    /// cross-check.
+    pub skip_cross_check: bool,
 }
 
 impl Default for InstallOptions {
@@ -111,6 +118,7 @@ impl Default for InstallOptions {
             block_on_lock: true,
             force: false,
             build: BuildOptions::default(),
+            skip_cross_check: false,
         }
     }
 }
@@ -321,7 +329,42 @@ pub fn install_with_options(
         // updated, but the cloned source is left in place so users can
         // diagnose without re-cloning. Users retry with `tau install
         // --force` or inspect the failure under the package dir.
-        let locked_plugin = build_plugin_if_needed(&manifest, &target, &options.build)?;
+        let mut locked_plugin = build_plugin_if_needed(&manifest, &target, &options.build)?;
+
+        // Step 8.7: Layer 2 cross-check — spawn the freshly-built binary,
+        // perform handshake + per-method tool.describe_capabilities, compare
+        // against the manifest's [[capabilities]]. On error, abort install
+        // (binary stays on disk; user retries via `tau install --force`
+        // after fixing the manifest).
+        //
+        // Skipped when:
+        //   - Data-only package (no [plugin] table → locked_plugin is None).
+        //   - Build was skipped via skip_build = true (locked_plugin is None
+        //     even for plugin packages — test / --no-build path).
+        //
+        // cross_check_plugin_capabilities is async; install_with_options is
+        // synchronous. Bridge via a current-thread tokio runtime spun up just
+        // for this step.
+        if !options.skip_cross_check {
+            if let Some(ref mut lp) = locked_plugin {
+                let binary_path = lp.binary_path.clone();
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| InstallError::Internal {
+                        message: format!("build tokio runtime for cross-check: {e}"),
+                    })?;
+                let shapes = runtime
+                    .block_on(crate::sandbox_check::cross_check_plugin_capabilities(
+                        &binary_path,
+                        &manifest,
+                    ))
+                    .map_err(|e| InstallError::CrossCheck {
+                        message: e.to_string(),
+                    })?;
+                lp.required_shapes = shapes;
+            }
+        }
 
         // Step 9: update lockfile.
         let now = SystemTime::now();

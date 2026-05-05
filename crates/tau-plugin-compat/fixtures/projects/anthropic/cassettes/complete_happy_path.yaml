@@ -1,0 +1,14 @@
+- request:
+    method: POST
+    uri: /v1/messages
+    headers:
+      x-api-key: "<REDACTED>"
+      anthropic-version: "2023-06-01"
+    body: |-
+      placeholder
+  response:
+    status: 200
+    headers:
+      content-type: application/json
+    body: |-
+      {"id":"msg_01ABC","type":"message","role":"assistant","content":[{"type":"text","text":"Hi there"}],"model":"claude-3-5-haiku-latest","stop_reason":"end_turn","usage":{"input_tokens":12,"output_tokens":3}}

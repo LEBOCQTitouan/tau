@@ -27,6 +27,17 @@ use tau_domain::{PackageSource, PluginKind, PortKind};
 use tau_pkg::{install_with_options, InstallError, InstallOptions, LockFile, Scope};
 use tempfile::TempDir;
 
+/// Build [`InstallOptions`] with `skip_cross_check = true` for tests
+/// that build stub plugin binaries that don't implement the
+/// `meta.handshake` protocol. Without this, sub-project B's Layer 2
+/// cross-check at install step 8.7 fails with "EOF before handshake
+/// response".
+fn install_options_skip_cross_check() -> InstallOptions {
+    let mut opts = InstallOptions::default();
+    opts.skip_cross_check = true;
+    opts
+}
+
 /// Run `git ARGS` in `cwd`, panicking on failure with a helpful message.
 fn run_git(cwd: &Path, args: &[&str]) {
     let output = Command::new("git")
@@ -169,7 +180,8 @@ fn install_runs_cargo_build_for_rust_cargo_plugin() {
     let bare = make_plugin_fixture_repo(tmp.path(), "fixture-plugin", "0.1.0", None);
     let source = PackageSource::from_str(&file_url(&bare)).unwrap();
 
-    let installed = install_with_options(&source, &scope, InstallOptions::default()).unwrap();
+    let installed =
+        install_with_options(&source, &scope, install_options_skip_cross_check()).unwrap();
 
     assert_eq!(installed.name.as_str(), "fixture-plugin");
     assert!(installed.installed_path.is_dir());
@@ -238,7 +250,7 @@ fn install_surfaces_compile_error_as_build_failed() {
     let bare = make_plugin_fixture_repo(tmp.path(), "broken-plugin", "0.1.0", Some(broken_main));
     let source = PackageSource::from_str(&file_url(&bare)).unwrap();
 
-    let result = install_with_options(&source, &scope, InstallOptions::default());
+    let result = install_with_options(&source, &scope, install_options_skip_cross_check());
     let err = result.expect_err("expected install to fail with BuildFailed");
 
     let InstallError::BuildFailed {
@@ -322,7 +334,7 @@ installed_at = "2026-04-27T10:00:00Z"
     // lockfile-write path, which should persist `schema_version = 4`.
     let bare = fixtures::make_fixture_repo(tmp.path(), "data-only-pkg", "0.1.0", "tool");
     let source = PackageSource::from_str(&fixtures::file_url(&bare)).unwrap();
-    install_with_options(&source, &scope, InstallOptions::default()).unwrap();
+    install_with_options(&source, &scope, install_options_skip_cross_check()).unwrap();
 
     // Verify the file on disk is now v4.
     let updated = std::fs::read_to_string(&lock_path).unwrap();

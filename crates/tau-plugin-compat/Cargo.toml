@@ -1,0 +1,34 @@
+[package]
+name = "tau-plugin-compat"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Plugin compatibility verification harness — per-plugin layer 3 / layer 4 (container + native) tests for the 5 real shipped plugins. Sub-project B (2026-05-04)."
+
+[features]
+default = []
+# Enables the heavyweight integration tests that install real plugin binaries
+# and exercise them under real sandbox adapters. Off by default; CI runs with
+# this feature on Linux only.
+integration-tests = []
+
+[dependencies]
+tau-domain = { path = "../tau-domain", features = ["serde"] }
+tau-pkg = { path = "../tau-pkg" }
+tau-runtime = { path = "../tau-runtime" }
+tau-sandbox-container = { path = "../tau-sandbox-container" }
+# tau-sandbox-native is Linux-only (per its lib.rs cfg gating); pull it in
+# via target-specific deps so this crate still compiles on macOS/Windows.
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tau-sandbox-native = { path = "../tau-sandbox-native" }
+
+[dev-dependencies]
+assert_cmd = "2"
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread"] }
+serde_json = "1"
+# Needed so assert_cmd::Command::cargo_bin("tau") can resolve CARGO_BIN_EXE_tau.
+tau-cli = { path = "../tau-cli" }
