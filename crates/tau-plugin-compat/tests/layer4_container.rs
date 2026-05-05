@@ -1,30 +1,25 @@
-//! Layer 4 container live spawn tests — sub-project B Task 7.
+//! Layer 4 container live spawn tests — sub-project D Task 6.
 //!
 //! Each test installs a real plugin binary into a tempdir scope, then
-//! drives a golden-path agent invocation via `tau plugin run --script`
-//! (or equivalent) under the Container adapter. The plugin actually runs
-//! under Docker isolation; the test asserts the golden path completes
+//! drives a golden-path agent invocation under the Container adapter
+//! (`--sandbox container`) which engages Docker isolation. The plugin
+//! actually runs under Docker; the test asserts the golden path completes
 //! successfully.
 //!
 //! Skip-with-message if Docker is not available on the host.
 //!
-//! # v0.1 scope (Task 7)
+//! # v0.1 scope (Task 6, sub-project D)
 //!
-//! ## Tier A — binary build + `tau plugin run --script` (shell, fs-read)
+//! ## Tier A — fully implemented (shell + fs-read)
 //!
-//! These two tests build the real plugin binary from the workspace source
-//! and drive a `tool.describe` call via `tau plugin run --script` to verify
-//! the binary is functional. **Limitation**: `tau plugin run` does not
-//! route through the sandbox adapter (it spawns the binary directly, without
-//! a Container wrapper). Container-adapter enforcement requires `tau run`
-//! with a full project setup including a wired LLM backend — that path is
-//! deferred to sub-project D when the e2e cassette-replay infrastructure is
-//! in place.
+//! These two tests force the Container adapter via
+//! `resolve_adapter_forced(RegistryKind::Container)`, then drive a real
+//! tool invocation (echo hello / file read) through the full
+//! `spawn_tool_under_sandbox` driver path. Pattern mirrors Task 5
+//! (layer4_native.rs) but targets the Container adapter.
 //!
-//! The Docker pre-check is still performed so these tests document the
-//! intent clearly. On CI (ubuntu-latest, Docker present) the Docker check
-//! passes and the binary-spawn path executes. On macOS without a running
-//! Docker daemon the tests skip cleanly.
+//! Skip-with-message on: (a) Docker not on PATH or daemon not running,
+//! (b) container adapter probe returns Unavailable.
 //!
 //! ## Tier B — `#[ignore]`'d, deferred to sub-project D (anthropic, ollama, openai)
 //!
@@ -32,25 +27,19 @@
 //! plugin process and back to a cassette-recorded HTTP response is
 //! non-trivial. Rather than fabricating a half-working version, these tests
 //! are scaffolded with `#[ignore]` and a rationale comment. Sub-project D
-//! will wire the cassette-replay infra and lift the `#[ignore]`.
-//!
-//! # Commit note
-//!
-//! Container adapter verification via `tau run --sandbox container` requires:
-//! 1. A real LLM backend plugin installed in scope (anthropic/ollama/openai).
-//! 2. A cassette server or mock HTTP layer so `tau run` does not make live
-//!    network calls.
-//! 3. The full `tau run` → kernel → plugin_host → ContainerAdapter → Docker
-//!    pipeline, which is only exercised once sub-project D is complete.
-//!
-//! Task 7 lays the scaffolding; the Tier A tests verify binary build +
-//! protocol handshake; Tier B is intentionally deferred.
+//! Task 7 will wire the cassette-replay infra and lift the `#[ignore]`.
 
 #![cfg(feature = "integration-tests")]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
+use tau_domain::{AgentInstanceId, Capability, PluginKind, PluginManifest, PortKind};
+use tau_pkg::LockedPlugin;
+use tau_ports::{SandboxPlan, SandboxProbe, SessionContext};
+use tau_runtime::sandbox::registry::RegistryKind;
+use tau_runtime::sandbox::resolve_adapter_forced;
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
@@ -85,20 +74,14 @@ fn require_docker() -> Result<(), String> {
     Ok(())
 }
 
-/// Locate the `tau` binary using the same resolution order as layer3.
+/// Locate the pre-built plugin binary.
 ///
-/// Resolution order:
-/// 1. `CARGO_BIN_EXE_tau` — set by cargo when building the tau-cli crate in
-///    the same compilation unit (e.g. `cargo test --all`).
-/// 2. `$CARGO_TARGET_DIR/debug/tau` — the CLAUDE.md-mandated target-dir
-///    override.
-/// 3. Workspace-root `target/debug/tau` fallback.
-fn tau_bin() -> std::path::PathBuf {
-    if let Ok(p) = std::env::var("CARGO_BIN_EXE_tau") {
-        return std::path::PathBuf::from(p);
-    }
+/// Resolution order mirrors `layer4_native.rs`:
+/// 1. `$CARGO_TARGET_DIR/release/<bin_name>` (CLAUDE.md-mandated override).
+/// 2. Workspace-root `target/release/<bin_name>` fallback.
+fn locate_plugin_bin(bin_name: &str) -> PathBuf {
     if let Ok(target_dir) = std::env::var("CARGO_TARGET_DIR") {
-        let candidate = Path::new(&target_dir).join("debug").join("tau");
+        let candidate = Path::new(&target_dir).join("release").join(bin_name);
         if candidate.exists() {
             return candidate;
         }
@@ -108,222 +91,304 @@ fn tau_bin() -> std::path::PathBuf {
             .parent()
             .unwrap()
             .join(&target_dir)
-            .join("debug")
-            .join("tau");
+            .join("release")
+            .join(bin_name);
         if abs.exists() {
             return abs;
         }
     }
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
-        .unwrap()
-        .join("target")
-        .join("debug")
-        .join("tau")
+        .unwrap();
+    workspace_root.join("target").join("release").join(bin_name)
 }
 
-/// Build a plugin binary from its workspace source path using `cargo build
-/// --release`.
+/// Construct a `LockedPlugin` pointing at the given binary path.
+fn make_locked_plugin(bin_name: &str, binary_path: PathBuf) -> LockedPlugin {
+    let manifest = PluginManifest::new(PortKind::Tool, PluginKind::RustCargo, bin_name.to_string());
+    LockedPlugin::new(
+        manifest,
+        binary_path,
+        std::time::SystemTime::UNIX_EPOCH,
+        String::new(),
+    )
+}
+
+/// Build a test `SessionContext` with the given granted capabilities.
+fn make_session_context_with_caps(caps: Vec<Capability>) -> SessionContext {
+    SessionContext::new(AgentInstanceId::new(), tau_domain::Uuid::new_v4(), None)
+        .with_granted_capabilities(caps)
+}
+
+/// Resolve the container sandbox adapter or skip the test.
 ///
-/// Returns the path to the compiled binary on success, or an error message
-/// if `cargo build` failed or the binary was not found at the expected path.
+/// Returns `None` (and prints skip message) if the container adapter is
+/// unavailable on this host (e.g. Docker not installed/running).
+async fn resolve_container_or_skip() -> Option<tau_runtime::sandbox::SandboxAdapter> {
+    match resolve_adapter_forced(RegistryKind::Container).await {
+        Ok(adapter) => {
+            if matches!(adapter.probe().await, SandboxProbe::Unavailable { .. }) {
+                eprintln!("SKIP: container adapter probe returned Unavailable");
+                None
+            } else {
+                Some(adapter)
+            }
+        }
+        Err(e) => {
+            eprintln!("SKIP: container adapter unavailable: {e}");
+            None
+        }
+    }
+}
+
+/// Minimal base64 encoding for the test fixture assertion.
+/// Avoids importing the base64 crate into the test binary directly
+/// (tau-plugin-compat doesn't depend on it).
+fn base64_encode(input: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::new();
+    let mut i = 0;
+    while i < input.len() {
+        let b0 = input[i] as usize;
+        let b1 = if i + 1 < input.len() {
+            input[i + 1] as usize
+        } else {
+            0
+        };
+        let b2 = if i + 2 < input.len() {
+            input[i + 2] as usize
+        } else {
+            0
+        };
+        output.push(ALPHABET[b0 >> 2] as char);
+        output.push(ALPHABET[((b0 & 0x3) << 4) | (b1 >> 4)] as char);
+        if i + 1 < input.len() {
+            output.push(ALPHABET[((b1 & 0xf) << 2) | (b2 >> 6)] as char);
+        } else {
+            output.push('=');
+        }
+        if i + 2 < input.len() {
+            output.push(ALPHABET[b2 & 0x3f] as char);
+        } else {
+            output.push('=');
+        }
+        i += 3;
+    }
+    output
+}
+
+// ---------------------------------------------------------------------------
+// Tier A tests — Container adapter e2e (sub-project D Task 6)
+// ---------------------------------------------------------------------------
+
+/// Test 1 (Tier A): shell plugin — spawn under Container adapter, invoke
+/// `shell.call({command: "echo", args: ["hello"]})`, assert "hello" in result.
 ///
-/// The `bin_name` argument is the value of `[plugin] bin = "..."` in the
-/// plugin's `tau.toml` (e.g. `"shell-plugin"` or `"fs-read-plugin"`).
-fn build_plugin_binary(
-    plugin_src_path: &Path,
-    bin_name: &str,
-) -> Result<std::path::PathBuf, String> {
-    // Use a dedicated target dir to avoid lock contention with the outer
-    // `cargo test -p tau-plugin-compat` invocation. The CLAUDE.md rule
-    // mandates unique CARGO_TARGET_DIR values per concurrent build.
-    let target_dir = plugin_src_path.join("target");
-
-    let mut cmd = Command::new("cargo");
-    cmd.arg("build")
-        .arg("--release")
-        .arg("--bin")
-        .arg(bin_name)
-        .current_dir(plugin_src_path)
-        .env("CARGO_TARGET_DIR", &target_dir);
-
-    eprintln!(
-        "  [layer4] building {} in {}...",
-        bin_name,
-        plugin_src_path.display()
-    );
-
-    let output = cmd.output().map_err(|e| format!("cargo spawn: {e}"))?;
-    if !output.stderr.is_empty() {
-        eprint!("{}", String::from_utf8_lossy(&output.stderr));
-    }
-    if !output.status.success() {
-        return Err(format!(
-            "cargo build --release --bin {bin_name} exited with {:?}\nstderr tail:\n{}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr)
-                .lines()
-                .rev()
-                .take(20)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<_>>()
-                .join("\n"),
-        ));
+/// This exercises:
+/// - `resolve_adapter_forced(RegistryKind::Container)`
+/// - `driver::spawn_tool_under_sandbox` → `plugin_host::load_tool`
+/// - The container adapter's `wrap_spawn` pipeline (Docker isolation)
+/// - The shell plugin's `SessionContext.granted_capabilities` path
+///   admission check (process.spawn allow-list)
+///
+/// Skips cleanly if Docker is not available or container adapter probe
+/// returns Unavailable.
+#[tokio::test]
+async fn shell_layer4_container_runs_echo_hello() {
+    // 1. Require Docker — without a running daemon, Container adapter is a no-op.
+    if let Err(reason) = require_docker() {
+        eprintln!("SKIP: {reason}");
+        return;
     }
 
-    let bin_path = target_dir.join("release").join(bin_name);
+    // 2. Locate the pre-built shell plugin binary.
+    let bin_path = locate_plugin_bin("shell-plugin");
     if !bin_path.exists() {
-        return Err(format!(
-            "cargo build succeeded but binary not found at {}",
+        eprintln!(
+            "SKIP: shell-plugin binary not found at {}; \
+             run `cargo build -p tau-plugins-shell --release` first",
             bin_path.display()
-        ));
-    }
-    Ok(bin_path)
-}
-
-/// Write a minimal JSONL script for `tau plugin run --script` that calls
-/// `tool.describe` (zero-param method → returns the plugin's ToolSpec).
-///
-/// `tool.describe` params is an empty array `[]`, which round-trips
-/// cleanly through the JSON→MessagePack conversion in `tau plugin run`.
-fn write_tool_describe_script(dir: &Path) -> std::path::PathBuf {
-    let script_path = dir.join("describe.jsonl");
-    std::fs::write(&script_path, r#"{"method":"tool.describe","params":[]}"#)
-        .expect("writing describe.jsonl");
-    script_path
-}
-
-/// Run `tau plugin run --script <script>` against the given binary,
-/// capturing stdout. Returns the combined stdout string.
-fn run_plugin_describe(tau: &Path, binary: &Path, script: &Path) -> std::process::Output {
-    Command::new(tau)
-        .arg("plugin")
-        .arg("run")
-        .arg(binary)
-        .arg("--script")
-        .arg(script)
-        .output()
-        .expect("tau plugin run --script spawn")
-}
-
-// ---------------------------------------------------------------------------
-// Tier A tests — working e2e (build + protocol handshake)
-// ---------------------------------------------------------------------------
-
-/// Locate the workspace root (two levels up from CARGO_MANIFEST_DIR).
-fn workspace_root() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf()
-}
-
-/// Test 1 (Tier A): shell plugin — build binary + verify via `tool.describe`.
-///
-/// What this tests:
-/// - `cargo build --release --bin shell-plugin` succeeds from the workspace
-///   source tree.
-/// - `tau plugin run --script` successfully drives the handshake and a
-///   `tool.describe` call, receiving a valid ToolSpec in response.
-///
-/// What this does NOT yet test (deferred to sub-project D):
-/// - Running shell under the Container adapter (`tau run --sandbox container`
-///   requires an LLM backend + cassette replay infrastructure).
-#[test]
-#[ignore = "tau plugin run --script handshakes as llm_backend but shell provides tool — needs sub-project D's port-aware driver. Worked locally on macOS-no-Docker via skip-with-message; failed on Linux CI where Docker is present."]
-fn shell_layer4_container_runs_echo_hello() {
-    if let Err(msg) = require_docker() {
-        eprintln!("SKIP: {msg}");
+        );
         return;
     }
 
-    let _scope = TempDir::new().expect("tempdir");
-    let plugin_src = workspace_root()
-        .join("crates")
-        .join("tau-plugins")
-        .join("shell");
-    let binary = match build_plugin_binary(&plugin_src, "shell-plugin") {
-        Ok(b) => b,
+    // 3. Resolve the container sandbox adapter, skip gracefully if unavailable.
+    let adapter = match resolve_container_or_skip().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    // 4. Build the SandboxPlan. Shell plugin needs process.spawn capability.
+    let spawn_cap: Capability = serde_json::from_value(serde_json::json!({
+        "kind": "process.spawn",
+        "commands": ["echo"]
+    }))
+    .expect("process.spawn capability JSON must be valid");
+
+    let plan = SandboxPlan::new(vec![spawn_cap.clone()], None, None);
+
+    // 5. Synthesise a LockedPlugin for the shell binary.
+    let plugin = make_locked_plugin("shell-plugin", bin_path);
+
+    // 6. Spawn under the container sandbox via the driver.
+    let dyn_tool = tau_plugin_compat::driver::spawn_tool_under_sandbox(
+        &plugin,
+        serde_json::json!({}),
+        Some(Arc::new(adapter)),
+        Some(&plan),
+    )
+    .await;
+
+    let dyn_tool = match dyn_tool {
+        Ok(t) => t,
         Err(e) => {
-            eprintln!("SKIP: shell-plugin build failed: {e}");
-            return;
+            panic!("spawn shell-plugin under container adapter failed: {e:?}");
         }
     };
 
-    let script_dir = TempDir::new().expect("script tempdir");
-    let script = write_tool_describe_script(script_dir.path());
-    let tau = tau_bin();
+    // 7. Build a SessionContext granting process.spawn for "echo".
+    let ctx = make_session_context_with_caps(vec![spawn_cap]);
+    let mut session = ();
 
-    let out = run_plugin_describe(&tau, &binary, &script);
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    // 8. Invoke shell.call({command: "echo", args: ["hello"]}).
+    let result = dyn_tool
+        .invoke(
+            &ctx,
+            &mut session,
+            serde_json::from_value(serde_json::json!({
+                "command": "echo",
+                "args": ["hello"]
+            }))
+            .expect("tool args must deserialize"),
+        )
+        .await
+        .expect("shell.call must succeed");
 
-    // `tau plugin run --script` prints the plugin's response to stdout.
-    // A successful `tool.describe` returns the ToolSpec JSON. We assert:
-    // 1. Exit 0.
-    // 2. Stdout mentions "shell" (the plugin name in the ToolSpec).
+    // 9. Assert "hello" appears somewhere in the result.
+    let result_debug = format!("{result:?}");
     assert!(
-        out.status.success(),
-        "shell-plugin tool.describe failed\nstdout: {stdout}\nstderr: {stderr}"
+        result_debug.contains("hello"),
+        "expected 'hello' in shell.call result; got: {result_debug}"
     );
     assert!(
-        stdout.contains("shell"),
-        "expected 'shell' in tool.describe output\nstdout: {stdout}\nstderr: {stderr}"
+        !result.is_error,
+        "shell.call returned is_error=true; result: {result_debug}"
     );
 }
 
-/// Test 2 (Tier A): fs-read plugin — build binary + verify via `tool.describe`.
+/// Test 2 (Tier A): fs-read plugin — spawn under Container adapter, write a
+/// data.txt into a tempdir, invoke `fs_read.call({path: <data.txt>})`, and
+/// assert the content is read back.
 ///
-/// What this tests:
-/// - `cargo build --release --bin fs-read-plugin` succeeds.
-/// - `tau plugin run --script` drives the handshake and `tool.describe`,
-///   receiving a ToolSpec with "fs-read" in the output.
+/// This exercises:
+/// - `resolve_adapter_forced(RegistryKind::Container)` + `SandboxPlan` with
+///   `FsCapability::Read` allowing the tempdir.
+/// - The container adapter's Docker-based enforcement for file reads.
+/// - The fs-read plugin's glob-based path admission check.
 ///
-/// What this does NOT yet test (deferred to sub-project D):
-/// - Running fs-read under the Container adapter with a real file-read
-///   invocation (`tau run --sandbox container` + LLM backend required).
-#[test]
-#[ignore = "tau plugin run --script handshakes as llm_backend but fs-read provides tool — needs sub-project D's port-aware driver. Worked locally on macOS-no-Docker via skip-with-message; failed on Linux CI where Docker is present."]
-fn fs_read_layer4_container_reads_data_file() {
-    if let Err(msg) = require_docker() {
-        eprintln!("SKIP: {msg}");
+/// Skips cleanly if Docker is not available or container adapter probe
+/// returns Unavailable.
+#[tokio::test]
+async fn fs_read_layer4_container_reads_data_file() {
+    // 1. Require Docker.
+    if let Err(reason) = require_docker() {
+        eprintln!("SKIP: {reason}");
         return;
     }
 
-    let _scope = TempDir::new().expect("tempdir");
-    let plugin_src = workspace_root()
-        .join("crates")
-        .join("tau-plugins")
-        .join("fs-read");
-    let binary = match build_plugin_binary(&plugin_src, "fs-read-plugin") {
-        Ok(b) => b,
+    // 2. Locate the pre-built fs-read-plugin binary.
+    let bin_path = locate_plugin_bin("fs-read-plugin");
+    if !bin_path.exists() {
+        eprintln!(
+            "SKIP: fs-read-plugin binary not found at {}; \
+             run `cargo build -p tau-plugins-fs-read --release` first",
+            bin_path.display()
+        );
+        return;
+    }
+
+    // 3. Resolve the container sandbox adapter, skip gracefully if unavailable.
+    let adapter = match resolve_container_or_skip().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    // 4. Write the data fixture into a tempdir.
+    let scope = TempDir::new().expect("tempdir creation must succeed");
+    let data_path = scope.path().join("data.txt");
+    let data_content = "layer4-container-fs-read-fixture";
+    std::fs::write(&data_path, data_content).expect("write data.txt must succeed");
+
+    // The fs-read plugin needs an fs.read capability granting access to the
+    // tempdir. Use a glob that covers the whole tempdir.
+    let tmpdir_glob = format!("{}/**", scope.path().display());
+
+    let fs_read_cap: Capability = serde_json::from_value(serde_json::json!({
+        "kind": "fs.read",
+        "paths": [tmpdir_glob.clone()]
+    }))
+    .expect("fs.read capability JSON must be valid");
+
+    let plan = SandboxPlan::new(vec![fs_read_cap.clone()], None, None);
+
+    // 5. Synthesise a LockedPlugin for the fs-read binary.
+    let plugin = make_locked_plugin("fs-read-plugin", bin_path);
+
+    // 6. Spawn under the container sandbox via the driver.
+    let dyn_tool = tau_plugin_compat::driver::spawn_tool_under_sandbox(
+        &plugin,
+        serde_json::json!({}),
+        Some(Arc::new(adapter)),
+        Some(&plan),
+    )
+    .await;
+
+    let dyn_tool = match dyn_tool {
+        Ok(t) => t,
         Err(e) => {
-            eprintln!("SKIP: fs-read-plugin build failed: {e}");
-            return;
+            panic!("spawn fs-read-plugin under container adapter failed: {e:?}");
         }
     };
 
-    let script_dir = TempDir::new().expect("script tempdir");
-    let script = write_tool_describe_script(script_dir.path());
-    let tau = tau_bin();
+    // 7. Build a SessionContext granting fs.read for the tempdir glob.
+    let ctx = make_session_context_with_caps(vec![fs_read_cap]);
+    let mut session = ();
 
-    let out = run_plugin_describe(&tau, &binary, &script);
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    // 8. Invoke fs_read.call({path: <data_path>}).
+    let data_path_str = data_path
+        .to_str()
+        .expect("data path must be valid UTF-8")
+        .to_string();
+    let result = dyn_tool
+        .invoke(
+            &ctx,
+            &mut session,
+            serde_json::from_value(serde_json::json!({
+                "path": data_path_str
+            }))
+            .expect("tool args must deserialize"),
+        )
+        .await
+        .expect("fs_read.call must succeed");
 
+    // 9. Assert the result contains the file content (base64-encoded).
     assert!(
-        out.status.success(),
-        "fs-read-plugin tool.describe failed\nstdout: {stdout}\nstderr: {stderr}"
+        !result.is_error,
+        "fs_read.call returned is_error=true; result: {result:?}"
     );
     assert!(
-        stdout.contains("fs-read"),
-        "expected 'fs-read' in tool.describe output\nstdout: {stdout}\nstderr: {stderr}"
+        !result.content.is_empty(),
+        "fs_read.call returned empty content; result: {result:?}"
+    );
+    let result_debug = format!("{result:?}");
+    // base64 of "layer4-container-fs-read-fixture"
+    let expected_b64 = base64_encode(data_content.as_bytes());
+    assert!(
+        result_debug.contains(&expected_b64),
+        "expected base64-encoded content '{expected_b64}' in fs_read.call result; \
+         got: {result_debug}"
     );
 }
 
