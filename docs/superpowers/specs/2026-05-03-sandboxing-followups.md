@@ -4,7 +4,9 @@
 **Status:** scoping doc for future implementation sessions, not a binding spec.
 **Audience:** future tau contributors picking up where the sandboxing sub-project left off.
 
-> **Update (2026-05-04):** Sub-project A (sandbox activation by default) shipped. See [its design doc](2026-05-04-sandbox-activation-design.md) and [ADR-0015](../../decisions/0015-sandbox-activation.md). Sub-project A's "Status" + "Scope" + "Test coverage to add" sections below are kept for historical reference but are now closed. The 9 remaining sub-projects (B, D, E, F, G, H, I, J, K — and the closed-inline C) remain as listed.
+> **Update (2026-05-04):** Sub-project A (sandbox activation by default) shipped. See [its design doc](2026-05-04-sandbox-activation-design.md) and [ADR-0015](../../decisions/0015-sandbox-activation.md). Sub-project A's "Status" + "Scope" + "Test coverage to add" sections below are kept for historical reference but are now closed.
+>
+> **Update (2026-05-04):** Sub-project B (plugin compatibility verification) shipped. See [its design doc](2026-05-04-plugin-compat-design.md) and [ADR-0016](../../decisions/0016-plugin-compat-verification.md). Sub-project D's *foundation* (controlled-environment binary + landlock-symlink-fix in `tau-sandbox-native::light::resolve_symlinks_for_landlock`) was absorbed into B; D's remainder is to re-introduce the 5 e2e test files and build the port-aware driver for the 10 `#[ignore]`'d Layer 4 tests in `tau-plugin-compat/tests/layer4_*.rs`. The 8 remaining sub-projects are D (reduced scope), E, F, G, H, I, J, K — plus the closed-inline C.
 
 ## Test coverage assessment
 
@@ -109,23 +111,23 @@ The original scope assumed the priority-12 chain model (`select_adapter` against
 
 ---
 
-### Sub-project B — Plugin compatibility verification (depends on A)
+### ~~Sub-project B — Plugin compatibility verification~~ ✅ DONE 2026-05-04
 
-**One-line:** Verify all 5 existing plugins (anthropic, ollama, openai, fs-read, shell) work under sandbox enforcement; implement Layer 2 install-time cross-check.
+**Status:** Shipped 2026-05-04 — see [spec](2026-05-04-plugin-compat-design.md) and [ADR-0016](../../decisions/0016-plugin-compat-verification.md). PR #24.
 
-**Scope:**
-1. **Layer 2 cross-check:** at `tau install` time, after the plugin handshake response is received, compare its `CAPABILITIES` set against the manifest's `[capabilities]` list. Reject install on mismatch; populate `LockedPlugin.required_shapes` from the binary's actual surface.
-2. **Per-plugin verification harness:** automated test that for each existing plugin, runs `tau resolve --check-sandbox` and asserts no Layer 3 violations.
-3. **Live spawn test:** run each plugin under the activated sandbox (post-A) on a Linux runner and verify it functions correctly. Cover the typical golden path (e.g., for `fs-read`: actually read a file; for `shell`: run a command).
-4. Document any plugin manifest discrepancies found and fix them.
-5. Add the `--rehash` flag to `tau install` for refreshing v3 lockfiles to v4 (deferred from priority 12).
+**What landed (and what diverged from the original scope above):**
 
-**Test coverage to add:**
-- 5+ plugin compatibility tests on Linux CI (with the e2e infrastructure from sub-project D).
+1. **Layer 2 install-time cross-check:** new `tau-pkg::sandbox_check` module wired into `install_with_options` step 8.7. Tool-port plugins enumerate `tool.describe_capabilities` per method and bidirectionally diff against the manifest's `[[capabilities]]`. LLM-backend / storage plugins fall through to manifest-only verification (universal cross-port wire mechanism deferred as a Phase 2 hardening item per ADR-0016 Decision 1).
+2. **Per-plugin verification harness:** new workspace crate `tau-plugin-compat/` (publish = false). Layer 3 tests (`tau resolve --check-sandbox`) for all 5 plugins — 5/5 pass on Linux CI.
+3. **Live spawn tests scaffolded but `#[ignore]`'d:** 5 Layer 4 container tests + 5 Layer 4 native tests (10 total) marked `#[ignore]` with rationale. Reason: `tau plugin run --script` hardcodes the handshake port to `llm_backend`, incompatible with tool-port plugins; cassette-replay-through-sandboxed-process for HTTP plugins doesn't yet exist. Sub-project D's port-aware driver flips these ignores.
+4. **Plugin manifest declarations:** all 5 real plugins declare `[sandbox] required_tier = "strict"`. Toy plugins unchanged.
+5. **`tau install --rehash` dropped:** YAGNI; `tau update`, `tau install --force`, `tau verify`, and auto-upgrade-with-warn already cover every realistic use case.
 
-**Estimated scope:** 1 week.
+**Sub-project D foundation absorbed:**
+- Controlled-environment test binary at `crates/tau-plugin-compat/fixtures/controlled-env-binary/` (statically linked, NOT a workspace member).
+- Landlock-symlink fix in `tau-sandbox-native/src/light.rs::resolve_symlinks_for_landlock` (canonicalizes paths and adds both the symlink and canonical target to the landlock ruleset, working around landlock V1's lack of symlink resolution against Ubuntu's `/bin → /usr/bin`).
 
-**Dependencies:** Sub-project A (default activation needed for live spawn tests).
+**Tests added:** ~35 across 8 files (8 unit on cross-check + 4 unit on symlink fix + 5 install-path integration + 5 Layer 3 + 5 Layer 4 container [`#[ignore]`'d] + 5 Layer 4 native [`#[ignore]`'d, Linux-only-gated] + 3 snapshot rendering). 27 CI checks green (was 25; new: `build (tau-plugin-compat)` + `test (tau-plugin-compat / linux)`).
 
 ---
 
@@ -146,25 +148,28 @@ The original scope assumed the priority-12 chain model (`select_adapter` against
 
 **One-line:** Establish a reliable CI infrastructure for testing real-kernel landlock + seccomp + namespace behavior on Linux.
 
-**Status:** Removed 5 e2e test files from priority 12 final ship because Ubuntu's `/bin → /usr/bin` symlinks combined with landlock V1 path-lookup returned EACCES on real binary spawns regardless of system_read_paths expansion.
+**Status:** Reduced scope as of 2026-05-04 — sub-project B absorbed D's foundation. Remaining work: re-introduce the 5 removed e2e test files + build the port-aware driver that flips the 10 `#[ignore]`'d Layer 4 tests in `tau-plugin-compat/tests/layer4_*.rs`.
 
-**Scope:**
-1. Investigate landlock + symlink resolution on modern Ubuntu — likely needs landlock V2's path resolution semantics OR explicit symlink resolution before adding to ruleset.
-2. Build a controlled-environment test binary (small, statically-linked, in a known location) that the e2e tests spawn instead of `/bin/cat` etc.
-3. Re-introduce the 5 removed test files using the controlled binary:
+**Foundation already shipped via B:**
+- ~~Investigate landlock + symlink resolution on modern Ubuntu.~~ ✅ Resolved via `tau-sandbox-native/src/light.rs::resolve_symlinks_for_landlock` (canonicalize + add both symlink and canonical target to ruleset).
+- ~~Build a controlled-environment test binary.~~ ✅ Lives at `crates/tau-plugin-compat/fixtures/controlled-env-binary/` (statically linked, isolated from workspace).
+
+**Remaining scope:**
+1. Re-introduce the 5 removed test files using the controlled binary:
    - `tests/light_landlock.rs` (allowed read + blocked read).
    - `tests/strict_seccomp.rs` (block socket without Network capability).
    - `tests/strict_exec_gating.rs` (per-command exec — defer until landlock V2 lands).
    - `tests/strict_net_filter.rs` (allowed socket with Network capability).
    - `tests/sandbox_native.rs` (in tau-runtime, runtime e2e).
-4. CI workflow: confirm the existing `cargo test ... --features integration-tests --tests -- --ignored` step passes reliably on `ubuntu-latest`.
-5. Document supported kernel versions + distro testing matrix.
+2. Build a port-aware driver to flip the 10 `#[ignore]`'d Layer 4 tests in `tau-plugin-compat/tests/layer4_container.rs` and `layer4_native.rs`. The driver must (a) handshake with the correct port for the plugin (tool / llm_backend / storage), (b) for HTTP plugins drive cassette-replay through a sandboxed plugin process, (c) for tool plugins drive a real tool invocation.
+3. CI workflow: confirm the existing `cargo test ... --features integration-tests --tests -- --ignored` step passes reliably on `ubuntu-latest`.
+4. Document supported kernel versions + distro testing matrix.
 
-**Test coverage to add:** 5+ real-kernel e2e tests, gated on `integration-tests` feature, run only on Linux CI.
+**Test coverage to add:** 5+ real-kernel e2e tests + 10 flipped-`#[ignore]` Layer 4 plugin compat tests, gated on `integration-tests` feature, run only on Linux CI.
 
-**Estimated scope:** 1 week (the landlock + symlinks investigation is the unknown).
+**Estimated scope:** 1 week (foundation already shipped via sub-project B; remaining is mostly mechanical — re-introduce removed tests + write port-aware driver).
 
-**Dependencies:** ideally Sub-project A so e2e tests can also exercise the activated runtime path.
+**Dependencies:** Sub-project B (foundation already shipped — controlled-env binary + symlink fix).
 
 ---
 
