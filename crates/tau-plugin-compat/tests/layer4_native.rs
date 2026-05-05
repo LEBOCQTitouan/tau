@@ -34,9 +34,11 @@ use std::sync::Arc;
 
 use tau_domain::{AgentInstanceId, Capability, PluginKind, PluginManifest, PortKind};
 use tau_pkg::LockedPlugin;
-use tau_ports::{CompletionRequest, ContentBlock, LlmProviderMessage, SandboxPlan, SessionContext};
+use tau_ports::{
+    CompletionRequest, ContentBlock, LlmProviderMessage, SandboxPlan, SandboxProbe, SessionContext,
+};
 use tau_runtime::sandbox::registry::RegistryKind;
-use tau_runtime::sandbox::{resolve_adapter_forced, SandboxProbe};
+use tau_runtime::sandbox::resolve_adapter_forced;
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------

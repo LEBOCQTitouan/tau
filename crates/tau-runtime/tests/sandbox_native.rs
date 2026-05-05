@@ -125,15 +125,22 @@ async fn adapter_threads_through_to_plugin_spawn() {
         return;
     }
 
-    // 2. Build a valid `SandboxPlan` with a standard capability shape
-    //    (FilesystemRead) that the native adapter supports.
-    let plan = SandboxPlan::new(
-        vec![Capability::Filesystem(tau_domain::FsCapability::Read {
-            paths: vec!["/tmp/**".into()],
-        })],
-        None,
-        None,
-    );
+    // 2. Build a valid `SandboxPlan`. Include the controlled-env binary's
+    //    parent directory in fs.read so landlock allows exec of the binary
+    //    itself (the standard system_read_paths in tau-sandbox-native::light
+    //    only includes /bin, /usr/bin, /lib, etc.).
+    let bin_parent = locate_controlled_env_bin()
+        .parent()
+        .expect("controlled-env binary has parent dir")
+        .to_string_lossy()
+        .into_owned();
+    // FsCapability::Read is #[non_exhaustive]; construct via serde.
+    let read_cap: Capability = serde_json::from_value(serde_json::json!({
+        "kind": "fs.read",
+        "paths": ["/tmp/**", bin_parent],
+    }))
+    .expect("valid fs.read capability");
+    let plan = SandboxPlan::new(vec![read_cap], None, None);
 
     // 3. Synthesise a LockedPlugin pointing at the controlled-env binary.
     let plugin = synthetic_locked_plugin("tau-controlled-env");
@@ -154,7 +161,12 @@ async fn adapter_threads_through_to_plugin_spawn() {
     //    emit non-IPC output — all of which surface as PluginHandshakeFailed.
     //    We also accept PluginSpawnFailed (sandbox-enforced spawn failure on
     //    constrained CI hosts) but NOT SandboxValidationFailed (pre-spawn).
-    let err = result.expect_err("load_tool must fail: controlled-env doesn't speak IPC");
+    // `Arc<dyn DynTool>` doesn't impl Debug, so `result.expect_err(..)` won't
+    // compile. Use match instead.
+    let err = match result {
+        Ok(_) => panic!("load_tool must fail: controlled-env doesn't speak IPC"),
+        Err(e) => e,
+    };
 
     assert!(
         matches!(
@@ -200,10 +212,13 @@ async fn sandbox_plan_validation_runs_pre_spawn() {
 
     // 2. Build a SandboxPlan with a Capability::Custom that the native adapter
     //    does NOT support (native only supports standard FS/network shapes).
-    let custom_cap = Capability::Custom {
-        name: "mcp.tool.use".into(),
-        params: BTreeMap::new(),
-    };
+    // Capability::Custom is #[non_exhaustive]; construct via serde.
+    let custom_cap: Capability = serde_json::from_value(serde_json::json!({
+        "kind": "custom",
+        "name": "mcp.tool.use",
+        "params": {},
+    }))
+    .expect("valid custom capability");
     let plan = SandboxPlan::new(vec![custom_cap], None, None);
 
     // 3. Synthesise a LockedPlugin (binary path doesn't matter — spawn must
@@ -222,7 +237,10 @@ async fn sandbox_plan_validation_runs_pre_spawn() {
     .await;
 
     // 5. Assert the error is SandboxValidationFailed (pre-spawn).
-    let err = result.expect_err("load_tool must fail: Custom shape unsupported by native adapter");
+    let err = match result {
+        Ok(_) => panic!("load_tool must fail: Custom shape unsupported by native adapter"),
+        Err(e) => e,
+    };
 
     assert!(
         matches!(&err, RuntimeError::SandboxValidationFailed { .. }),

@@ -21,9 +21,22 @@ fn locate_controlled_env_bin() -> PathBuf {
     )
 }
 
+/// Returns the controlled-env binary's parent dir as a string, for
+/// inclusion in `fs.read` paths so landlock allows exec of the binary.
+fn bin_parent_str() -> String {
+    locate_controlled_env_bin()
+        .parent()
+        .expect("controlled-env binary has parent dir")
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn plan_strict_no_network() -> SandboxPlan {
+    let bin_parent = bin_parent_str();
     serde_json::from_value(serde_json::json!({
-        "capabilities": [],
+        "capabilities": [
+            {"kind": "fs.read", "paths": [bin_parent]}
+        ],
         "context": null,
         "limits": null,
     }))
@@ -31,12 +44,16 @@ fn plan_strict_no_network() -> SandboxPlan {
 }
 
 fn plan_strict_with_network() -> SandboxPlan {
+    let bin_parent = bin_parent_str();
     serde_json::from_value(serde_json::json!({
-        "capabilities": [{
-            "kind": "net.http",
-            "hosts": ["api.example.com"],
-            "methods": ["GET"]
-        }],
+        "capabilities": [
+            {
+                "kind": "net.http",
+                "hosts": ["api.example.com"],
+                "methods": ["GET"]
+            },
+            {"kind": "fs.read", "paths": [bin_parent]}
+        ],
         "context": null,
         "limits": null,
     }))

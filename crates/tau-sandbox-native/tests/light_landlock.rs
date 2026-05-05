@@ -36,10 +36,23 @@ fn locate_controlled_env_bin() -> PathBuf {
     bin
 }
 
+/// Build a SandboxPlan with read access to the given paths PLUS the
+/// controlled-env binary's parent directory. Without the binary's
+/// parent in the read paths, landlock blocks exec of the binary itself
+/// (EACCES on spawn) since the standard system_read_paths in
+/// `tau-sandbox-native::light` only includes /bin, /usr/bin, /lib, etc.
 fn plan_with_read_paths(paths: Vec<&str>) -> SandboxPlan {
-    let path_array: Vec<serde_json::Value> = paths.iter().map(|p| serde_json::json!(p)).collect();
+    let bin = locate_controlled_env_bin();
+    let bin_parent = bin
+        .parent()
+        .expect("controlled-env binary has parent dir")
+        .to_string_lossy()
+        .into_owned();
+    let mut all_paths: Vec<serde_json::Value> =
+        paths.iter().map(|p| serde_json::json!(p)).collect();
+    all_paths.push(serde_json::json!(bin_parent));
     serde_json::from_value(serde_json::json!({
-        "capabilities": [{"kind": "fs.read", "paths": path_array}],
+        "capabilities": [{"kind": "fs.read", "paths": all_paths}],
         "context": null,
         "limits": null,
     }))
