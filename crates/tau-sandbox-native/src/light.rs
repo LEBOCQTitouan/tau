@@ -84,7 +84,30 @@ pub(crate) fn apply_landlock(
     plan: &SandboxPlan,
     cmd: &mut Command,
 ) -> Result<SandboxHandle, SandboxError> {
-    let (read_paths, write_paths) = collect_landlock_paths(plan, cmd)?;
+    let (mut read_paths, write_paths) = collect_landlock_paths(plan, cmd)?;
+
+    // Auto-add the spawned binary's parent directory to read_paths so the
+    // kernel can READ the binary file to load it AND EXEC it.
+    // `cmd.get_program()` returns the binary path; its parent dir gets
+    // added to the landlock ruleset (alongside the user's plan-derived
+    // read paths and the system_read_paths in install_landlock).
+    //
+    // Without this, plugins built into a workspace's `target/release/`
+    // (or anywhere outside /bin, /usr/bin, /lib, etc.) fail to exec under
+    // the native adapter with EACCES — the plan's capabilities cover
+    // application data access, NOT the binary's own load.
+    if let Some(prog) = std::path::Path::new(cmd.get_program()).parent() {
+        if !prog.as_os_str().is_empty() {
+            // Resolve symlinks so the canonical path is also in the ruleset
+            // (sub-project B Task 3's helper covers Ubuntu's /bin -> /usr/bin
+            // case).
+            for resolved in resolve_symlinks_for_landlock(prog).unwrap_or_default() {
+                if !read_paths.contains(&resolved) {
+                    read_paths.push(resolved);
+                }
+            }
+        }
+    }
 
     // KNOWN-LIMITATION: this pre_exec closure runs in the child between fork
     // and exec. POSIX guarantees only async-signal-safe operations in that
