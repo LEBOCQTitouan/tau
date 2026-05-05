@@ -398,35 +398,35 @@ async fn fs_read_layer4_container_reads_data_file() {
 
 /// Test 3 (Tier B, ignored): anthropic — container adapter + cassette replay.
 ///
-/// Requires the cassette-replay e2e infrastructure that plumbs a recorded HTTP
-/// response through `tau run --sandbox container`. The wire path is:
-///   `tau run` → runtime kernel → plugin_host → ContainerAdapter → Docker →
-///   anthropic-plugin binary → real HTTP (replayed from cassette).
-/// This is non-trivial and is the primary deliverable of sub-project D.
+/// The container adapter runs the plugin binary inside an isolated Docker
+/// network namespace.  The in-process `CassetteServer` that Task 7 (native)
+/// uses binds on the host's loopback (`127.0.0.1`), which is not reachable
+/// from inside the container's network namespace without the nftables-in-netns
+/// rules that sub-project F will introduce.
 #[test]
-#[ignore = "Cassette-replay through sandboxed plugin pending sub-project D's e2e infrastructure"]
+#[ignore = "Container netns isolation: localhost cassette server not reachable from container without sub-project F's nftables-in-netns work. See ADR-0017 Decision 3."]
 fn anthropic_layer4_container_completes_via_cassette() {
-    todo!("sub-project D: wire cassette replay through ContainerAdapter for anthropic")
+    todo!("sub-project F: nftables-in-netns needed to reach host loopback cassette server from container")
 }
 
 /// Test 4 (Tier B, ignored): ollama — container adapter + cassette replay.
 ///
-/// Same dependency as anthropic: requires the sub-project D e2e cassette-replay
-/// infrastructure before a meaningful assertion can be made without a live
-/// Ollama daemon.
+/// Same blocker as anthropic: the in-process `CassetteServer` on the host
+/// loopback is unreachable from the container netns without sub-project F's
+/// per-host nftables-in-netns filtering work.
 #[test]
-#[ignore = "Cassette-replay through sandboxed plugin pending sub-project D's e2e infrastructure"]
+#[ignore = "Container netns isolation: localhost cassette server not reachable from container without sub-project F's nftables-in-netns work. See ADR-0017 Decision 3."]
 fn ollama_layer4_container_completes_via_cassette() {
-    todo!("sub-project D: wire cassette replay through ContainerAdapter for ollama")
+    todo!("sub-project F: nftables-in-netns needed to reach host loopback cassette server from container")
 }
 
 /// Test 5 (Tier B, ignored): openai — container adapter + cassette replay.
 ///
-/// Same dependency as anthropic: requires the sub-project D e2e cassette-replay
-/// infrastructure (no real OpenAI key; cassette must intercept the HTTP layer
-/// inside the containerized plugin process).
+/// Same blocker as anthropic: the in-process `CassetteServer` on the host
+/// loopback is unreachable from the container netns without sub-project F's
+/// per-host nftables-in-netns filtering work.
 #[test]
-#[ignore = "Cassette-replay through sandboxed plugin pending sub-project D's e2e infrastructure"]
+#[ignore = "Container netns isolation: localhost cassette server not reachable from container without sub-project F's nftables-in-netns work. See ADR-0017 Decision 3."]
 fn openai_layer4_container_completes_via_cassette() {
-    todo!("sub-project D: wire cassette replay through ContainerAdapter for openai")
+    todo!("sub-project F: nftables-in-netns needed to reach host loopback cassette server from container")
 }

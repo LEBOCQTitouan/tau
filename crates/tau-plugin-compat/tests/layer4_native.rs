@@ -1,4 +1,4 @@
-//! Layer 4 native live spawn tests — sub-project D Task 5.
+//! Layer 4 native live spawn tests — sub-project D Tasks 5 + 7.
 //!
 //! Each test installs a real plugin binary into a tempdir scope, then
 //! drives a golden-path agent invocation under the Native adapter
@@ -7,11 +7,18 @@
 //! (`resolve_symlinks_for_landlock`) — landlock V1 path lookup against
 //! Ubuntu's `/bin → /usr/bin` symlinks.
 //!
-//! # v0.1 scope (Task 5, sub-project D)
+//! # v0.1 scope
 //!
-//! Two tool-plugin tests are fully implemented (shell + fs-read).
-//! Three HTTP cassette-replay tests remain `#[ignore]`'d pending
-//! sub-project D Task 7.
+//! Two tool-plugin tests (shell + fs-read) are implemented in Task 5.
+//! Three HTTP cassette-replay LLM backend tests (anthropic + ollama +
+//! openai) are implemented in Task 7.  The HTTP tests start a
+//! `CassetteServer` in the test process, configure the plugin binary to
+//! connect to `127.0.0.1:<random_port>` via the `base_url` config field,
+//! and verify the response matches the cassette's expected outcome.
+//!
+//! The native adapter's v0.1 over-permissive netns inheritance (when
+//! `Network(Http)` is in the plan; per priority-12 net.rs design) makes
+//! `127.0.0.1` reachable from the sandboxed plugin process.
 //!
 //! # Linux-only
 //!
@@ -27,7 +34,7 @@ use std::sync::Arc;
 
 use tau_domain::{AgentInstanceId, Capability, PluginKind, PluginManifest, PortKind};
 use tau_pkg::LockedPlugin;
-use tau_ports::{SandboxPlan, SessionContext};
+use tau_ports::{CompletionRequest, ContentBlock, LlmProviderMessage, SandboxPlan, SessionContext};
 use tau_runtime::sandbox::registry::RegistryKind;
 use tau_runtime::sandbox::{resolve_adapter_forced, SandboxProbe};
 use tempfile::TempDir;
@@ -86,6 +93,21 @@ fn locate_plugin_bin(bin_name: &str) -> PathBuf {
 /// Construct a `LockedPlugin` pointing at the given binary path.
 fn make_locked_plugin(bin_name: &str, binary_path: PathBuf) -> LockedPlugin {
     let manifest = PluginManifest::new(PortKind::Tool, PluginKind::RustCargo, bin_name.to_string());
+    LockedPlugin::new(
+        manifest,
+        binary_path,
+        std::time::SystemTime::UNIX_EPOCH,
+        String::new(),
+    )
+}
+
+/// Construct a `LockedPlugin` for an LLM-backend plugin.
+fn make_llm_locked_plugin(bin_name: &str, binary_path: PathBuf) -> LockedPlugin {
+    let manifest = PluginManifest::new(
+        PortKind::LlmBackend,
+        PluginKind::RustCargo,
+        bin_name.to_string(),
+    );
     LockedPlugin::new(
         manifest,
         binary_path,
@@ -377,23 +399,320 @@ fn base64_encode(input: &[u8]) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Tests 3-5: HTTP cassette-replay (pending sub-project D Task 7)
+// Helpers for HTTP cassette-replay tests (Task 7)
 // ---------------------------------------------------------------------------
 
-#[test]
-#[ignore = "Pending sub-project D Task 7: cassette-replay through sandboxed plugin"]
-fn anthropic_layer4_native_completes_via_cassette() {
-    // HTTP plugin under --sandbox native. Cassette-replay; no real network.
+/// Return the workspace root (two levels above this crate's manifest dir).
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
-#[test]
-#[ignore = "Pending sub-project D Task 7: cassette-replay through sandboxed plugin"]
-fn ollama_layer4_native_completes_via_cassette() {
-    // HTTP plugin under --sandbox native. Cassette-replay; no real network.
+/// Build a minimal `CompletionRequest` that matches the cassette's "say hi"
+/// fixture.  The model string is provider-specific; pass whatever the
+/// cassette's response carries.
+fn make_cassette_completion_request(model: &str) -> CompletionRequest {
+    let mut req = CompletionRequest::new(model.to_string());
+    req.messages
+        .push(LlmProviderMessage::user(vec![ContentBlock::Text(
+            "say hi".into(),
+        )]));
+    req.max_tokens = Some(20);
+    req
 }
 
-#[test]
-#[ignore = "Pending sub-project D Task 7: cassette-replay through sandboxed plugin"]
-fn openai_layer4_native_completes_via_cassette() {
-    // HTTP plugin under --sandbox native. Cassette-replay; no real network.
+/// Build the `net.http` capability that allows the plugin process to
+/// reach back to `127.0.0.1` (the in-process cassette server).
+fn make_net_http_localhost_cap() -> Capability {
+    serde_json::from_value(serde_json::json!({
+        "kind": "net.http",
+        "hosts": ["127.0.0.1", "localhost"],
+        "methods": ["POST", "GET"]
+    }))
+    .expect("net.http capability JSON must be valid")
+}
+
+// ---------------------------------------------------------------------------
+// Test 3: anthropic plugin — cassette-replay via native sandbox
+// ---------------------------------------------------------------------------
+
+/// Spin up a `CassetteServer` for the anthropic happy-path cassette, install
+/// the anthropic plugin binary, configure it to connect to the cassette server
+/// via `base_url` in the JSON config, spawn under the native sandbox adapter,
+/// invoke `DynLlmBackend::complete`, and assert the response text matches the
+/// cassette's expected "Hi there" reply.
+///
+/// This exercises:
+/// - `tau_plugin_test_support::cassette::replay` loading a YAML cassette.
+/// - `base_url` config field passing through `spawn_llm_under_sandbox` to the
+///   plugin binary process (no real Anthropic API; no real API key needed in
+///   env because `api_key` is set directly in the config JSON).
+/// - The native adapter's `Network(Http)` plan allowing `127.0.0.1` from
+///   within the sandboxed process (v0.1 over-permissive netns inheritance).
+/// - `DynLlmBackend::complete` round-trip returning `CompletionResponse.text`.
+///
+/// Skips if: (a) landlock/native adapter unavailable, (b) anthropic-plugin
+/// binary not yet built.
+#[tokio::test]
+async fn anthropic_layer4_native_completes_via_cassette() {
+    // 1. Locate the pre-built anthropic plugin binary.
+    let bin_path = locate_plugin_bin("anthropic-plugin");
+    if !bin_path.exists() {
+        eprintln!(
+            "SKIP: anthropic-plugin binary not found at {}; \
+             run `cargo build -p tau-plugins-anthropic --release` first",
+            bin_path.display()
+        );
+        return;
+    }
+
+    // 2. Resolve the native sandbox adapter, skip gracefully on hosts without
+    //    landlock/seccomp (macOS, old kernels).
+    let adapter = match resolve_native_or_skip().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    // 3. Start a cassette-replay HTTP server from the anthropic happy-path
+    //    cassette.  The server binds to 127.0.0.1:<random_port>.
+    let cassette_path = workspace_root()
+        .join("crates/tau-plugins/anthropic/tests/cassettes/complete_happy_path.yaml");
+    let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
+    let api_base = cassette_server.uri().to_string();
+
+    // 4. Build the SandboxPlan with Network(Http) capability for localhost so
+    //    the sandboxed plugin process can reach the cassette server.
+    let net_cap = make_net_http_localhost_cap();
+    let plan = SandboxPlan::new(vec![net_cap], None, None);
+
+    // 5. Synthesise a LockedPlugin for the anthropic binary (LlmBackend port).
+    let plugin = make_llm_locked_plugin("anthropic-plugin", bin_path);
+
+    // 6. Build the plugin config JSON, pointing base_url at the cassette
+    //    server.  Set api_key directly (test-only path) so the plugin
+    //    doesn't require a real ANTHROPIC_API_KEY env var.
+    let config = serde_json::json!({
+        "base_url": api_base,
+        "api_key": "sk-ant-test"
+    });
+
+    // 7. Spawn the anthropic plugin under the native sandbox via the driver.
+    let dyn_llm = tau_plugin_compat::driver::spawn_llm_under_sandbox(
+        &plugin,
+        config,
+        Some(Arc::new(adapter)),
+        Some(&plan),
+    )
+    .await;
+
+    let dyn_llm = match dyn_llm {
+        Ok(b) => b,
+        Err(e) => {
+            panic!("spawn anthropic-plugin under native adapter failed: {e:?}");
+        }
+    };
+
+    // 8. Invoke complete with a request that matches the cassette.
+    let req = make_cassette_completion_request("claude-3-5-haiku-latest");
+    let result = dyn_llm.complete(req).await;
+
+    // 9. Assert the response matches the cassette's expected outcome.
+    let resp = result.expect("anthropic complete via cassette must succeed");
+    assert_eq!(
+        resp.text, "Hi there",
+        "expected cassette response 'Hi there'; got: {:?}",
+        resp.text
+    );
+
+    // Verify the cassette server received exactly one request.
+    let received = cassette_server.received_requests();
+    assert_eq!(
+        received.len(),
+        1,
+        "cassette server should have received exactly 1 request; got: {}",
+        received.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test 4: ollama plugin — cassette-replay via native sandbox
+// ---------------------------------------------------------------------------
+
+/// Spin up a `CassetteServer` for the ollama happy-path cassette, install
+/// the ollama plugin binary, configure it to connect to the cassette server
+/// via `base_url` in the JSON config, spawn under the native sandbox adapter,
+/// invoke `DynLlmBackend::complete`, and assert the response text matches the
+/// cassette's expected "Hi there" reply.
+///
+/// Ollama doesn't require an API key; we set `bearer_token_env` to an
+/// definitely-unset name so the test is insulated from ambient env vars.
+///
+/// Skips if: (a) landlock/native adapter unavailable, (b) ollama-plugin
+/// binary not yet built.
+#[tokio::test]
+async fn ollama_layer4_native_completes_via_cassette() {
+    // 1. Locate the pre-built ollama plugin binary.
+    let bin_path = locate_plugin_bin("ollama-plugin");
+    if !bin_path.exists() {
+        eprintln!(
+            "SKIP: ollama-plugin binary not found at {}; \
+             run `cargo build -p tau-plugins-ollama --release` first",
+            bin_path.display()
+        );
+        return;
+    }
+
+    // 2. Resolve the native sandbox adapter.
+    let adapter = match resolve_native_or_skip().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    // 3. Start the cassette-replay server.
+    let cassette_path =
+        workspace_root().join("crates/tau-plugins/ollama/tests/cassettes/complete_happy_path.yaml");
+    let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
+    let api_base = cassette_server.uri().to_string();
+
+    // 4. Build the SandboxPlan with Network(Http) for localhost.
+    let net_cap = make_net_http_localhost_cap();
+    let plan = SandboxPlan::new(vec![net_cap], None, None);
+
+    // 5. Synthesise the LockedPlugin (LlmBackend port).
+    let plugin = make_llm_locked_plugin("ollama-plugin", bin_path);
+
+    // 6. Build the config JSON.  Ollama has no required API key; set
+    //    bearer_token_env to an unset name so no Authorization header is
+    //    injected (correct for the happy-path cassette).
+    let config = serde_json::json!({
+        "base_url": api_base,
+        "bearer_token_env": "OLLAMA_BEARER_TOKEN_DEFINITELY_NOT_SET_FOR_TESTS"
+    });
+
+    // 7. Spawn under the native sandbox.
+    let dyn_llm = tau_plugin_compat::driver::spawn_llm_under_sandbox(
+        &plugin,
+        config,
+        Some(Arc::new(adapter)),
+        Some(&plan),
+    )
+    .await;
+
+    let dyn_llm = match dyn_llm {
+        Ok(b) => b,
+        Err(e) => {
+            panic!("spawn ollama-plugin under native adapter failed: {e:?}");
+        }
+    };
+
+    // 8. Invoke complete.
+    let req = make_cassette_completion_request("llama3.2");
+    let result = dyn_llm.complete(req).await;
+
+    // 9. Assert response matches cassette.
+    let resp = result.expect("ollama complete via cassette must succeed");
+    assert_eq!(
+        resp.text, "Hi there",
+        "expected cassette response 'Hi there'; got: {:?}",
+        resp.text
+    );
+
+    let received = cassette_server.received_requests();
+    assert_eq!(
+        received.len(),
+        1,
+        "cassette server should have received exactly 1 request; got: {}",
+        received.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test 5: openai plugin — cassette-replay via native sandbox
+// ---------------------------------------------------------------------------
+
+/// Spin up a `CassetteServer` for the openai happy-path cassette, install
+/// the openai plugin binary, configure it to connect to the cassette server
+/// via `base_url` in the JSON config, spawn under the native sandbox adapter,
+/// invoke `DynLlmBackend::complete`, and assert the response text matches the
+/// cassette's expected "Hi there" reply.
+///
+/// Skips if: (a) landlock/native adapter unavailable, (b) openai-plugin
+/// binary not yet built.
+#[tokio::test]
+async fn openai_layer4_native_completes_via_cassette() {
+    // 1. Locate the pre-built openai plugin binary.
+    let bin_path = locate_plugin_bin("openai-plugin");
+    if !bin_path.exists() {
+        eprintln!(
+            "SKIP: openai-plugin binary not found at {}; \
+             run `cargo build -p tau-plugins-openai --release` first",
+            bin_path.display()
+        );
+        return;
+    }
+
+    // 2. Resolve the native sandbox adapter.
+    let adapter = match resolve_native_or_skip().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    // 3. Start the cassette-replay server.
+    let cassette_path =
+        workspace_root().join("crates/tau-plugins/openai/tests/cassettes/complete_happy_path.yaml");
+    let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
+    let api_base = cassette_server.uri().to_string();
+
+    // 4. Build the SandboxPlan with Network(Http) for localhost.
+    let net_cap = make_net_http_localhost_cap();
+    let plan = SandboxPlan::new(vec![net_cap], None, None);
+
+    // 5. Synthesise the LockedPlugin (LlmBackend port).
+    let plugin = make_llm_locked_plugin("openai-plugin", bin_path);
+
+    // 6. Build the config JSON.  Set api_key directly (test-only path).
+    let config = serde_json::json!({
+        "base_url": api_base,
+        "api_key": "sk-test"
+    });
+
+    // 7. Spawn under the native sandbox.
+    let dyn_llm = tau_plugin_compat::driver::spawn_llm_under_sandbox(
+        &plugin,
+        config,
+        Some(Arc::new(adapter)),
+        Some(&plan),
+    )
+    .await;
+
+    let dyn_llm = match dyn_llm {
+        Ok(b) => b,
+        Err(e) => {
+            panic!("spawn openai-plugin under native adapter failed: {e:?}");
+        }
+    };
+
+    // 8. Invoke complete.
+    let req = make_cassette_completion_request("gpt-4o-mini");
+    let result = dyn_llm.complete(req).await;
+
+    // 9. Assert response matches cassette.
+    let resp = result.expect("openai complete via cassette must succeed");
+    assert_eq!(
+        resp.text, "Hi there",
+        "expected cassette response 'Hi there'; got: {:?}",
+        resp.text
+    );
+
+    let received = cassette_server.received_requests();
+    assert_eq!(
+        received.len(),
+        1,
+        "cassette server should have received exactly 1 request; got: {}",
+        received.len()
+    );
 }

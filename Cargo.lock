@@ -2881,6 +2881,7 @@ dependencies = [
  "tau-domain",
  "tau-pkg",
  "tau-plugin-protocol",
+ "tau-plugin-test-support",
  "tau-ports",
  "tau-runtime",
  "tau-sandbox-container",
