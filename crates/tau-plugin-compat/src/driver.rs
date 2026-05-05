@@ -52,14 +52,21 @@ pub enum DriveError {
 /// use a synthetic run/agent/span ID stable enough for log correlation
 /// but unique enough that parallel test runs don't conflate.
 pub fn test_trace_context() -> tau_plugin_protocol::handshake::TraceContext {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
+    // Atomic counter guarantees uniqueness across parallel test runs even
+    // when nanosecond clock resolution can't distinguish two consecutive
+    // calls (observed on macOS CI where two identical nanos timestamps
+    // surfaced from back-to-back invocations).
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
     tau_plugin_protocol::handshake::TraceContext::new(
-        format!("test-driver-run-{nanos}"),
-        format!("test-agent-{nanos}"),
-        format!("test-span-{nanos}"),
+        format!("test-driver-run-{nanos}-{seq}"),
+        format!("test-agent-{nanos}-{seq}"),
+        format!("test-span-{nanos}-{seq}"),
     )
 }
 
