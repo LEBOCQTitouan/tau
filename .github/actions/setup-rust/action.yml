@@ -1,0 +1,40 @@
+name: Setup Rust
+description: |
+  Install a Rust toolchain (with optional components) and configure
+  Swatinem/rust-cache for inter-run caching of `target/` and the cargo
+  registry/git caches. Saves cache only on main-branch pushes to keep
+  PR caches fresh; PRs restore from main's most recent cache.
+
+inputs:
+  toolchain:
+    description: Rust toolchain version (stable, 1.91, master, etc.)
+    required: false
+    default: stable
+  components:
+    description: Comma-separated list of components (rustfmt, clippy)
+    required: false
+    default: ""
+  cache-key:
+    description: Job-specific cache key suffix (default uses github.job)
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+    - name: Cache cargo registry, target, and sccache
+      uses: Swatinem/rust-cache@v2
+      with:
+        # One cache per job-name to avoid cross-job contamination of
+        # target/ artifacts. Job-name is derived from github.job by
+        # default; callers can override via the cache-key input.
+        key: ${{ inputs.cache-key != '' && inputs.cache-key || github.job }}
+        # Save the cache only when running on main (push events to main).
+        # PRs restore but don't write — keeps cache stable + avoids
+        # PR-specific bloat.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
