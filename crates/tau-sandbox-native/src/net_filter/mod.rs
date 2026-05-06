@@ -12,24 +12,22 @@
 //! 5. Apply nftables ruleset in child netns via `nsenter --net=... -- nft -f -`.
 //! 6. Return a `NetFilterHandle` whose `Drop` removes the parent veth.
 
-#[allow(dead_code)]
 mod error;
-#[allow(dead_code)]
 mod exec;
-// Submodules for Tasks 2-5 (added incrementally):
-// mod probe;
-// mod validate;
+mod probe;
+mod validate;
+// Submodules for Tasks 3-6 (added incrementally):
 // mod resolve;
 // mod netns;
 // mod rules;
 // mod handle;
 
 pub use error::NetFilterError;
+pub use probe::probe_prerequisites;
+pub use validate::validate_hosts;
 
-// Public API surface (filled in by Tasks 2-6):
+// Public API surface (filled in by Tasks 3-6):
 //
-// pub fn probe_prerequisites() -> Result<(), NetFilterError>;
-// pub fn validate_hosts(hosts: &[String]) -> Result<(), NetFilterError>;
 // pub async fn apply_per_host_filter(
 //     plan: &SandboxPlan,
 //     child_pid: i32,
