@@ -15,7 +15,7 @@
 //! the helpers + orchestrator are unused at runtime — `#[allow(dead_code)]`
 //! at module level silences the lints.
 
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports, clippy::vec_init_then_push)]
 
 mod error;
 mod exec;
