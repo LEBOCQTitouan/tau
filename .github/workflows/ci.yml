@@ -350,6 +350,7 @@ jobs:
 
   test-conformance:
     name: test (conformance)
+    needs: build-fixtures-linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -359,6 +360,17 @@ jobs:
           with-nextest: true
           with-sccache: true
           with-mold: true
+      - name: Download fixture binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-fixture-binaries
+          path: ./prebuilt
+      - name: Place plugin binaries
+        run: |
+          mkdir -p target/release
+          mv ./prebuilt/anthropic-plugin ./prebuilt/ollama-plugin ./prebuilt/openai-plugin \
+             target/release/
+          touch target/release/anthropic-plugin target/release/ollama-plugin target/release/openai-plugin
       - name: Run conformance suite against all 3 plugins
         run: |
           cargo nextest run -p anthropic --test conformance --no-capture
