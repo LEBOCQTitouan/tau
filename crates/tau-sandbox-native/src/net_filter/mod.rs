@@ -15,9 +15,9 @@
 mod error;
 mod exec;
 mod probe;
+mod resolve;
 mod validate;
-// Submodules for Tasks 3-6 (added incrementally):
-// mod resolve;
+// Submodules for Tasks 4-6 (added incrementally):
 // mod netns;
 // mod rules;
 // mod handle;
