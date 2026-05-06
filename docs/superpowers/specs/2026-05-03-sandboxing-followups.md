@@ -9,6 +9,8 @@
 > **Update (2026-05-04):** Sub-project B (plugin compatibility verification) shipped. See [its design doc](2026-05-04-plugin-compat-design.md) and [ADR-0016](../../decisions/0016-plugin-compat-verification.md). Sub-project D's *foundation* (controlled-environment binary + landlock-symlink-fix in `tau-sandbox-native::light::resolve_symlinks_for_landlock`) was absorbed into B; D's remainder is to re-introduce the 5 e2e test files and build the port-aware driver for the 10 `#[ignore]`'d Layer 4 tests in `tau-plugin-compat/tests/layer4_*.rs`. The 8 remaining sub-projects are D (reduced scope), E, F, G, H, I, J, K — plus the closed-inline C.
 >
 > **Update (2026-05-06):** Sub-project D (e2e landlock CI integration + port-aware Layer 4 driver) shipped. See [its design doc](2026-05-05-e2e-landlock-design.md) and [ADR-0017](../../decisions/0017-e2e-landlock-and-driver.md). The 5 e2e kernel-enforcement files are re-introduced and passing on Linux CI; the port-aware driver foundation is in place. **However:** the 10 Layer 4 plugin-compat `#[ignore]`'s did NOT flip — plugins exec under strict-tier landlock but EOF before handshake (their startup-IO surface needs per-plugin cataloging). That work is deferred to a D-followup or sub-project F. Two priority-12 native-adapter bugs were caught and fixed during D (Execute access flag + binary-parent auto-add); D also delivered GitHub Actions caching infrastructure as a bonus. The 7 remaining sub-projects are E, F, G, H, I, J, K — plus the closed-inline C.
+>
+> **Update (2026-05-06):** Sub-project F (per-host network filtering via nftables-in-netns) **PARTIAL shipped** at PR #35 (commit d4438ae). See [ADR-0019](../../decisions/0019-per-host-network-filter.md). The full `tau-sandbox-native::net_filter` machinery (probe + validate + resolve + veth/netns + nft ruleset + `NetFilterHandle` + orchestrator) is implemented and unit-tested (~26 tests). **Task 6.5 (strict.rs `apply_post_spawn` trait extension) is the remaining work.** Architectural reason: `Sandbox::wrap_spawn` returns a `pre_exec` closure that runs inside the forked child before `execve` — the child PID is not yet known to the parent at this point, but `ip link set <peer> netns <pid>` requires it. The clean solution is a new `Sandbox::apply_post_spawn(plan, child_pid)` trait method with a sync pipe rendezvous; this requires extending `tau-ports` and updating all adapters. Until task 6.5 ships, `unshare_flags_for_plan` retains the v0.1 fallback. The 6 remaining open sub-projects are G, H, I, J, K — plus the F task 6.5 follow-up and the Layer 4 startup-IO cataloging spinoff.
 
 ## Test coverage assessment
 
@@ -204,26 +206,43 @@ The original scope assumed the priority-12 chain model (`select_adapter` against
 
 ---
 
-### Sub-project F — Per-host network filtering via nftables-in-netns
+### Sub-project F — Per-host network filtering via nftables-in-netns ✅ PARTIAL 2026-05-06
 
 **One-line:** Replace the v0.1 "inherit parent netns" fallback with real per-host egress filtering.
 
-**Status:** v0.1 strips `CLONE_NEWNET` when `Network(Http)` is requested (over-permissive). `tracing::warn!` fires once-per-process.
+**Status:** PARTIAL. Machinery shipped at PR #35 (commit d4438ae). Task 6.5 (strict.rs `apply_post_spawn` trait extension) is the remaining work. See [ADR-0019](../../decisions/0019-per-host-network-filter.md).
 
-**Scope:**
-1. Keep `CLONE_NEWNET` always; child runs in fresh empty netns.
-2. Create veth pair in parent + move one end to child netns + assign IPs.
-3. Resolve hostnames in `Capability::Network(NetCapability::Http { hosts })` to IPs (DNS lookup with timeout).
-4. Generate nftables ruleset in child netns: allow egress to resolved IPs + DNS; drop everything else.
-5. Need `CAP_NET_ADMIN` inside the user namespace — verify this works for unprivileged users.
-6. Fallback when nftables isn't available: stay with the v0.1 over-permissive behavior + warn.
-7. Remove the once-per-process warn from `unshare_flags_for_plan` since it's now actually enforcing.
+**What shipped (PR #35, 2026-05-06):**
 
-**Test coverage to add:** ~5 tests + e2e (depends on D).
+The full `tau-sandbox-native::net_filter` module (~640 LOC, 26+ unit tests):
+- `probe` — checks nft/ip/nsenter binaries and CAP_NET_ADMIN-in-userns availability.
+- `validate` — rejects wildcard hosts (`*`, `*.x.y`) at plan validation time.
+- `resolve` — multi-record (A + AAAA) DNS lookup per host via `tokio::net::lookup_host`.
+- `netns` — veth/netns setup helpers (create netns, veth pair, move peer, assign IPs).
+- `rules` — nft ruleset generation (deterministic DSL, verified by insta snapshots).
+- `handle` — `NetFilterHandle` RAII guard that tears down veth/netns on Drop.
+- `orchestrator` — `apply_per_host_filter(plan, child_pid)` composing the above.
+- New `SandboxError::NetFilter { message: String }` variant in `tau-ports`.
+- New `test-net-filter / linux` CI job in privileged Docker (GHA host runners block uid_map writes).
 
-**Estimated scope:** 1.5-2 weeks (nftables tooling complexity).
+**What did NOT ship — task 6.5 deferral:**
 
-**Dependencies:** Sub-project D.
+`Sandbox::wrap_spawn` provides a `pre_exec` closure that runs inside the forked child before `execve`. The child PID is not yet known to the parent at this point. `apply_per_host_filter` needs the child PID to move the veth peer into the child's netns via `ip link set <peer> netns <pid>` — a parent-side operation. These requirements are incompatible with the current `Sandbox::wrap_spawn` API.
+
+The clean solution is a new `Sandbox::apply_post_spawn(plan, child_pid)` trait method that runs concurrently with the child's pre_exec phase while the child blocks on a sync pipe. This requires extending `tau-ports`, updating all adapters + `plugin_host`, and updating `MockSandbox`. Task 6.5 will land this integration.
+
+Until task 6.5 ships, `unshare_flags_for_plan` retains the v0.1 fallback (drops CLONE_NEWNET when Network(Http) is in plan; child inherits parent netns).
+
+**Original scope (for reference):**
+1. Keep `CLONE_NEWNET` always; child runs in fresh empty netns. ✅ (machinery ready; not yet wired)
+2. Create veth pair in parent + move one end to child netns + assign IPs. ✅ (machinery ready; not yet wired)
+3. Resolve hostnames in `Capability::Network(NetCapability::Http { hosts })` to IPs. ✅ (machinery ready; not yet wired)
+4. Generate nftables ruleset in child netns: allow egress to resolved IPs + DNS; drop everything else. ✅ (machinery ready; not yet wired)
+5. Need `CAP_NET_ADMIN` inside the user namespace. ✅ (probed; GHA host runner workaround in place)
+6. Hard refuse when prerequisites absent (spec changed from "fallback + warn" to hard refuse — ADR-0019 Decision 1). ✅
+7. Remove the once-per-process warn from `unshare_flags_for_plan`. ⏳ (deferred to task 6.5)
+
+**Dependencies:** Sub-project D (done). Task 6.5 for strict.rs wiring.
 
 ---
 
@@ -380,7 +399,7 @@ noise of follow-up work.
 | **Layer 2 cross-check is unimplemented and untested.** The plan-erratum block deferred the install-time manifest-vs-`CAPABILITIES`-handshake comparison; lockfile `required_shapes` is currently always populated empty by the install path. | **B** | The cross-check needs the install pipeline to be sandbox-aware (depends on A) and to know which adapter to validate against. |
 | **`strict.rs::apply_strict` orchestrator has no direct unit test.** Each of its three helpers (`baseline_syscall_map`, `exec::extend_with_exec_rules`, `net::extend_with_network_rules` + `compile_filter`) is independently tested, but the `?`-chain that wires them isn't unit-tested as a unit. | **C extension** (or rolled into D's e2e work) | At Light tier the orchestrator is trivial; at Strict tier it does enough work that a focused integration test would be valuable. Inline coverage didn't reach this because every wired-up call in the chain is itself well-tested. |
 | **Per-command exec gating is a no-op stub.** `exec::extend_with_exec_rules` does nothing at v0.1; the 4 unit tests verify the no-op behavior. The actual gating logic (landlock V2 `AccessFs::Execute`) is unwritten. | **E** | landlock V2 requires kernel ≥ 5.19; needs feature detection + fallback path. |
-| **Per-host network filtering is over-permissive.** When `Network(Http)` is requested, the child inherits the parent's full netns. The 5 unit tests verify the unshare-flag decision; the actual nftables-in-netns enforcement is unwritten. | **F** | Needs `CAP_NET_ADMIN` + nftables rule generation + DNS resolution; substantial complexity. |
+| **Per-host network filtering is over-permissive (v0.1 fallback still active).** F machinery shipped 2026-05-06 (PR #35, commit d4438ae) — probe, validate, resolve, veth/netns, nft ruleset, `NetFilterHandle`, orchestrator, 26+ tests. **Task 6.5 still pending**: `Sandbox::apply_post_spawn` trait extension + sync pipe rendezvous in `plugin_host` required to wire the filter at spawn time. Until task 6.5 ships, `unshare_flags_for_plan` retains the v0.1 fallback. See [ADR-0019](../../decisions/0019-per-host-network-filter.md). | **F task 6.5** | `Sandbox::wrap_spawn` returns before child PID is known; filter setup requires child PID for veth peer move. Trait surgery deferred to focused task 6.5. |
 | **`SandboxHandle` Drop semantics are unit-tested but not integration-tested.** Container adapter relies on `--rm` for cleanup; future cgroup/cidfile-based adapters will need real Drop coverage. | **D** + container e2e | Currently no real-cleanup adapter ships, so the gap is forward-compat only. |
 | **No async-signal-safety verification in `pre_exec` chain.** The KNOWN-LIMITATION comments document the malloc-during-fork hazard; no test confirms the closure body is allocation-free on the success path (and it currently isn't). | **I** | The fork-server pattern is the real fix; testing the current closure for signal-safety would just pin the bug. |
 | **`tau resolve --check-sandbox` integration tests use `MockSandbox` only.** Real adapter coverage at the CLI level requires the env-var opt-in path (`TAU_TESTING_ALLOW_MOCK_SANDBOX=1`) which is itself a debt item. | **H** | Replacing Mock with real Native + Container in CLI integration tests is part of the H cleanup. |
