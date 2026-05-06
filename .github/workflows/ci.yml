@@ -332,6 +332,12 @@ jobs:
               set -e
               apt-get update -qq
               apt-get install -y -qq iproute2 nftables
+              # The strict_net_filter integration tests spawn the controlled-env
+              # fixture binary (used to verify socket / EACCES behaviour from
+              # inside the sandbox). Build it before running the tests.
+              cargo build --manifest-path \
+                crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml \
+                --release
               cargo test -p tau-sandbox-native --lib net_filter
               cargo test -p tau-sandbox-native --features integration-tests --test strict_net_filter
             '
