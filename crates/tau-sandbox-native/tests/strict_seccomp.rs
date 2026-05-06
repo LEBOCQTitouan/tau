@@ -10,6 +10,8 @@
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::process::Command;
+use tau_domain::fixtures::{cap_fs_read, cap_net_http};
+use tau_ports::fixtures::plan_from_capabilities;
 use tau_ports::{Sandbox, SandboxPlan, SandboxTier};
 use tau_sandbox_native::NativeSandbox;
 
@@ -33,31 +35,15 @@ fn bin_parent_str() -> String {
 
 fn plan_strict_no_network() -> SandboxPlan {
     let bin_parent = bin_parent_str();
-    serde_json::from_value(serde_json::json!({
-        "capabilities": [
-            {"kind": "fs.read", "paths": [bin_parent]}
-        ],
-        "context": null,
-        "limits": null,
-    }))
-    .expect("valid plan")
+    plan_from_capabilities(vec![cap_fs_read(&[&bin_parent])])
 }
 
 fn plan_strict_with_network() -> SandboxPlan {
     let bin_parent = bin_parent_str();
-    serde_json::from_value(serde_json::json!({
-        "capabilities": [
-            {
-                "kind": "net.http",
-                "hosts": ["api.example.com"],
-                "methods": ["GET"]
-            },
-            {"kind": "fs.read", "paths": [bin_parent]}
-        ],
-        "context": null,
-        "limits": null,
-    }))
-    .expect("valid plan")
+    plan_from_capabilities(vec![
+        cap_net_http(&["api.example.com"], &["GET"]),
+        cap_fs_read(&[&bin_parent]),
+    ])
 }
 
 #[tokio::test]

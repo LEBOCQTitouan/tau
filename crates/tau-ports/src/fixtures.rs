@@ -525,20 +525,63 @@ impl Sandbox for MockSandbox {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SandboxPlan / WorkingContext / ResourceLimits construction helpers
+// ---------------------------------------------------------------------------
+//
+// `SandboxPlan`, `WorkingContext`, and `ResourceLimits` are all
+// `#[non_exhaustive]`. External crates cannot use struct-literal syntax to
+// construct them. These helpers provide typed constructors so downstream test
+// crates can build canonical values without the
+// `serde_json::from_value(json!({...}))` round-trip workaround.
+
+/// Build a [`SandboxPlan`] from a capability list with no context or limits.
+pub fn plan_from_capabilities(caps: Vec<tau_domain::Capability>) -> SandboxPlan {
+    SandboxPlan::new(caps, None, None)
+}
+
+/// Build a [`SandboxPlan`] from a capability list with a [`WorkingContext`].
+pub fn plan_with_context(
+    caps: Vec<tau_domain::Capability>,
+    ctx: crate::sandbox::WorkingContext,
+) -> SandboxPlan {
+    SandboxPlan::new(caps, Some(ctx), None)
+}
+
+/// Build a [`WorkingContext`] from a working directory and environment map.
+pub fn working_context(
+    working_dir: impl Into<std::path::PathBuf>,
+    env: BTreeMap<String, String>,
+) -> crate::sandbox::WorkingContext {
+    crate::sandbox::WorkingContext {
+        working_dir: Some(working_dir.into()),
+        env,
+    }
+}
+
+/// Build a [`ResourceLimits`] from optional memory and CPU-second limits.
+///
+/// `cpu_seconds` is `Option<u32>` (matching the field type in
+/// [`crate::sandbox::ResourceLimits`]).
+pub fn resource_limits(
+    memory_bytes: Option<u64>,
+    cpu_seconds: Option<u32>,
+) -> crate::sandbox::ResourceLimits {
+    crate::sandbox::ResourceLimits {
+        memory_bytes,
+        cpu_seconds,
+        wall_clock_seconds: None,
+        max_subprocesses: None,
+    }
+}
+
 #[cfg(test)]
 mod sandbox_v01_tests {
     use super::*;
     use tau_domain::{Capability, CapabilityShape};
 
     fn read_cap() -> Capability {
-        // FsCapability::Read is #[non_exhaustive] so we can't struct-literal it
-        // outside tau-domain; round-trip through JSON using the flat kind-based
-        // format defined in tau_domain's custom serde impl instead.
-        serde_json::from_value::<Capability>(serde_json::json!({
-            "kind": "fs.read",
-            "paths": ["/tmp/**"]
-        }))
-        .expect("decode Capability::Filesystem(Read)")
+        tau_domain::fixtures::cap_fs_read(&["/tmp/**"])
     }
 
     #[tokio::test]

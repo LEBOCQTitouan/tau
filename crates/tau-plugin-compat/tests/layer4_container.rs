@@ -35,7 +35,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use tau_domain::{AgentInstanceId, Capability, PluginKind, PluginManifest, PortKind};
+use tau_domain::{
+    fixtures as domain_fixtures, AgentInstanceId, Capability, PluginKind, PluginManifest, PortKind,
+};
 use tau_pkg::LockedPlugin;
 use tau_ports::{SandboxPlan, SandboxProbe, SessionContext};
 use tau_runtime::sandbox::registry::RegistryKind;
@@ -222,11 +224,7 @@ async fn shell_layer4_container_runs_echo_hello() {
     };
 
     // 4. Build the SandboxPlan. Shell plugin needs process.spawn capability.
-    let spawn_cap: Capability = serde_json::from_value(serde_json::json!({
-        "kind": "process.spawn",
-        "commands": ["echo"]
-    }))
-    .expect("process.spawn capability JSON must be valid");
+    let spawn_cap: Capability = domain_fixtures::cap_process_spawn(&["echo"]);
 
     let plan = SandboxPlan::new(vec![spawn_cap.clone()], None, None);
 
@@ -327,11 +325,7 @@ async fn fs_read_layer4_container_reads_data_file() {
     // tempdir. Use a glob that covers the whole tempdir.
     let tmpdir_glob = format!("{}/**", scope.path().display());
 
-    let fs_read_cap: Capability = serde_json::from_value(serde_json::json!({
-        "kind": "fs.read",
-        "paths": [tmpdir_glob.clone()]
-    }))
-    .expect("fs.read capability JSON must be valid");
+    let fs_read_cap: Capability = domain_fixtures::cap_fs_read(&[&tmpdir_glob]);
 
     let plan = SandboxPlan::new(vec![fs_read_cap.clone()], None, None);
 

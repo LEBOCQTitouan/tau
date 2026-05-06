@@ -38,3 +38,5 @@ serde_json = "1"
 tau-cli = { path = "../tau-cli" }
 # Cassette replayer for Layer 4 HTTP plugin tests (Task 7, sub-project D).
 tau-plugin-test-support = { workspace = true }
+tau-domain = { workspace = true, features = ["serde", "test-fixtures"] }
+tau-ports  = { workspace = true, features = ["serde", "test-fixtures"] }

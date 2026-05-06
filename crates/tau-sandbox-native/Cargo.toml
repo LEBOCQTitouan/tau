@@ -22,11 +22,11 @@ nix         = { workspace = true }
 seccompiler = { workspace = true }
 
 [dev-dependencies]
+serde_json = "1"
 tempfile   = { workspace = true }
 tokio      = { workspace = true, features = ["macros", "rt"] }
-serde_json = "1"
-tau-domain = { workspace = true, features = ["serde"] }
-tau-ports  = { workspace = true, features = ["serde"] }
+tau-domain = { workspace = true, features = ["serde", "test-fixtures"] }
+tau-ports  = { workspace = true, features = ["serde", "test-fixtures"] }
 
 [features]
 default = []

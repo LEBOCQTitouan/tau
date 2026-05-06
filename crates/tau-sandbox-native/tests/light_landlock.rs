@@ -16,6 +16,8 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use tau_domain::fixtures::cap_fs_read;
+use tau_ports::fixtures::plan_from_capabilities;
 use tau_ports::{Sandbox, SandboxPlan, SandboxTier};
 use tau_sandbox_native::NativeSandbox;
 use tempfile::TempDir;
@@ -48,15 +50,11 @@ fn plan_with_read_paths(paths: Vec<&str>) -> SandboxPlan {
         .expect("controlled-env binary has parent dir")
         .to_string_lossy()
         .into_owned();
-    let mut all_paths: Vec<serde_json::Value> =
-        paths.iter().map(|p| serde_json::json!(p)).collect();
-    all_paths.push(serde_json::json!(bin_parent));
-    serde_json::from_value(serde_json::json!({
-        "capabilities": [{"kind": "fs.read", "paths": all_paths}],
-        "context": null,
-        "limits": null,
-    }))
-    .expect("valid plan")
+    // Extend with the binary's parent so landlock allows exec of the binary.
+    let mut all_paths_owned: Vec<String> = paths.iter().map(|s| s.to_string()).collect();
+    all_paths_owned.push(bin_parent);
+    let all_path_refs: Vec<&str> = all_paths_owned.iter().map(|s| s.as_str()).collect();
+    plan_from_capabilities(vec![cap_fs_read(&all_path_refs)])
 }
 
 #[tokio::test]
