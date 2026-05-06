@@ -194,6 +194,13 @@ pub enum SandboxError {
         /// Identifier of the limit that was exceeded.
         limit: String,
     },
+    /// Per-host network filter failed to set up or apply (sub-project F).
+    /// The wrapped message includes the underlying NetFilterError.
+    #[error("sandbox network filter: {message}")]
+    NetFilter {
+        /// Free-form message including the failure context.
+        message: String,
+    },
     /// Plugin internal error.
     ///
     /// See: [escape-hatches.md#sandboxerror-internal](../docs/explanation/escape-hatches.md#sandboxerror-internal).
@@ -453,5 +460,13 @@ mod tests {
         let err = op().unwrap_err();
         assert_eq!(err, ToolError::Storage(StorageError::Timeout));
         assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn sandbox_error_net_filter_renders() {
+        let e = SandboxError::NetFilter {
+            message: "nftables binary missing".to_string(),
+        };
+        assert_eq!(format!("{e}"), "sandbox network filter: nftables binary missing");
     }
 }
