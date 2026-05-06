@@ -112,12 +112,10 @@ pub(crate) mod test_support {
                 args: args.iter().map(|s| s.to_string()).collect(),
                 stdin: stdin.map(String::from),
             });
-            let canned = self
-                .responses
-                .lock()
-                .expect("mutex")
-                .pop()
-                .ok_or_else(|| io::Error::other("MockCommandExecutor: no canned response left"))?;
+            let canned =
+                self.responses.lock().expect("mutex").pop().ok_or_else(|| {
+                    io::Error::other("MockCommandExecutor: no canned response left")
+                })?;
             Ok(Output {
                 status: ExitStatus::from_raw(canned.exit_code << 8),
                 stdout: canned.stdout,

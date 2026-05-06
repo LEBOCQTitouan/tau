@@ -66,8 +66,16 @@ fn next_veth_names() -> (String, String) {
     let pid = std::process::id();
     let host = format!("tsb{}-{}h", pid % 100000, seq);
     let child = format!("tsb{}-{}c", pid % 100000, seq);
-    debug_assert!(host.len() < 16, "veth name too long: {host} ({} chars)", host.len());
-    debug_assert!(child.len() < 16, "veth name too long: {child} ({} chars)", child.len());
+    debug_assert!(
+        host.len() < 16,
+        "veth name too long: {host} ({} chars)",
+        host.len()
+    );
+    debug_assert!(
+        child.len() < 16,
+        "veth name too long: {child} ({} chars)",
+        child.len()
+    );
     (host, child)
 }
 
@@ -76,9 +84,7 @@ fn next_veth_names() -> (String, String) {
 /// Returns the `VethPair` for downstream `move_peer_to_netns` +
 /// `assign_child_ip_and_up_via_nsenter`.
 #[allow(dead_code)] // consumed by Task 6's orchestrator
-pub(super) fn setup_veth_pair(
-    exec: &dyn CommandExecutor,
-) -> Result<VethPair, NetFilterError> {
+pub(super) fn setup_veth_pair(exec: &dyn CommandExecutor) -> Result<VethPair, NetFilterError> {
     let (name_host, name_child) = next_veth_names();
     let (parent_ip, child_ip) = next_subnet();
 
@@ -87,10 +93,13 @@ pub(super) fn setup_veth_pair(
         .run(
             "ip",
             &[
-                "link", "add",
+                "link",
+                "add",
                 &name_host,
-                "type", "veth",
-                "peer", "name",
+                "type",
+                "veth",
+                "peer",
+                "name",
                 &name_child,
             ],
             None,
@@ -110,11 +119,7 @@ pub(super) fn setup_veth_pair(
     let out = exec
         .run(
             "ip",
-            &[
-                "addr", "add",
-                &format!("{parent_ip}/30"),
-                "dev", &name_host,
-            ],
+            &["addr", "add", &format!("{parent_ip}/30"), "dev", &name_host],
             None,
         )
         .map_err(|e| NetFilterError::NetnsSetup {
@@ -161,8 +166,11 @@ pub(super) fn move_peer_to_netns(
         .run(
             "ip",
             &[
-                "link", "set", &pair.name_child,
-                "netns", &child_pid.to_string(),
+                "link",
+                "set",
+                &pair.name_child,
+                "netns",
+                &child_pid.to_string(),
             ],
             None,
         )
@@ -197,25 +205,55 @@ pub(super) fn assign_child_ip_and_up_via_nsenter(
     let parent_ip_str = pair.parent_ip.to_string();
 
     let steps: &[(&str, &[&str])] = &[
-        ("nsenter ip link set lo up",      &[netns_path.as_str(), "ip", "link", "set", "lo", "up"]),
-        ("nsenter ip addr add (child)",    &[netns_path.as_str(), "ip", "addr", "add", child_ip_with_mask.as_str(), "dev", pair.name_child.as_str()]),
-        ("nsenter ip link set up (child)", &[netns_path.as_str(), "ip", "link", "set", pair.name_child.as_str(), "up"]),
-        ("nsenter ip route add default",   &[netns_path.as_str(), "ip", "route", "add", "default", "via", parent_ip_str.as_str()]),
+        (
+            "nsenter ip link set lo up",
+            &[netns_path.as_str(), "ip", "link", "set", "lo", "up"],
+        ),
+        (
+            "nsenter ip addr add (child)",
+            &[
+                netns_path.as_str(),
+                "ip",
+                "addr",
+                "add",
+                child_ip_with_mask.as_str(),
+                "dev",
+                pair.name_child.as_str(),
+            ],
+        ),
+        (
+            "nsenter ip link set up (child)",
+            &[
+                netns_path.as_str(),
+                "ip",
+                "link",
+                "set",
+                pair.name_child.as_str(),
+                "up",
+            ],
+        ),
+        (
+            "nsenter ip route add default",
+            &[
+                netns_path.as_str(),
+                "ip",
+                "route",
+                "add",
+                "default",
+                "via",
+                parent_ip_str.as_str(),
+            ],
+        ),
     ];
 
     for (context, args) in steps {
         let out = exec
             .run("nsenter", args, None)
-            .map_err(|e| NetFilterError::NetnsSetup {
-                context,
-                source: e,
-            })?;
+            .map_err(|e| NetFilterError::NetnsSetup { context, source: e })?;
         if !out.status.success() {
             return Err(NetFilterError::NetnsSetup {
                 context,
-                source: std::io::Error::other(
-                    String::from_utf8_lossy(&out.stderr).into_owned(),
-                ),
+                source: std::io::Error::other(String::from_utf8_lossy(&out.stderr).into_owned()),
             });
         }
     }
@@ -225,8 +263,8 @@ pub(super) fn assign_child_ip_and_up_via_nsenter(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::exec::test_support::{CannedOutput, MockCommandExecutor};
+    use super::*;
 
     #[test]
     fn next_subnet_returns_valid_ipv4_pair_in_10_222_range() {
@@ -236,7 +274,11 @@ mod tests {
         assert_eq!(child.octets()[0], 10);
         assert_eq!(child.octets()[1], 222);
         assert_eq!(parent.octets()[2], child.octets()[2], "same subnet");
-        assert_eq!(child.octets()[3], parent.octets()[3] + 1, "child is parent+1");
+        assert_eq!(
+            child.octets()[3],
+            parent.octets()[3] + 1,
+            "child is parent+1"
+        );
     }
 
     #[test]
@@ -282,9 +324,9 @@ mod tests {
     fn setup_veth_pair_propagates_ip_failure() {
         // First call fails immediately; only one canned response needed.
         // Vec::pop() returns the last element — single-element vec works fine.
-        let exec = MockCommandExecutor::new(vec![
-            CannedOutput::err("RTNETLINK answers: Operation not permitted"),
-        ]);
+        let exec = MockCommandExecutor::new(vec![CannedOutput::err(
+            "RTNETLINK answers: Operation not permitted",
+        )]);
         let result = setup_veth_pair(&exec);
         let err = result.unwrap_err();
         assert!(matches!(err, NetFilterError::NetnsSetup { .. }));

@@ -467,6 +467,9 @@ mod tests {
         let e = SandboxError::NetFilter {
             message: "nftables binary missing".to_string(),
         };
-        assert_eq!(format!("{e}"), "sandbox network filter: nftables binary missing");
+        assert_eq!(
+            format!("{e}"),
+            "sandbox network filter: nftables binary missing"
+        );
     }
 }

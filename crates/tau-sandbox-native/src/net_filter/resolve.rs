@@ -55,9 +55,7 @@ pub(super) async fn resolve_hosts(
         };
 
         if addrs.is_empty() {
-            return Err(NetFilterError::DnsNoRecords {
-                host: host.clone(),
-            });
+            return Err(NetFilterError::DnsNoRecords { host: host.clone() });
         }
 
         for sock_addr in addrs {

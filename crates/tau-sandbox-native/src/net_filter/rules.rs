@@ -19,10 +19,7 @@ use super::exec::CommandExecutor;
 /// Generate a deterministic nft ruleset. Iteration order is stable because
 /// the input is a `BTreeSet<IpAddr>`.
 #[allow(dead_code)]
-pub(super) fn generate_ruleset(
-    allowed_ips: &BTreeSet<IpAddr>,
-    dns_servers: &[IpAddr],
-) -> String {
+pub(super) fn generate_ruleset(allowed_ips: &BTreeSet<IpAddr>, dns_servers: &[IpAddr]) -> String {
     let mut lines: Vec<String> = Vec::new();
     lines.push("table inet tau_sandbox {".to_string());
     lines.push("    chain output {".to_string());
@@ -84,12 +81,7 @@ pub(super) fn discover_dns_servers() -> Vec<IpAddr> {
 }
 
 fn discover_dns_servers_from_path(path: &Path) -> Vec<IpAddr> {
-    let fallback = || {
-        vec![
-            IpAddr::from([1u8, 1, 1, 1]),
-            IpAddr::from([8u8, 8, 8, 8]),
-        ]
-    };
+    let fallback = || vec![IpAddr::from([1u8, 1, 1, 1]), IpAddr::from([8u8, 8, 8, 8])];
 
     let content = match std::fs::read_to_string(path) {
         Ok(s) => s,
@@ -117,8 +109,8 @@ fn discover_dns_servers_from_path(path: &Path) -> Vec<IpAddr> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::exec::test_support::{CannedOutput, MockCommandExecutor};
+    use super::*;
 
     fn ipv4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
         IpAddr::from([a, b, c, d])

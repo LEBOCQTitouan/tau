@@ -17,8 +17,8 @@ mod exec;
 mod netns;
 mod probe;
 mod resolve;
-mod validate;
 mod rules;
+mod validate;
 // Submodule for Task 6 (added incrementally):
 // mod handle;
 
