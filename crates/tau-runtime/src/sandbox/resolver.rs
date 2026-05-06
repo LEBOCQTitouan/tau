@@ -117,6 +117,23 @@ impl SandboxAdapter {
             SandboxAdapter::Passthrough(a) => a.wrap_spawn(plan, cmd).await,
         }
     }
+
+    /// Post-spawn sandbox configuration (e.g. per-host network filtering for
+    /// the strict tier). Called after `cmd.spawn()` while the child is blocked
+    /// on the sync-pipe. Default: no-op.
+    pub async fn apply_post_spawn(
+        &self,
+        plan: &SandboxPlan,
+        child_pid: i32,
+        handle: &mut SandboxHandle,
+    ) -> Result<(), SandboxError> {
+        match self {
+            SandboxAdapter::Native(a) => a.apply_post_spawn(plan, child_pid, handle).await,
+            SandboxAdapter::Container(a) => a.apply_post_spawn(plan, child_pid, handle).await,
+            SandboxAdapter::Mock(a) => a.apply_post_spawn(plan, child_pid, handle).await,
+            SandboxAdapter::Passthrough(a) => a.apply_post_spawn(plan, child_pid, handle).await,
+        }
+    }
 }
 
 impl Sandbox for SandboxAdapter {
@@ -166,6 +183,20 @@ impl Sandbox for SandboxAdapter {
             SandboxAdapter::Container(s) => s.wrap_spawn(plan, cmd).await,
             SandboxAdapter::Mock(s) => s.wrap_spawn(plan, cmd).await,
             SandboxAdapter::Passthrough(s) => s.wrap_spawn(plan, cmd).await,
+        }
+    }
+
+    async fn apply_post_spawn(
+        &self,
+        plan: &SandboxPlan,
+        child_pid: i32,
+        handle: &mut SandboxHandle,
+    ) -> Result<(), SandboxError> {
+        match self {
+            SandboxAdapter::Native(s) => s.apply_post_spawn(plan, child_pid, handle).await,
+            SandboxAdapter::Container(s) => s.apply_post_spawn(plan, child_pid, handle).await,
+            SandboxAdapter::Mock(s) => s.apply_post_spawn(plan, child_pid, handle).await,
+            SandboxAdapter::Passthrough(s) => s.apply_post_spawn(plan, child_pid, handle).await,
         }
     }
 }
