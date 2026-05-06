@@ -6,6 +6,11 @@ name: probe-userns-net
 
 on:
   workflow_dispatch:
+  # Also trigger on pushes to the verification branch — workflow_dispatch
+  # only works for workflows already on the default branch.
+  push:
+    branches:
+      - feat/f-probe-verification
 
 jobs:
   probe:
