@@ -1,0 +1,15 @@
+---
+source: crates/tau-sandbox-native/src/net_filter/rules.rs
+expression: ruleset
+---
+table inet tau_sandbox {
+    chain output {
+        type filter hook output priority 0; policy drop;
+        ct state established,related accept
+        ip daddr 93.184.216.34 accept
+        ip6 daddr 2606:2800:220:1:248:1893:25c8:1946 accept
+        udp dport 53 ip daddr 1.1.1.1 accept
+        udp dport 53 ip6 daddr 2606:4700:4700::1111 accept
+    }
+}
+

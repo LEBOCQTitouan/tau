@@ -18,8 +18,8 @@ mod netns;
 mod probe;
 mod resolve;
 mod validate;
-// Submodules for Tasks 5-6 (added incrementally):
-// mod rules;
+mod rules;
+// Submodule for Task 6 (added incrementally):
 // mod handle;
 
 pub use error::NetFilterError;
