@@ -20,11 +20,12 @@ use super::exec::CommandExecutor;
 /// the input is a `BTreeSet<IpAddr>`.
 #[allow(dead_code)]
 pub(super) fn generate_ruleset(allowed_ips: &BTreeSet<IpAddr>, dns_servers: &[IpAddr]) -> String {
-    let mut lines: Vec<String> = Vec::new();
-    lines.push("table inet tau_sandbox {".to_string());
-    lines.push("    chain output {".to_string());
-    lines.push("        type filter hook output priority 0; policy drop;".to_string());
-    lines.push("        ct state established,related accept".to_string());
+    let mut lines: Vec<String> = vec![
+        "table inet tau_sandbox {".to_string(),
+        "    chain output {".to_string(),
+        "        type filter hook output priority 0; policy drop;".to_string(),
+        "        ct state established,related accept".to_string(),
+    ];
 
     for ip in allowed_ips {
         match ip {
@@ -40,9 +41,7 @@ pub(super) fn generate_ruleset(allowed_ips: &BTreeSet<IpAddr>, dns_servers: &[Ip
         }
     }
 
-    lines.push("    }".to_string());
-    lines.push("}".to_string());
-    lines.push(String::new()); // trailing newline
+    lines.extend(["    }".to_string(), "}".to_string(), String::new()]);
     lines.join("\n")
 }
 

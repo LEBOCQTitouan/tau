@@ -22,8 +22,7 @@ use super::exec::CommandExecutor;
 
 /// Parent + child interface names + the pre-allocated /30 subnet IPs.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // consumed by Task 6's orchestrator
-pub(super) struct VethPair {
+pub(crate) struct VethPair {
     pub name_host: String,
     pub name_child: String,
     pub parent_ip: Ipv4Addr,
@@ -100,7 +99,6 @@ fn next_veth_names() -> (String, String) {
 ///
 /// Returns the `VethPair` for downstream `move_peer_to_netns` +
 /// `assign_child_ip_and_up_via_nsenter`.
-#[allow(dead_code)] // consumed by Task 6's orchestrator
 pub(crate) fn setup_veth_pair_with_subnet(
     exec: &dyn CommandExecutor,
     subnet: VethSubnet,
@@ -177,7 +175,6 @@ pub(crate) fn setup_veth_pair_with_subnet(
 }
 
 /// Move the child end of the veth pair into the child's netns (via PID).
-#[allow(dead_code)]
 pub(super) fn move_peer_to_netns(
     exec: &dyn CommandExecutor,
     pair: &VethPair,
@@ -215,7 +212,6 @@ pub(super) fn move_peer_to_netns(
 /// - `ip addr add <child_ip>/30 dev <name_child>`
 /// - `ip link set <name_child> up`
 /// - `ip route add default via <parent_ip>`
-#[allow(dead_code)]
 pub(super) fn assign_child_ip_and_up_via_nsenter(
     exec: &dyn CommandExecutor,
     pair: &VethPair,

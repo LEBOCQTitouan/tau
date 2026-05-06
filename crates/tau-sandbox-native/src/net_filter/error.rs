@@ -17,10 +17,16 @@ pub enum NetFilterError {
     PrerequisitesUnavailable { missing: Vec<&'static str> },
 
     /// A specific binary required for the filter is missing from PATH.
+    // Consumed at runtime via probe paths; flagged dead by static analysis
+    // without integration-tests feature active.
+    #[allow(dead_code)]
     #[error("nftables binary missing: {name}")]
     MissingBinary { name: &'static str },
 
     /// CAP_NET_ADMIN cannot be acquired in an unprivileged user namespace.
+    // Consumed at runtime via probe paths; flagged dead by static analysis
+    // without integration-tests feature active.
+    #[allow(dead_code)]
     #[error("CAP_NET_ADMIN unavailable in user namespace")]
     CapNetAdminUnavailable,
 

@@ -123,6 +123,7 @@ pub enum SandboxTier {
 #[non_exhaustive]
 pub struct SandboxHandle {
     cleanup: Option<Box<dyn FnOnce() + Send + 'static>>,
+    #[cfg(unix)]
     sync_write_fd: Option<std::os::fd::OwnedFd>,
     nested: Vec<Box<dyn Send>>,
 }
@@ -133,6 +134,7 @@ impl SandboxHandle {
     pub fn new<F: FnOnce() + Send + 'static>(cleanup: F) -> Self {
         Self {
             cleanup: Some(Box::new(cleanup)),
+            #[cfg(unix)]
             sync_write_fd: None,
             nested: Vec::new(),
         }
@@ -142,6 +144,7 @@ impl SandboxHandle {
     pub fn noop() -> Self {
         Self {
             cleanup: None,
+            #[cfg(unix)]
             sync_write_fd: None,
             nested: Vec::new(),
         }
@@ -153,6 +156,7 @@ impl SandboxHandle {
     /// Takes ownership of the `OwnedFd`; the fd will be closed either by
     /// [`SandboxHandle::signal_post_spawn_complete`] (after writing 1 byte)
     /// or by the `Drop` impl (without writing, causing child to read EOF).
+    #[cfg(unix)]
     pub fn with_sync_write_fd(mut self, fd: std::os::fd::OwnedFd) -> Self {
         self.sync_write_fd = Some(fd);
         self
@@ -160,6 +164,7 @@ impl SandboxHandle {
 
     /// Read the raw fd value from the encoded sync_write_fd, if any.
     /// Used by adapter implementations that need to inspect or duplicate the fd.
+    #[cfg(unix)]
     pub fn sync_write_fd_value(&self) -> Option<std::os::fd::RawFd> {
         use std::os::fd::AsRawFd;
         self.sync_write_fd.as_ref().map(|fd| fd.as_raw_fd())
@@ -179,6 +184,7 @@ impl SandboxHandle {
     ///
     /// Idempotent. No-op for handles without a sync_write_fd. Returns
     /// `Err` if the write fails (e.g., child already exited).
+    #[cfg(unix)]
     pub fn signal_post_spawn_complete(&mut self) -> std::io::Result<()> {
         use std::io::Write;
         if let Some(owned_fd) = self.sync_write_fd.take() {
@@ -189,6 +195,12 @@ impl SandboxHandle {
         }
         Ok(())
     }
+
+    /// Release the child from its pre_exec sync-pipe block (no-op on non-Unix).
+    #[cfg(not(unix))]
+    pub fn signal_post_spawn_complete(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 impl Drop for SandboxHandle {
@@ -197,6 +209,7 @@ impl Drop for SandboxHandle {
         // an OwnedFd remaining, drop it (closes the fd without writing).
         // The child reads EOF in pre_exec and returns an error; the spawn's
         // wait() reaps the child.
+        #[cfg(unix)]
         drop(self.sync_write_fd.take());
 
         // Drop nested guards LIFO (latest-attached drops first).
@@ -309,6 +322,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn signal_post_spawn_complete_is_noop_without_fd() {
         let mut handle = SandboxHandle::new(|| {});

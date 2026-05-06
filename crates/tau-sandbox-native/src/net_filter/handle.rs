@@ -15,6 +15,9 @@ use super::exec::{CommandExecutor, RealCommandExecutor};
 #[non_exhaustive]
 pub struct NetFilterHandle {
     veth_name_host: String,
+    // Used by integration-tests via parent_ip(); flagged dead by static analysis
+    // when integration-tests feature is off.
+    #[allow(dead_code)]
     parent_ip: IpAddr,
     cleaned_up: bool,
 }
@@ -40,11 +43,17 @@ impl NetFilterHandle {
 
     /// Parent-side IP address of the veth pair. Tests reaching cross-netns
     /// services bind on this IP and read it via `TAU_NET_PARENT_VETH_IP`.
+    // Used by integration-tests; flagged dead by static analysis when
+    // integration-tests feature is off.
+    #[allow(dead_code)]
     pub fn parent_ip(&self) -> IpAddr {
         self.parent_ip
     }
 
     /// Whether this handle is the noop sentinel (no veth to clean up).
+    // Used by integration-tests; flagged dead by static analysis when
+    // integration-tests feature is off.
+    #[allow(dead_code)]
     pub fn is_noop(&self) -> bool {
         self.veth_name_host.is_empty()
     }
