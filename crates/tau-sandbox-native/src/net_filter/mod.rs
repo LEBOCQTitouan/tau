@@ -58,6 +58,7 @@ const DNS_TIMEOUT: Duration = Duration::from_secs(5);
 pub async fn apply_per_host_filter(
     plan: &SandboxPlan,
     child_pid: i32,
+    subnet: netns::VethSubnet,
 ) -> Result<NetFilterHandle, NetFilterError> {
     // Extract Network(Http) capabilities. If none, return the noop handle.
     let mut hosts: Vec<String> = Vec::new();
@@ -80,9 +81,9 @@ pub async fn apply_per_host_filter(
         .into_iter()
         .collect();
 
-    // 3. Set up veth pair.
+    // 3. Set up veth pair using the pre-allocated subnet.
     let exec = exec::RealCommandExecutor;
-    let pair = netns::setup_veth_pair(&exec)?;
+    let pair = netns::setup_veth_pair_with_subnet(&exec, subnet)?;
     // From here, we MUST clean up the host-end veth on any subsequent failure
     // because the NetFilterHandle is constructed only at the end. Use a guard.
     let mut cleanup_guard = ScopedVethCleanup::new(pair.name_host.clone());
