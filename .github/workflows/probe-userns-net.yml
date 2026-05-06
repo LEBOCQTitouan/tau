@@ -1,0 +1,22 @@
+name: probe-userns-net
+
+# One-off probe to verify GHA ubuntu-latest supports unprivileged userns + netns
+# + AF_NETLINK + veth — prerequisites for sub-project F's e2e tests.
+# Triggered manually via workflow_dispatch. Result determines F's CI strategy.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: probe userns + netns + veth + AF_NETLINK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-mold: true
+      - name: Run probe
+        run: |
+          cargo test -p tau-sandbox-native --test probe_userns_net_caps -- --ignored --nocapture
