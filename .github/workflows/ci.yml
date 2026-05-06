@@ -223,6 +223,42 @@ jobs:
       - name: Build toy plugins (release)
         run: cargo build --release -p echo-llm -p echo-tool
 
+  build-fixtures-linux:
+    name: build-fixtures / linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-mold: true
+      - name: Build all release-mode binaries
+        run: |
+          cargo build --release \
+            -p anthropic -p ollama -p openai \
+            -p fs-read -p shell \
+            -p echo-llm -p echo-tool \
+            -p tau-cli
+      - name: Build controlled-env binary
+        run: |
+          cargo build --release \
+            --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml
+      - name: Upload fixture binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-fixture-binaries
+          retention-days: 1
+          path: |
+            target/release/anthropic-plugin
+            target/release/ollama-plugin
+            target/release/openai-plugin
+            target/release/fs-read-plugin
+            target/release/shell-plugin
+            target/release/echo-llm
+            target/release/echo-tool
+            target/release/tau
+            crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+
   build-anthropic-plugin:
     name: build (anthropic-plugin)
     runs-on: ubuntu-latest
