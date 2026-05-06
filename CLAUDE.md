@@ -13,8 +13,15 @@ NEVER run bare `cargo`. ALWAYS prefix with `CARGO_TARGET_DIR=<path>`.
 | Main agent (top-level Bash tool) | `target/main` |
 | Any subagent spawned via Agent tool | `target/agent-<role>` where `<role>` is the subagent's purpose (e.g. `spec-review`, `solution-review`, `impl`, `adversary`) |
 | One-off diagnostic from main agent (cargo --version, cargo metadata, etc.) | `target/main` |
+| `lefthook` pre-commit hooks (host-side) | `target/lefthook/fmt`, `target/lefthook/clippy`, `target/lefthook/test`, `target/lefthook/check-linux` (one per command) |
+| `lefthook` pre-push hook (Podman container) | `target/lefthook-podman` (mounted as a named Podman volume `target-cache` so it persists across runs) |
 
 If you cannot determine your role, use `target/agent-misc`. Never omit the variable.
+
+The `target/lefthook/*` and `target/lefthook-podman` paths are reserved
+for the pre-commit and pre-push git hooks defined in `lefthook.yml`.
+Contributors install them with `lefthook install` after `brew install
+lefthook podman`. See `docs/dev-environment.md` for full setup.
 
 ## Rule 2: Always scope to a single crate
 
