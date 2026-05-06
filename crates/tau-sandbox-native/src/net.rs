@@ -1,27 +1,14 @@
 //! Per-host network filtering helpers for the Strict sandbox tier.
 //!
-//! # v0.1 status — per-host filtering not yet implemented
-//!
-//! True per-host egress filtering (e.g. nftables rules inside an isolated
-//! network namespace) is **deferred** from v0.1. The reasons are:
-//!
-//! - Setting up nftables inside a fresh user-namespaced netns requires
-//!   `CAP_NET_ADMIN` inside the namespace; acquiring and using it correctly
-//!   is non-trivial and introduces portability risks across Linux distributions
-//!   and kernel versions.
-//! - The nftables API is not exposed through a stable Rust crate with the
-//!   maturity required for Phase 0 work.
-//!
-//! # What this module does today
+//! # Sub-project F — per-host egress filtering
 //!
 //! Two decisions are made at plan-evaluation time (parent process, before fork):
 //!
 //! 1. **Unshare flags** (`unshare_flags_for_plan`):
-//!    - No `Capability::Network(Http)` in plan → `CLONE_NEWUSER | CLONE_NEWNET`:
-//!      child gets an isolated netns with no interfaces; all egress fails.
-//!    - `Capability::Network(Http)` present → `CLONE_NEWUSER` only (no `CLONE_NEWNET`):
-//!      child inherits the parent's network namespace; full egress is available.
-//!      A `tracing::warn!` is emitted to signal this v0.1 over-permissiveness.
+//!    - Always returns `CLONE_NEWUSER | CLONE_NEWNET` for all plans. The child
+//!      is placed in an isolated network namespace; sub-project F's
+//!      `net_filter::apply_per_host_filter` then configures a veth pair and
+//!      nftables ruleset inside the child netns to allow only the declared hosts.
 //!
 //! 2. **Seccomp socket syscalls** (`extend_with_network_rules`):
 //!    - No `Capability::Network(Http)` → `SYS_socket`, `SYS_connect`,
@@ -31,58 +18,23 @@
 //!      added to the allow-list so HTTP clients can open TCP connections.
 //!      Server-side syscalls (`SYS_bind`, `SYS_listen`, `SYS_accept`,
 //!      `SYS_accept4`) are intentionally omitted.
-//!
-//! # TODO(future) — real per-host egress filtering (Phase 2)
-//!
-//! - Create a new netns via `unshare(CLONE_NEWNET)` for ALL plans (including those
-//!   with `Network(Http)`).
-//! - Inside the netns, configure a loopback + veth pair for outbound traffic.
-//! - Install nftables rules that allow egress only to the hosts listed in the
-//!   `Http { hosts }` capability.
-//! - Wire `SYS_socket`/`SYS_connect` additions to the allow-list behind the same
-//!   capability check (already done in v0.1).
-//! - Remove the `tracing::warn!` once real filtering is in place.
 
 use std::collections::BTreeMap;
-use std::sync::Once;
 
 use nix::sched::CloneFlags;
 use seccompiler::SeccompRule;
 use tau_domain::{Capability, NetCapability};
 use tau_ports::SandboxPlan;
 
-/// Return the `unshare(2)` flags appropriate for the plan's network capabilities.
+/// Returns the flags to pass to `unshare(2)` for the given plan.
 ///
-/// - If the plan has **any** `Capability::Network(Http)` capability, returns
-///   `CLONE_NEWUSER` only. The child inherits the parent's netns so HTTP
-///   clients can reach external hosts. A warning is logged because this is
-///   over-permissive (no per-host filtering yet).
-/// - Otherwise, returns `CLONE_NEWUSER | CLONE_NEWNET`. The child is placed in
-///   an empty netns with no interfaces; all network egress fails.
-///
-/// # v0.1 limitation
-///
-/// The `Network(Http)` path grants full parent netns access, not filtered
-/// per-host access. Per-host nftables-based filtering is deferred to Phase 2.
+/// Always includes both `CLONE_NEWUSER` (mandatory for unprivileged
+/// sandboxing) and `CLONE_NEWNET` (per-host filtering enforces network
+/// isolation via the new netns; sub-project F replaces the v0.1 fallback
+/// that stripped CLONE_NEWNET when Network(Http) was in the plan).
 pub(crate) fn unshare_flags_for_plan(plan: &SandboxPlan) -> CloneFlags {
-    let has_http = plan
-        .capabilities
-        .iter()
-        .any(|c| matches!(c, Capability::Network(NetCapability::Http { .. })));
-
-    if has_http {
-        static V01_NETNS_WARNING: Once = Once::new();
-        V01_NETNS_WARNING.call_once(|| {
-            tracing::warn!(
-                "v0.1 limitation: plan has Network(Http) capability; \
-                 child inherits parent netns (no per-host filtering). \
-                 Phase 2 will add nftables-based egress filtering."
-            );
-        });
-        CloneFlags::CLONE_NEWUSER
-    } else {
-        CloneFlags::CLONE_NEWUSER | CloneFlags::CLONE_NEWNET
-    }
+    let _ = plan;
+    CloneFlags::CLONE_NEWUSER | CloneFlags::CLONE_NEWNET
 }
 
 /// Extend the seccomp rules map with network-related syscalls for the given plan.
@@ -145,7 +97,7 @@ mod tests {
     // ---- unshare_flags_for_plan tests ----
 
     /// An empty plan (no capabilities) should yield both CLONE_NEWUSER and
-    /// CLONE_NEWNET, isolating the child into an empty netns.
+    /// CLONE_NEWNET (sub-project F: always isolate into a fresh netns).
     #[test]
     fn unshare_flags_default_no_network() {
         let plan_json = serde_json::json!({
@@ -165,10 +117,11 @@ mod tests {
         );
     }
 
-    /// A plan with Network(Http) should yield only CLONE_NEWUSER (no CLONE_NEWNET),
-    /// so the child inherits the parent's netns.
+    /// A plan with Network(Http) now also gets CLONE_NEWNET. Sub-project F's
+    /// apply_per_host_filter configures the netns with a veth pair + nftables
+    /// rather than inheriting the parent netns.
     #[test]
-    fn unshare_flags_with_http_drops_newnet() {
+    fn unshare_flags_with_http_includes_newnet() {
         let plan_json = serde_json::json!({
             "capabilities": [{
                 "kind": "net.http",
@@ -185,8 +138,8 @@ mod tests {
             "must include CLONE_NEWUSER"
         );
         assert!(
-            !flags.contains(CloneFlags::CLONE_NEWNET),
-            "CLONE_NEWNET must be absent when Network(Http) is present"
+            flags.contains(CloneFlags::CLONE_NEWNET),
+            "CLONE_NEWNET must be present (sub-project F: isolated netns for all plans)"
         );
     }
 
