@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use tau_domain::fixtures::{cap_fs_exec, cap_fs_read, cap_process_spawn};
-use tau_ports::{fixtures::plan_from_capabilities, Sandbox, SandboxTier};
+use tau_ports::{fixtures::plan_from_capabilities, Sandbox, SandboxPlan, SandboxTier};
 use tau_sandbox_native::NativeSandbox;
 
 fn locate_controlled_env_bin() -> PathBuf {
