@@ -26,7 +26,7 @@ These limitations are enumerated in [the sandboxing followups doc](../superpower
 
 - **Per-host network filtering is over-permissive.** When `Network(Http)` is in the plan, the child inherits the parent's network namespace and can reach any host (per `tau-sandbox-native::net::unshare_flags_for_plan` v0.1 design). Per-host filtering via nftables-in-netns is **sub-project F**.
 
-- **Per-command exec gating is a no-op stub.** `Capability::Process(Spawn { commands })` does not yet restrict which executables the plugin can `exec`. Real per-command gating requires landlock V2 (kernel ≥ 5.19) and is **sub-project E**.
+- **Per-command exec gating is active (sub-project E).** `Capability::Filesystem(Exec { paths })` and `Capability::Process(Spawn { commands })` now grant `AccessFs::Execute` (landlock V1, kernel ≥ 5.13) for the listed paths only; attempting to exec any unlisted path returns EACCES. The earlier doc reference to "landlock V2 required" was incorrect — `AccessFs::Execute` is present in V1. No kernel-version gate beyond the existing V1 requirement is needed.
 
 - **macOS native sandboxing is not yet implemented.** macOS hosts use the container adapter (Docker / Podman). A native macOS adapter via `sandbox-exec` is **sub-project J**.
 

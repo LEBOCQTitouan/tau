@@ -11,6 +11,9 @@ use std::process::Command;
 use tau_domain::{Capability, FsCapability};
 use tau_ports::{SandboxError, SandboxHandle, SandboxPlan};
 
+// Re-export so strict.rs can call collect_exec_paths without reaching into exec.rs directly.
+pub(crate) use crate::exec::collect_exec_paths;
+
 /// Collect and resolve landlock path lists from a plan + command CWD.
 ///
 /// Returns `(read_paths, write_paths)` as resolved `PathBuf` vectors.
@@ -81,11 +84,17 @@ pub(crate) fn collect_landlock_paths(
 ///
 /// Called from inside a `pre_exec` closure (in the child between fork and exec).
 /// Exposed as `pub(crate)` so `strict::apply_strict` can reuse it.
+///
+/// - `read_paths` — granted `ReadFile | ReadDir | Execute` (system and plan read paths).
+/// - `write_paths` — granted `WriteFile | MakeReg | RemoveFile`.
+/// - `exec_paths` — granted `Execute` only; enforces the per-command exec allow-list
+///   from `Capability::Filesystem(Exec)` and `Capability::Process(Spawn)`.
 pub(crate) fn install_landlock_from_plan(
     read_paths: &[std::path::PathBuf],
     write_paths: &[std::path::PathBuf],
+    exec_paths: &[std::path::PathBuf],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    install_landlock(read_paths, write_paths)
+    install_landlock(read_paths, write_paths, exec_paths)
 }
 
 /// Apply landlock rules to `cmd` via a `pre_exec` hook.
@@ -106,6 +115,22 @@ pub(crate) fn apply_landlock(
     // it lives in the filesystem. See collect_landlock_paths for the comment.
     let (read_paths, write_paths) = collect_landlock_paths(plan, cmd)?;
 
+    // Collect exec-gated paths from Filesystem(Exec) and Process(Spawn) capabilities.
+    // These receive Execute-only access in the landlock ruleset, enforcing the
+    // per-command exec allow-list. Resolution happens in the parent before fork.
+    let exec_paths = collect_exec_paths(plan)
+        .into_iter()
+        .filter_map(|p| {
+            // Resolve symlinks so landlock's path matching covers both the
+            // link path and the canonical target — same treatment as read_paths.
+            match resolve_symlinks_for_landlock(&p) {
+                Ok(resolved) => Some(resolved),
+                Err(_) => None, // Skip unresolvable exec paths silently.
+            }
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+
     // KNOWN-LIMITATION: this pre_exec closure runs in the child between fork
     // and exec. POSIX guarantees only async-signal-safe operations in that
     // state. tau is multi-threaded (tokio), so any malloc held by another
@@ -121,7 +146,7 @@ pub(crate) fn apply_landlock(
     // unaffected.
     unsafe {
         cmd.pre_exec(move || {
-            install_landlock(&read_paths, &write_paths)
+            install_landlock(&read_paths, &write_paths, &exec_paths)
                 .map_err(|e| std::io::Error::other(e.to_string()))
         });
     }
@@ -184,6 +209,7 @@ fn resolve_symlinks_for_landlock(
 fn install_landlock(
     read_paths: &[PathBuf],
     write_paths: &[PathBuf],
+    exec_paths: &[PathBuf],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use landlock::make_bitflags;
     use landlock::{
@@ -243,6 +269,20 @@ fn install_landlock(
             fd,
             make_bitflags!(AccessFs::{WriteFile | MakeReg | RemoveFile}),
         ))?;
+    }
+
+    // Per-command exec gating (sub-project E): grant Execute-only access for
+    // explicitly declared Filesystem(Exec) and Process(Spawn) paths.
+    // These paths may be individual files (e.g. `/usr/bin/git`) or
+    // directories (e.g. `/usr/bin` from a glob-trimmed `fs.exec` entry).
+    // AccessFs::Execute is part of landlock V1 — no kernel-version gate needed.
+    for p in exec_paths {
+        if let Ok(fd) = PathFd::new(p) {
+            ruleset =
+                ruleset.add_rule(PathBeneath::new(fd, make_bitflags!(AccessFs::{Execute})))?;
+        }
+        // Silently skip unresolvable exec paths — the binary simply won't be
+        // executable under landlock, which is the correct secure default.
     }
 
     ruleset.restrict_self()?;

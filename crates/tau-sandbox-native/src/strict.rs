@@ -317,6 +317,20 @@ pub(crate) fn apply_strict(
     // Collect landlock paths from the plan (same logic as light tier).
     let (read_paths, write_paths) = crate::light::collect_landlock_paths(plan, cmd)?;
 
+    // Collect exec-gated paths from Filesystem(Exec) and Process(Spawn) capabilities.
+    // Resolve symlinks so landlock path matching covers both the link and its target.
+    let exec_paths: Vec<std::path::PathBuf> = crate::light::collect_exec_paths(plan)
+        .into_iter()
+        .filter_map(|p| {
+            match std::fs::canonicalize(&p) {
+                Ok(canonical) if canonical == p => Some(vec![p]),
+                Ok(canonical) => Some(vec![p, canonical]),
+                Err(_) => None, // Skip unresolvable exec paths silently.
+            }
+        })
+        .flatten()
+        .collect();
+
     // Build the extended rules map: baseline → exec extension → network extension.
     let mut rules = baseline_syscall_map();
     crate::exec::extend_with_exec_rules(&mut rules, plan);
@@ -340,8 +354,8 @@ pub(crate) fn apply_strict(
     // and do not affect the parent process.
     unsafe {
         cmd.pre_exec(move || {
-            // Step 1: landlock filesystem isolation.
-            install_landlock_from_plan(&read_paths, &write_paths)
+            // Step 1: landlock filesystem isolation (read/write) + exec gating.
+            install_landlock_from_plan(&read_paths, &write_paths, &exec_paths)
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
 
             // Step 2: drop into new user namespace (+ network namespace unless plan
