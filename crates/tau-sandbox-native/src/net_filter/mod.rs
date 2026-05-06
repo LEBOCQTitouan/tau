@@ -14,11 +14,11 @@
 
 mod error;
 mod exec;
+mod netns;
 mod probe;
 mod resolve;
 mod validate;
-// Submodules for Tasks 4-6 (added incrementally):
-// mod netns;
+// Submodules for Tasks 5-6 (added incrementally):
 // mod rules;
 // mod handle;
 
