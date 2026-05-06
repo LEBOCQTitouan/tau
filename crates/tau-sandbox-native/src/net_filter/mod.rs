@@ -123,8 +123,11 @@ impl ScopedVethCleanup {
 impl Drop for ScopedVethCleanup {
     fn drop(&mut self) {
         if let Some(name) = self.veth_name.take() {
-            let exec = exec::RealCommandExecutor;
-            let _ = exec.run("ip", &["link", "del", &name], None);
+            // Bring CommandExecutor into scope so .run() resolves on the
+            // RealCommandExecutor instance.
+            use exec::CommandExecutor;
+            let executor = exec::RealCommandExecutor;
+            let _ = executor.run("ip", &["link", "del", &name], None);
         }
     }
 }
