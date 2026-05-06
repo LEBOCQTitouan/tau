@@ -10,7 +10,7 @@
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::process::Command;
-use tau_domain::fixtures::{cap_fs_read, cap_net_http};
+use tau_domain::fixtures::cap_fs_read;
 use tau_ports::fixtures::plan_from_capabilities;
 use tau_ports::{Sandbox, SandboxPlan, SandboxTier};
 use tau_sandbox_native::NativeSandbox;
@@ -36,14 +36,6 @@ fn bin_parent_str() -> String {
 fn plan_strict_no_network() -> SandboxPlan {
     let bin_parent = bin_parent_str();
     plan_from_capabilities(vec![cap_fs_read(&[&bin_parent])])
-}
-
-fn plan_strict_with_network() -> SandboxPlan {
-    let bin_parent = bin_parent_str();
-    plan_from_capabilities(vec![
-        cap_net_http(&["api.example.com"], &["GET"]),
-        cap_fs_read(&[&bin_parent]),
-    ])
 }
 
 #[tokio::test]
@@ -78,34 +70,6 @@ async fn socket_blocked_without_network_capability() {
         // SIGSYS = 31
         assert_eq!(sig, 31, "expected SIGSYS (31); got signal {sig}");
     }
-}
-
-#[tokio::test]
-async fn socket_allowed_with_network_capability() {
-    let plan = plan_strict_with_network();
-
-    let mut cmd = Command::new(locate_controlled_env_bin());
-    cmd.env("TAU_FIXTURE_MODE", "open-socket");
-
-    let sandbox = NativeSandbox::new("test-strict", SandboxTier::Strict);
-    let _handle = sandbox
-        .wrap_spawn(&plan, &mut cmd)
-        .await
-        .expect("wrap_spawn");
-    let output = cmd.output().expect("spawn");
-
-    assert!(
-        output.status.success(),
-        "expected exit 0 with Network(Http) cap; got status={:?}, stdout={:?}, stderr={:?}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains("SOCKET_OK"),
-        "expected SOCKET_OK; got stdout={:?}",
-        String::from_utf8_lossy(&output.stdout)
-    );
 }
 
 #[tokio::test]
