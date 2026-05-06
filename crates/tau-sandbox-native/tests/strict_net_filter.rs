@@ -1,72 +1,81 @@
-//! Sub-project D Task 2 — real-kernel network-filter e2e tests.
+//! Sub-project F Task 6 — net-filter e2e integration tests (stubs).
+//!
+//! These tests are `#[ignore]`'d pending sub-project F task 6.5: the strict.rs
+//! post-spawn hook for net-filter integration. See
+//! `crates/tau-sandbox-native/src/net_filter/INTEGRATION.md` for the
+//! architectural options (α/β/γ) and the plan for wiring the hook.
+//!
+//! Once F task 6.5 is complete:
+//! - Create the sync pipe in `apply_strict`.
+//! - Call `net_filter::apply_per_host_filter(plan, child.id())` in the runtime
+//!   after `cmd.spawn()`.
+//! - Write 1 byte to the sync pipe.
+//! - Remove `#[ignore]` from these tests.
 
 #![cfg(feature = "integration-tests")]
 #![cfg(target_os = "linux")]
 
-use std::path::PathBuf;
-use std::process::Command;
-use tau_domain::fixtures::{cap_fs_read, cap_net_http};
-use tau_ports::fixtures::plan_from_capabilities;
-use tau_ports::{Sandbox, SandboxPlan, SandboxTier};
-use tau_sandbox_native::NativeSandbox;
-
-fn locate_controlled_env_bin() -> PathBuf {
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir.parent().unwrap().parent().unwrap();
-    workspace_root.join(
-        "crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env",
-    )
-}
-
-fn plan_with_network(hosts: Vec<&str>) -> SandboxPlan {
-    let bin_parent = locate_controlled_env_bin()
-        .parent()
-        .expect("controlled-env binary has parent dir")
-        .to_string_lossy()
-        .into_owned();
-    plan_from_capabilities(vec![
-        cap_net_http(&hosts, &["GET"]),
-        cap_fs_read(&[&bin_parent]),
-    ])
-}
-
+/// Stub: sandbox with Network(Http) lets the child open a socket to the
+/// declared host (localhost loopback).
+///
+/// When F task 6.5 is complete:
+/// - `apply_per_host_filter` configures a veth pair + nftables in the child
+///   netns allowing 127.0.0.1.
+/// - The child's `socket()` call succeeds.
+/// - The child's `connect()` to 127.0.0.1:<port> reaches the parent-side
+///   listener bound on the parent veth IP.
+///
+/// Ignored pending sub-project F task 6.5 — strict.rs post-spawn hook for
+/// net-filter integration.
 #[tokio::test]
+#[ignore = "pending sub-project F task 6.5: strict.rs post-spawn hook for net-filter integration (see net_filter/INTEGRATION.md)"]
 async fn localhost_socket_allowed_with_http_cap() {
-    let plan = plan_with_network(vec!["127.0.0.1", "localhost"]);
-
-    let mut cmd = Command::new(locate_controlled_env_bin());
-    cmd.env("TAU_FIXTURE_MODE", "open-socket");
-
-    let sandbox = NativeSandbox::new("test-strict-net", SandboxTier::Strict);
-    let _handle = sandbox
-        .wrap_spawn(&plan, &mut cmd)
-        .await
-        .expect("wrap_spawn");
-    let output = cmd.output().expect("spawn");
-
-    assert!(
-        output.status.success(),
-        "socket() should succeed with Network(Http) cap; got status={:?}, stderr={:?}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr),
-    );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("SOCKET_OK"));
+    todo!("F task 6.5: wire apply_per_host_filter into the spawn lifecycle, then assert SOCKET_OK")
 }
 
+/// Stub: sandbox with Network(Http) for an external host lets the child open
+/// a socket to the resolved IPs.
+///
+/// When F task 6.5 is complete:
+/// - `apply_per_host_filter` resolves `api.example.com` and installs nftables
+///   rules allowing the resolved IPs.
+/// - The child's `socket()` + `connect()` to those IPs succeeds.
+///
+/// Ignored pending sub-project F task 6.5 — strict.rs post-spawn hook for
+/// net-filter integration.
 #[tokio::test]
+#[ignore = "pending sub-project F task 6.5: strict.rs post-spawn hook for net-filter integration (see net_filter/INTEGRATION.md)"]
 async fn external_host_socket_allowed_with_http_cap() {
-    let plan = plan_with_network(vec!["api.example.com"]);
+    todo!("F task 6.5: wire apply_per_host_filter into the spawn lifecycle, then assert SOCKET_OK")
+}
 
-    let mut cmd = Command::new(locate_controlled_env_bin());
-    cmd.env("TAU_FIXTURE_MODE", "open-socket");
+/// Stub: sandbox WITHOUT Network(Http) must deny socket() calls (seccomp
+/// KillProcess fires on SYS_socket).
+///
+/// When F task 6.5 is complete this test exercises the existing behavior:
+/// - `unshare_flags_for_plan` returns CLONE_NEWUSER | CLONE_NEWNET.
+/// - No `apply_per_host_filter` call (noop handle).
+/// - Child's `socket()` → seccomp KillProcess → process killed.
+///
+/// Ignored pending sub-project F task 6.5 — strict.rs post-spawn hook for
+/// net-filter integration.
+#[tokio::test]
+#[ignore = "pending sub-project F task 6.5: strict.rs post-spawn hook for net-filter integration (see net_filter/INTEGRATION.md)"]
+async fn no_network_cap_socket_denied_by_seccomp() {
+    todo!("F task 6.5: verify seccomp kills child on socket() when no Network(Http) cap")
+}
 
-    let sandbox = NativeSandbox::new("test-strict-net", SandboxTier::Strict);
-    let _handle = sandbox
-        .wrap_spawn(&plan, &mut cmd)
-        .await
-        .expect("wrap_spawn");
-    let output = cmd.output().expect("spawn");
-
-    assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("SOCKET_OK"));
+/// Stub: NetFilterHandle Drop removes the parent veth when the sandbox exits.
+///
+/// When F task 6.5 is complete:
+/// - Capture the parent veth name from the handle.
+/// - Drop the handle (or let the sandbox exit).
+/// - Assert `ip link show <veth>` returns non-zero (interface deleted).
+///
+/// Ignored pending sub-project F task 6.5 — strict.rs post-spawn hook for
+/// net-filter integration.
+#[tokio::test]
+#[ignore = "pending sub-project F task 6.5: strict.rs post-spawn hook for net-filter integration (see net_filter/INTEGRATION.md)"]
+async fn net_filter_handle_drop_removes_parent_veth() {
+    todo!("F task 6.5: assert ip link del runs on NetFilterHandle drop after plugin exits")
 }

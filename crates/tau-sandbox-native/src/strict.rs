@@ -4,9 +4,8 @@
 //! 1. **Landlock** (`install_landlock`) — uses `landlock_*` syscalls that seccomp
 //!    would block if installed first.
 //! 2. **`unshare(flags)`** — drops the child into a fresh user namespace (gaining
-//!    all capabilities within it). Whether `CLONE_NEWNET` is included depends on the
-//!    plan: plans with `Capability::Network(Http)` skip `CLONE_NEWNET` so the child
-//!    inherits the parent's netns (v0.1 limitation; see `net::unshare_flags_for_plan`).
+//!    all capabilities within it) and a new network namespace. `CLONE_NEWNET` is
+//!    always included (sub-project F; see `net::unshare_flags_for_plan`).
 //!    Must run before seccomp blocks `unshare(2)`.
 //! 3. **seccomp BPF filter** (`apply_filter`) — installed last; once active it
 //!    blocks `unshare`, `landlock_*`, and any other syscall not in the allow-list.
@@ -296,8 +295,8 @@ fn compile_filter(
 
 /// Apply Strict-tier isolation to `cmd`:
 /// 1. Landlock filesystem rules (from plan).
-/// 2. `unshare` with plan-derived flags (CLONE_NEWUSER always; CLONE_NEWNET only when
-///    no `Network(Http)` capability is in the plan — see `net::unshare_flags_for_plan`).
+/// 2. `unshare` with `CLONE_NEWUSER | CLONE_NEWNET` (always both — sub-project F
+///    simplified `net::unshare_flags_for_plan` to return both flags unconditionally).
 /// 3. seccomp BPF allow-list filter (baseline extended by exec + network capability rules).
 ///
 /// All preparation (path collection, rules extension, BPF compilation) happens in the
@@ -310,6 +309,25 @@ fn compile_filter(
 /// 1. Landlock — uses `landlock_*` syscalls that seccomp would block if installed first.
 /// 2. unshare — must precede seccomp because `unshare(2)` is not in the allow-list.
 /// 3. seccomp — installed last; once active it blocks everything not in the allow-list.
+///
+/// # TODO sub-project F task 6.5: post-spawn hook for net-filter
+///
+/// Per-host network filtering (`net_filter::apply_per_host_filter`) must run in the
+/// **parent** after `fork` but before the child continues past the sync-pipe barrier.
+/// This requires knowing the child PID — which is only available after `cmd.spawn()`
+/// returns. However, `apply_strict` does not call `spawn()`; it only installs
+/// `pre_exec` and returns a `SandboxHandle`. The spawn happens in the runtime layer.
+///
+/// The integration therefore needs a post-spawn hook mechanism. Three options are
+/// documented in `crates/tau-sandbox-native/src/net_filter/INTEGRATION.md`:
+/// - α: modify the `Sandbox` trait's `wrap_spawn` to take a post-fork hook.
+/// - β: add a new `Sandbox::apply_post_spawn` method with a default no-op.
+/// - γ: runtime-layer-only extension specific to `NativeSandbox`.
+///
+/// Until F task 6.5 is implemented, `Network(Http)` plans create an isolated
+/// netns (via `CLONE_NEWNET`) but the per-host nftables ruleset is not applied —
+/// all egress is denied by the empty netns. This is safe (over-restrictive) but
+/// means `Network(Http)` plans will fail to reach the declared hosts.
 pub(crate) fn apply_strict(
     plan: &SandboxPlan,
     cmd: &mut Command,
@@ -339,8 +357,9 @@ pub(crate) fn apply_strict(
     // Compile the BPF program in the parent — cheap, deterministic.
     let bpf: BpfProgram = compile_filter(rules)?;
 
-    // Determine unshare flags: drop CLONE_NEWNET when Network(Http) is present so
-    // the child inherits the parent's netns (v0.1 limitation; see net.rs).
+    // Determine unshare flags: always CLONE_NEWUSER | CLONE_NEWNET.
+    // Sub-project F simplified unshare_flags_for_plan — see net.rs and
+    // net_filter/INTEGRATION.md for the post-spawn hook plan (F task 6.5).
     let unshare_flags = crate::net::unshare_flags_for_plan(plan);
 
     // KNOWN-LIMITATION: async-signal-safety — see light.rs for the full note.
@@ -358,8 +377,9 @@ pub(crate) fn apply_strict(
             install_landlock_from_plan(&read_paths, &write_paths, &exec_paths)
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-            // Step 2: drop into new user namespace (+ network namespace unless plan
-            // has Network(Http) capability — see net::unshare_flags_for_plan).
+            // Step 2: drop into new user namespace + isolated network namespace.
+            // Sub-project F always includes CLONE_NEWNET; the per-host nftables
+            // ruleset is installed by apply_per_host_filter (F task 6.5).
             unshare(unshare_flags).map_err(|e| std::io::Error::other(e.to_string()))?;
 
             // Step 3: install seccomp BPF allow-list (blocks unshare/landlock after this).
