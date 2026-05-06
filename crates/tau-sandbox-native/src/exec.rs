@@ -62,7 +62,7 @@ pub(crate) fn collect_exec_paths(plan: &SandboxPlan) -> Vec<PathBuf> {
 
     for cap in &plan.capabilities {
         match cap {
-            Capability::Filesystem(FsCapability::Exec { paths: exec_paths }) => {
+            Capability::Filesystem(FsCapability::Exec { paths: exec_paths, .. }) => {
                 for p in exec_paths {
                     // Trim trailing glob suffix — landlock's PathFd works on
                     // directory roots or exact file paths, not glob patterns.
@@ -70,7 +70,7 @@ pub(crate) fn collect_exec_paths(plan: &SandboxPlan) -> Vec<PathBuf> {
                     paths.push(PathBuf::from(trimmed));
                 }
             }
-            Capability::Process(ProcessCapability::Spawn { commands }) => {
+            Capability::Process(ProcessCapability::Spawn { commands, .. }) => {
                 for cmd in commands {
                     if cmd.starts_with('/') {
                         // Full path — use directly.
