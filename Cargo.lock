@@ -3017,6 +3017,7 @@ dependencies = [
  "libc",
  "nix 0.29.0",
  "seccompiler",
+ "serde_json",
  "tau-domain",
  "tau-ports",
  "tempfile",
