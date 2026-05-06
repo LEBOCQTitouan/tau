@@ -51,7 +51,7 @@ fn gha_supports_unprivileged_userns_with_veth_and_netlink() {
     let exit_code = match status {
         WaitStatus::Exited(_, code) => code,
         WaitStatus::Signaled(_, sig, _) => {
-            panic!("child killed by signal {sig}");
+            panic!("child killed by signal {sig:?}");
         }
         other => panic!("unexpected wait status: {other:?}"),
     };
