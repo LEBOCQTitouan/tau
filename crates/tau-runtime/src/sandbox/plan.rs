@@ -39,6 +39,8 @@ pub fn build_plan(
 mod tests {
     use super::*;
 
+    use tau_ports::fixtures as ports_fixtures;
+
     fn cap(json: &str) -> Capability {
         serde_json::from_str(json).expect("test capability JSON must be valid")
     }
@@ -79,20 +81,8 @@ mod tests {
     #[test]
     fn build_plan_passes_through_context_and_limits() {
         use std::path::PathBuf;
-        // WorkingContext and ResourceLimits are #[non_exhaustive]; build via
-        // JSON round-trip (same pattern used throughout the sandboxing sub-project).
-        let ctx: WorkingContext = serde_json::from_value(serde_json::json!({
-            "working_dir": "/workspace",
-            "env": {}
-        }))
-        .expect("valid WorkingContext JSON");
-        let lim: ResourceLimits = serde_json::from_value(serde_json::json!({
-            "memory_bytes": 268435456_u64,
-            "cpu_seconds": 10,
-            "wall_clock_seconds": null,
-            "max_subprocesses": null
-        }))
-        .expect("valid ResourceLimits JSON");
+        let ctx = ports_fixtures::working_context("/workspace", Default::default());
+        let lim = ports_fixtures::resource_limits(Some(268_435_456), Some(10));
         let plan = build_plan(&[], &[], Some(ctx), Some(lim)).unwrap();
         assert!(plan.context.is_some());
         assert_eq!(

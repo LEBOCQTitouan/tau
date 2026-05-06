@@ -5,6 +5,8 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use tau_domain::fixtures::{cap_fs_read, cap_net_http};
+use tau_ports::fixtures::plan_from_capabilities;
 use tau_ports::{Sandbox, SandboxPlan, SandboxTier};
 use tau_sandbox_native::NativeSandbox;
 
@@ -17,25 +19,15 @@ fn locate_controlled_env_bin() -> PathBuf {
 }
 
 fn plan_with_network(hosts: Vec<&str>) -> SandboxPlan {
-    let host_array: Vec<serde_json::Value> = hosts.iter().map(|h| serde_json::json!(h)).collect();
     let bin_parent = locate_controlled_env_bin()
         .parent()
         .expect("controlled-env binary has parent dir")
         .to_string_lossy()
         .into_owned();
-    serde_json::from_value(serde_json::json!({
-        "capabilities": [
-            {
-                "kind": "net.http",
-                "hosts": host_array,
-                "methods": ["GET"]
-            },
-            {"kind": "fs.read", "paths": [bin_parent]}
-        ],
-        "context": null,
-        "limits": null,
-    }))
-    .expect("valid plan")
+    plan_from_capabilities(vec![
+        cap_net_http(&hosts, &["GET"]),
+        cap_fs_read(&[&bin_parent]),
+    ])
 }
 
 #[tokio::test]

@@ -761,17 +761,13 @@ mod tests {
     /// a Custom capability to trigger the rejection.
     #[tokio::test]
     async fn spawn_fails_on_validation_error() {
-        use tau_domain::Capability;
+        use tau_domain::fixtures as domain_fixtures;
         use tau_ports::SandboxPlan;
 
         use crate::sandbox::SandboxAdapter;
 
         // A plan with a Custom capability that MockSandbox cannot handle.
-        let custom_cap: Capability = serde_json::from_value(serde_json::json!({
-            "kind": "mcp.tool.use",
-            "tool": "risky-tool"
-        }))
-        .expect("valid Capability JSON");
+        let custom_cap = domain_fixtures::cap_custom("mcp.tool.use");
         let plan = SandboxPlan::new(vec![custom_cap], None, None);
 
         // MockSandbox validates correctly — rejects Custom shapes.

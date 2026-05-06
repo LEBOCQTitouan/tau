@@ -32,7 +32,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tau_domain::{AgentInstanceId, Capability, PluginKind, PluginManifest, PortKind};
+use tau_domain::{fixtures as domain_fixtures, AgentInstanceId, Capability, PluginKind, PluginManifest, PortKind};
 use tau_pkg::LockedPlugin;
 use tau_ports::{
     CompletionRequest, ContentBlock, LlmProviderMessage, SandboxPlan, SandboxProbe, SessionContext,
@@ -187,13 +187,7 @@ async fn shell_layer4_native_runs_echo_hello() {
     //    so the native adapter allows exec(echo). The tempdir itself doesn't
     //    need fs.read -- we're just executing a binary.
     //
-    //    The Capability enum variants are #[non_exhaustive]; build via JSON
-    //    deserialization (same pattern as shell's capabilities() builder).
-    let spawn_cap: Capability = serde_json::from_value(serde_json::json!({
-        "kind": "process.spawn",
-        "commands": ["echo"]
-    }))
-    .expect("process.spawn capability JSON must be valid");
+    let spawn_cap: Capability = domain_fixtures::cap_process_spawn(&["echo"]);
 
     let plan = SandboxPlan::new(vec![spawn_cap.clone()], None, None);
 
@@ -294,11 +288,7 @@ async fn fs_read_layer4_native_reads_data_file() {
     // tempdir. Use a glob that covers the whole tempdir.
     let tmpdir_glob = format!("{}/**", scope.path().display());
 
-    let fs_read_cap: Capability = serde_json::from_value(serde_json::json!({
-        "kind": "fs.read",
-        "paths": [tmpdir_glob.clone()]
-    }))
-    .expect("fs.read capability JSON must be valid");
+    let fs_read_cap: Capability = domain_fixtures::cap_fs_read(&[&tmpdir_glob]);
 
     let plan = SandboxPlan::new(vec![fs_read_cap.clone()], None, None);
 
@@ -432,12 +422,7 @@ fn make_cassette_completion_request(model: &str) -> CompletionRequest {
 /// Build the `net.http` capability that allows the plugin process to
 /// reach back to `127.0.0.1` (the in-process cassette server).
 fn make_net_http_localhost_cap() -> Capability {
-    serde_json::from_value(serde_json::json!({
-        "kind": "net.http",
-        "hosts": ["127.0.0.1", "localhost"],
-        "methods": ["POST", "GET"]
-    }))
-    .expect("net.http capability JSON must be valid")
+    domain_fixtures::cap_net_http(&["127.0.0.1", "localhost"], &["POST", "GET"])
 }
 
 // ---------------------------------------------------------------------------

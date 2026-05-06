@@ -19,8 +19,12 @@ use std::time::SystemTime;
 use crate::agent::AgentDefinition;
 use crate::id::{AgentId, AgentInstanceId, MessageId, PackageName};
 use crate::message::{Address, Message, MessagePayload};
+use crate::package::capability::{
+    AgentCapability, Capability, FsCapability, NetCapability, ProcessCapability,
+};
 use crate::package::manifest::{PackageId, PackageKind, UncheckedManifest};
 use crate::package::{PackageManifest, PackageSource};
+use crate::value::Value;
 use crate::version::Version;
 
 /// A deterministic, valid `PackageName`.
@@ -89,5 +93,81 @@ pub fn any_message() -> Message {
         payload: MessagePayload::Text {
             content: "hello".into(),
         },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Capability constructors
+// ---------------------------------------------------------------------------
+//
+// These helpers bypass the `#[non_exhaustive]` barrier that prevents external
+// crates from constructing variant structs with literal syntax. External test
+// crates (tau-sandbox-native, tau-runtime, tau-plugin-compat, ...) depend on
+// `tau-domain` with `features = ["test-fixtures"]` and call these functions
+// instead of the `serde_json::from_value(json!({...}))` round-trip workaround.
+
+/// Build a `Capability::Filesystem(FsCapability::Read)` granting read access
+/// to the given path glob patterns.
+pub fn cap_fs_read(paths: &[&str]) -> Capability {
+    Capability::Filesystem(FsCapability::Read {
+        paths: paths.iter().map(|s| s.to_string()).collect(),
+    })
+}
+
+/// Build a `Capability::Filesystem(FsCapability::Write)` granting write access
+/// to the given path glob patterns, with an optional byte limit.
+pub fn cap_fs_write(paths: &[&str], max_bytes: Option<u64>) -> Capability {
+    Capability::Filesystem(FsCapability::Write {
+        paths: paths.iter().map(|s| s.to_string()).collect(),
+        max_bytes,
+    })
+}
+
+/// Build a `Capability::Filesystem(FsCapability::Exec)` granting exec access
+/// to binaries matching the given path glob patterns.
+pub fn cap_fs_exec(paths: &[&str]) -> Capability {
+    Capability::Filesystem(FsCapability::Exec {
+        paths: paths.iter().map(|s| s.to_string()).collect(),
+    })
+}
+
+/// Build a `Capability::Network(NetCapability::Http)` granting HTTP access to
+/// the given hosts with the given HTTP methods.
+pub fn cap_net_http(hosts: &[&str], methods: &[&str]) -> Capability {
+    Capability::Network(NetCapability::Http {
+        hosts: hosts.iter().map(|s| s.to_string()).collect(),
+        methods: methods.iter().map(|s| s.to_string()).collect(),
+    })
+}
+
+/// Build a `Capability::Process(ProcessCapability::Spawn)` granting permission
+/// to spawn subprocesses matching the given command names.
+pub fn cap_process_spawn(commands: &[&str]) -> Capability {
+    Capability::Process(ProcessCapability::Spawn {
+        commands: commands.iter().map(|s| s.to_string()).collect(),
+    })
+}
+
+/// Build a `Capability::Agent(AgentCapability::Spawn)` granting permission to
+/// spawn sub-agents whose package kind is in the allow-list.
+pub fn cap_agent_spawn(allowed_kinds: &[&str]) -> Capability {
+    Capability::Agent(AgentCapability::Spawn {
+        allowed_kinds: allowed_kinds.iter().map(|s| s.to_string()).collect(),
+    })
+}
+
+/// Build a `Capability::Custom` with the given name and no parameters.
+pub fn cap_custom(name: &str) -> Capability {
+    Capability::Custom {
+        name: name.into(),
+        params: BTreeMap::new(),
+    }
+}
+
+/// Build a `Capability::Custom` with the given name and a parameter map.
+pub fn cap_custom_with_params(name: &str, params: BTreeMap<String, Value>) -> Capability {
+    Capability::Custom {
+        name: name.into(),
+        params,
     }
 }

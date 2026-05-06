@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tau_domain::{Capability, PluginKind, PluginManifest, PortKind};
+use tau_domain::{fixtures as domain_fixtures, Capability, PluginKind, PluginManifest, PortKind};
 use tau_pkg::LockedPlugin;
 use tau_plugin_protocol::handshake::TraceContext;
 use tau_ports::{SandboxPlan, SandboxProbe};
@@ -133,12 +133,7 @@ async fn adapter_threads_through_to_plugin_spawn() {
         .expect("controlled-env binary has parent dir")
         .to_string_lossy()
         .into_owned();
-    // FsCapability::Read is #[non_exhaustive]; construct via serde.
-    let read_cap: Capability = serde_json::from_value(serde_json::json!({
-        "kind": "fs.read",
-        "paths": ["/tmp/**", bin_parent],
-    }))
-    .expect("valid fs.read capability");
+    let read_cap: Capability = domain_fixtures::cap_fs_read(&["/tmp/**", &bin_parent]);
     let plan = SandboxPlan::new(vec![read_cap], None, None);
 
     // 3. Synthesise a LockedPlugin pointing at the controlled-env binary.
@@ -211,13 +206,7 @@ async fn sandbox_plan_validation_runs_pre_spawn() {
 
     // 2. Build a SandboxPlan with a Capability::Custom that the native adapter
     //    does NOT support (native only supports standard FS/network shapes).
-    // Capability::Custom is #[non_exhaustive]; construct via serde.
-    let custom_cap: Capability = serde_json::from_value(serde_json::json!({
-        "kind": "custom",
-        "name": "mcp.tool.use",
-        "params": {},
-    }))
-    .expect("valid custom capability");
+    let custom_cap: Capability = domain_fixtures::cap_custom("mcp.tool.use");
     let plan = SandboxPlan::new(vec![custom_cap], None, None);
 
     // 3. Synthesise a LockedPlugin (binary path doesn't matter — spawn must
