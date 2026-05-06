@@ -122,10 +122,23 @@ fn run_child(orig_uid: u32, orig_gid: u32) -> ! {
     // CAP_NET_ADMIN within the userns), then delete it to clean up.
     let add = Command::new("ip")
         .args(["link", "add", "veth-probe-host", "type", "veth", "peer", "name", "veth-probe-child"])
-        .status();
+        .output();
     match add {
-        Ok(s) if s.success() => {}
-        _ => std::process::exit(EXIT_VETH),
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            // Capture stderr so the parent can diagnose what step of veth
+            // creation went wrong inside the privileged Docker container.
+            eprintln!(
+                "probe: ip link add failed: status={:?} stderr={:?}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            std::process::exit(EXIT_VETH);
+        }
+        Err(e) => {
+            eprintln!("probe: ip link add spawn failed: {e}");
+            std::process::exit(EXIT_VETH);
+        }
     }
 
     let del = Command::new("ip")
