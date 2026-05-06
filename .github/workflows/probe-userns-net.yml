@@ -13,15 +13,37 @@ on:
       - feat/f-probe-verification
 
 jobs:
-  probe:
-    name: probe userns + netns + veth + AF_NETLINK
+  probe-host:
+    name: probe (host runner)
     runs-on: ubuntu-latest
+    continue-on-error: true  # expected to fail; documents the GHA restriction
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
         with:
           shared-key: linux-stable
           with-mold: true
-      - name: Run probe
+      - name: Run probe on host runner
         run: |
           cargo test -p tau-sandbox-native --test probe_userns_net_caps -- --ignored --nocapture
+
+  probe-privileged-docker:
+    name: probe (privileged docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run probe inside privileged Docker container
+        # Privileged container has full root + CAP_NET_ADMIN + can write
+        # /proc/self/uid_map. This validates approach B for sub-project F's
+        # CI strategy: e2e tests run inside privileged Docker.
+        run: |
+          docker run --rm --privileged \
+            -v "$PWD":/workspace \
+            -w /workspace \
+            rust:1.95-bookworm \
+            bash -c '
+              set -e
+              apt-get update -qq
+              apt-get install -y -qq iproute2 nftables
+              cargo test -p tau-sandbox-native --test probe_userns_net_caps -- --ignored --nocapture
+            '
