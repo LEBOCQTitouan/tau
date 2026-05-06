@@ -66,6 +66,19 @@ If you see another cargo invocation using the same CARGO_TARGET_DIR you
 were about to use, EITHER wait for it OR pick a different target dir
 (e.g. `target/agent-<role>-2`). Do not just launch and hope.
 
+## Rule 6: Prefer `cargo nextest` for tests
+
+CI runs `cargo nextest run` everywhere except doctests. Using nextest
+locally matches CI behavior more closely (per-test isolation, parallel
+binary execution). Install once: `cargo install cargo-nextest --locked`.
+
+For doctests, still use `cargo test --doc` — nextest doctest support is
+incomplete.
+
+`.config/nextest.toml` configures `retries = 2` to handle timing-sensitive
+flakes that nextest's parallelism can expose vs cargo test's serial
+execution.
+
 ## Why these rules exist
 
 Past sessions accumulated 24 lock-contended builds totaling ~36 minutes
