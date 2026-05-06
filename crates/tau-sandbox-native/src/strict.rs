@@ -308,8 +308,8 @@ fn compile_filter(
 /// The order is fixed and must not be changed:
 /// 1. Landlock — uses `landlock_*` syscalls that seccomp would block if installed first.
 /// 2. unshare — must precede seccomp because `unshare(2)` is not in the allow-list.
-/// 2.5. sync-pipe read (F task 6.5) — block until parent completes per-host filter setup.
-/// 3. seccomp — installed last; once active it blocks everything not in the allow-list.
+/// 3. sync-pipe read (F task 6.5) — block until parent completes per-host filter setup.
+/// 4. seccomp — installed last; once active it blocks everything not in the allow-list.
 ///
 /// Returns `(SandboxHandle, Option<VethSubnet>)`. The `VethSubnet` is `Some` when the
 /// plan has `Network(Http)` and is consumed by `NativeSandbox::apply_post_spawn` (T4)
@@ -418,16 +418,15 @@ pub(crate) fn apply_strict(
             if let Some(fd) = sync_read_raw {
                 let mut byte = [0u8; 1];
                 // SAFETY: read() is async-signal-safe; fd inherited via fork.
-                let n = unsafe { libc::read(fd, byte.as_mut_ptr() as _, 1) };
+                // Already inside the outer pre_exec unsafe block (line 403).
+                let n = libc::read(fd, byte.as_mut_ptr() as _, 1);
                 if n != 1 {
                     return Err(std::io::Error::other(
                         "net-filter setup failed (parent closed sync pipe before signal)",
                     ));
                 }
                 // SAFETY: we own the fd; close after read.
-                unsafe {
-                    libc::close(fd);
-                }
+                libc::close(fd);
             }
 
             // Step 3: install seccomp BPF allow-list (blocks unshare/landlock after this).
