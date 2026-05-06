@@ -382,6 +382,7 @@ jobs:
 
   test-tau-plugin-compat:
     name: test (tau-plugin-compat / linux)
+    needs: build-fixtures-linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -390,25 +391,38 @@ jobs:
           shared-key: linux-stable
           with-nextest: true
           with-mold: true
-      - name: Build tau binary first
-        # Layer 3 tests spawn `tau resolve --check-sandbox` via the
-        # CARGO_BIN_EXE_tau env var. Building tau-cli first ensures the
-        # binary exists in target/debug for the helper to discover.
-        run: cargo build -p tau-cli --bin tau
-      - name: Build all real plugin binaries (Layer 4 tests)
-        # Sub-project D Task 5/6/7's Layer 4 tests need the real plugin
-        # binaries pre-built. Build the 5 real plugins in release mode.
+      - name: Download fixture binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-fixture-binaries
+          path: ./prebuilt
+      - name: Place binaries at cargo-expected paths
         run: |
-          cargo build -p anthropic --release
-          cargo build -p ollama --release
-          cargo build -p openai --release
-          cargo build -p fs-read --release
-          cargo build -p shell --release
+          mkdir -p target/release
+          mv ./prebuilt/anthropic-plugin ./prebuilt/ollama-plugin ./prebuilt/openai-plugin \
+             ./prebuilt/fs-read-plugin ./prebuilt/shell-plugin \
+             ./prebuilt/echo-llm ./prebuilt/echo-tool \
+             ./prebuilt/tau \
+             target/release/
+          mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
+          mv ./prebuilt/tau-controlled-env \
+             crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
+          # Touch to bump mtime above source files so cargo's freshness
+          # check doesn't decide to rebuild.
+          touch target/release/* \
+                crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+      # FALLBACK (removed in Task C7 once green):
+      # - name: Build tau binary first
+      #   run: cargo build -p tau-cli --bin tau
+      # - name: Build all real plugin binaries (Layer 4 tests)
+      #   run: |
+      #     cargo build -p anthropic --release
+      #     cargo build -p ollama --release
+      #     cargo build -p openai --release
+      #     cargo build -p fs-read --release
+      #     cargo build -p shell --release
       - name: Test tau-plugin-compat (integration-tests feature)
-        # Layer 3 tests run; 7 of 10 Layer 4 tests run after sub-project D
-        # (4 tool-plugin × 2 adapters + 3 native HTTP plugin via cassette);
-        # 3 container × HTTP plugin tests stay #[ignore]'d pending F.
-        run: cargo nextest run -p tau-plugin-compat --features integration-tests --tests
+        run: cargo nextest run -p tau-plugin-compat --features integration-tests --tests --verbose
 
   test-tau-sandbox-native-e2e:
     name: test (tau-sandbox-native e2e / linux)
