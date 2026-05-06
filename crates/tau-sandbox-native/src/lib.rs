@@ -108,7 +108,12 @@ impl Sandbox for NativeSandbox {
         {
             match self.requested_tier {
                 SandboxTier::Light => light::apply_landlock(plan, cmd),
-                SandboxTier::Strict => strict::apply_strict(plan, cmd),
+                SandboxTier::Strict => {
+                    // F task 6.5 task 3: apply_strict returns (handle, Option<VethSubnet>).
+                    // Task 4 will use _veth_subnet to populate self.veth_subnets HashMap.
+                    let (handle, _veth_subnet) = strict::apply_strict(plan, cmd)?;
+                    Ok(handle)
+                }
                 SandboxTier::None => Ok(SandboxHandle::noop()),
                 other => Err(SandboxError::Unsupported {
                     what: format!("tier {other:?} not implemented"),
