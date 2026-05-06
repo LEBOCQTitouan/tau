@@ -121,7 +121,7 @@ fn run_child(orig_uid: u32, orig_gid: u32) -> ! {
     // Step 4: create a veth pair inside the isolated netns (exercises
     // CAP_NET_ADMIN within the userns), then delete it to clean up.
     let add = Command::new("ip")
-        .args(["link", "add", "veth-probe-host", "type", "veth", "peer", "name", "veth-probe-child"])
+        .args(["link", "add", "vp-host", "type", "veth", "peer", "name", "vp-child"])
         .output();
     match add {
         Ok(out) if out.status.success() => {}
@@ -142,12 +142,12 @@ fn run_child(orig_uid: u32, orig_gid: u32) -> ! {
     }
 
     let del = Command::new("ip")
-        .args(["link", "del", "veth-probe-host"])
+        .args(["link", "del", "vp-host"])
         .status();
     match del {
         Ok(s) if s.success() => {}
         // Deletion failure is non-fatal for the probe's purpose; log and continue.
-        _ => eprintln!("probe: ip link del veth-probe-host failed (non-fatal)"),
+        _ => eprintln!("probe: ip link del vp-host failed (non-fatal)"),
     }
 
     eprintln!("PROBE OK");
