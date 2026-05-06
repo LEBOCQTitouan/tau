@@ -379,6 +379,8 @@ jobs:
           mkdir -p target/release
           mv ./prebuilt/anthropic-plugin ./prebuilt/ollama-plugin ./prebuilt/openai-plugin \
              target/release/
+          # actions/upload-artifact strips executable bits; restore them.
+          chmod +x target/release/anthropic-plugin target/release/ollama-plugin target/release/openai-plugin
           touch target/release/anthropic-plugin target/release/ollama-plugin target/release/openai-plugin
       - name: Run conformance suite against all 3 plugins
         run: |
@@ -428,6 +430,9 @@ jobs:
           mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
           mv ./prebuilt/tau-controlled-env \
              crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
+          # actions/upload-artifact strips executable bits; restore them.
+          chmod +x target/release/* \
+                   crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
           # Touch to bump mtime above source files so cargo's freshness
           # check doesn't decide to rebuild.
           touch target/release/* \
@@ -466,6 +471,8 @@ jobs:
           mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
           mv ./prebuilt/tau-controlled-env \
              crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
+          # actions/upload-artifact strips executable bits; restore them.
+          chmod +x crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
           touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
       # FALLBACK (removed in Task C7):
       # - name: Build controlled-env binary
@@ -494,6 +501,8 @@ jobs:
           mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
           mv ./prebuilt/tau-controlled-env \
              crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
+          # actions/upload-artifact strips executable bits; restore them.
+          chmod +x crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
           touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
       # FALLBACK (removed in Task C7):
       # - name: Build controlled-env binary
