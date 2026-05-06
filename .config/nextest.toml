@@ -1,0 +1,13 @@
+# Nextest configuration. See https://nexte.st/docs/configuration/
+
+[profile.default]
+# Retry flaky tests up to twice before marking as failure. nextest's
+# parallel test execution exposes timing-sensitive flakes that
+# cargo test (single-threaded per binary) masked. Two retries lets
+# genuinely flaky tests pass while keeping deterministic failures fast.
+retries = 2
+
+# Show output for failures even when retries succeed, so flakes are
+# visible in CI logs.
+failure-output = "immediate-final"
+success-output = "never"

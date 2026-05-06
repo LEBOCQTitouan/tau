@@ -32,6 +32,8 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt
+          shared-key: linux-stable
+          with-mold: true
       - run: cargo fmt --all -- --check
 
   clippy:
@@ -42,6 +44,9 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy
+          shared-key: linux-stable
+          with-sccache: true
+          with-mold: true
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
@@ -58,17 +63,22 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.toolchain }}
-          cache-key: test-${{ matrix.os }}-${{ matrix.toolchain }}
-      - run: cargo test --workspace --all-targets
+          shared-key: ${{ matrix.os }}-${{ matrix.toolchain }}
+          with-nextest: true
+          with-sccache: true
+          with-mold: true
+      - run: cargo nextest run --workspace --all-targets
       - run: cargo test --workspace --doc
       # Sandbox integration tests — Linux-only, ignored by default,
-      # opt-in via the integration-tests feature.
+      # opt-in via the integration-tests feature. nextest exits 4 when
+      # `--run-ignored only` matches zero tests; --no-tests=pass restores
+      # cargo test's permissive behavior so empty filter sets succeed.
       - if: matrix.os == 'ubuntu-latest'
-        run: cargo test -p tau-sandbox-native --features integration-tests --tests -- --ignored
+        run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests --run-ignored only --no-tests=pass
       - if: matrix.os == 'ubuntu-latest'
-        run: cargo test -p tau-sandbox-container --tests -- --ignored
+        run: cargo nextest run -p tau-sandbox-container --tests --run-ignored only --no-tests=pass
       - if: matrix.os == 'ubuntu-latest'
-        run: cargo test -p tau-runtime --features integration-tests --tests -- --ignored
+        run: cargo nextest run -p tau-runtime --features integration-tests --tests --run-ignored only --no-tests=pass
 
   no-default-features:
     name: build (no-default-features)
@@ -76,10 +86,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-sccache: true
+          with-mold: true
       - name: Build tau-domain (no default features)
         run: cargo build -p tau-domain --no-default-features
       - name: Test tau-domain (no default features)
-        run: cargo test -p tau-domain --no-default-features --lib
+        run: cargo nextest run -p tau-domain --no-default-features --lib
 
   no-default-features-ports:
     name: build (tau-ports no-default-features)
@@ -87,10 +102,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-sccache: true
+          with-mold: true
       - name: Build tau-ports (no default features)
         run: cargo build -p tau-ports --no-default-features
       - name: Test tau-ports (no default features)
-        run: cargo test -p tau-ports --no-default-features --lib
+        run: cargo nextest run -p tau-ports --no-default-features --lib
 
   test-fixtures-ports:
     name: test (tau-ports test-fixtures only)
@@ -98,8 +118,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-sccache: true
+          with-mold: true
       - name: Test tau-ports (test-fixtures feature only)
-        run: cargo test -p tau-ports --features test-fixtures
+        run: cargo nextest run -p tau-ports --features test-fixtures
 
   no-default-features-pkg:
     name: build (tau-pkg no-default-features)
@@ -107,10 +132,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-sccache: true
+          with-mold: true
       - name: Build tau-pkg (no default features)
         run: cargo build -p tau-pkg --no-default-features
       - name: Test tau-pkg (no default features)
-        run: cargo test -p tau-pkg --no-default-features --lib
+        run: cargo nextest run -p tau-pkg --no-default-features --lib
 
   no-default-features-runtime:
     name: build (tau-runtime no-default-features)
@@ -118,10 +148,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-sccache: true
+          with-mold: true
       - name: Build tau-runtime (no default features)
         run: cargo build -p tau-runtime --no-default-features
       - name: Test tau-runtime (no default features)
-        run: cargo test -p tau-runtime --no-default-features --lib
+        run: cargo nextest run -p tau-runtime --no-default-features --lib
 
   no-default-features-cli:
     name: build (tau-cli no-default-features)
@@ -129,10 +164,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-sccache: true
+          with-mold: true
       - name: Build tau-cli (no default features)
         run: cargo build -p tau-cli --no-default-features
       - name: Test tau-cli (no default features)
-        run: cargo test -p tau-cli --no-default-features --lib
+        run: cargo nextest run -p tau-cli --no-default-features --lib
 
   no-default-features-protocol:
     name: build (tau-plugin-protocol)
@@ -140,10 +180,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-sccache: true
+          with-mold: true
       - name: Build tau-plugin-protocol (no default features)
         run: cargo build -p tau-plugin-protocol --no-default-features
       - name: Test tau-plugin-protocol (no default features)
-        run: cargo test -p tau-plugin-protocol --no-default-features --lib
+        run: cargo nextest run -p tau-plugin-protocol --no-default-features --lib
 
   no-default-features-sdk:
     name: build (tau-plugin-sdk)
@@ -151,10 +196,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-sccache: true
+          with-mold: true
       - name: Build tau-plugin-sdk (no default features)
         run: cargo build -p tau-plugin-sdk --no-default-features
       - name: Test tau-plugin-sdk (no default features)
-        run: cargo test -p tau-plugin-sdk --no-default-features --lib
+        run: cargo nextest run -p tau-plugin-sdk --no-default-features --lib
 
   build-tau-plugins:
     name: build (tau-plugins)
@@ -162,6 +212,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-mold: true
       - name: Build toy plugins (release)
         run: cargo build --release -p echo-llm -p echo-tool
 
@@ -171,6 +224,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-mold: true
       - name: Build anthropic-plugin (release)
         run: cargo build --release -p anthropic
 
@@ -180,6 +236,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-mold: true
       - name: Build ollama-plugin (release)
         run: cargo build --release -p ollama
 
@@ -189,6 +248,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-mold: true
       - name: Build openai-plugin (release)
         run: cargo build --release -p openai
 
@@ -198,6 +260,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-mold: true
       - name: Build fs-read-plugin (release)
         run: cargo build --release -p fs-read
 
@@ -207,6 +272,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-mold: true
       - name: Build shell-plugin (release)
         run: cargo build --release -p shell
 
@@ -216,10 +284,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-sccache: true
+          with-mold: true
       - name: Build tau-plugin-test-support
         run: cargo build -p tau-plugin-test-support
       - name: Test tau-plugin-test-support
-        run: cargo test -p tau-plugin-test-support --all-targets
+        run: cargo nextest run -p tau-plugin-test-support --all-targets
 
   build-tau-plugin-conformance:
     name: build (tau-plugin-conformance)
@@ -227,6 +300,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-sccache: true
+          with-mold: true
       - name: Build tau-plugin-conformance
         run: cargo build -p tau-plugin-conformance
 
@@ -236,11 +313,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-sccache: true
+          with-mold: true
       - name: Run conformance suite against all 3 plugins
         run: |
-          cargo test -p anthropic --test conformance -- --nocapture
-          cargo test -p ollama    --test conformance -- --nocapture
-          cargo test -p openai    --test conformance -- --nocapture
+          cargo nextest run -p anthropic --test conformance --no-capture
+          cargo nextest run -p ollama    --test conformance --no-capture
+          cargo nextest run -p openai    --test conformance --no-capture
 
   build-tau-plugin-compat:
     name: build (tau-plugin-compat)
@@ -248,6 +330,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-sccache: true
+          with-mold: true
       - name: Build tau-plugin-compat
         run: cargo build -p tau-plugin-compat
       - name: Build tau-plugin-compat (integration-tests feature)
@@ -259,6 +345,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-mold: true
       - name: Build tau binary first
         # Layer 3 tests spawn `tau resolve --check-sandbox` via the
         # CARGO_BIN_EXE_tau env var. Building tau-cli first ensures the
@@ -277,7 +367,7 @@ jobs:
         # Layer 3 tests run; 7 of 10 Layer 4 tests run after sub-project D
         # (4 tool-plugin × 2 adapters + 3 native HTTP plugin via cassette);
         # 3 container × HTTP plugin tests stay #[ignore]'d pending F.
-        run: cargo test -p tau-plugin-compat --features integration-tests --tests
+        run: cargo nextest run -p tau-plugin-compat --features integration-tests --tests
 
   test-tau-sandbox-native-e2e:
     name: test (tau-sandbox-native e2e / linux)
@@ -285,6 +375,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-mold: true
       - name: Build controlled-env binary
         # Sub-project D's e2e tests use this binary as a deterministic
         # spawn target. Built in release mode with static linking
@@ -293,7 +387,7 @@ jobs:
       - name: Test tau-sandbox-native e2e
         # Real-kernel landlock + seccomp + network-filter tests gated
         # cfg(feature = "integration-tests") + cfg(target_os = "linux").
-        run: cargo test -p tau-sandbox-native --features integration-tests --tests
+        run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests
 
   test-tau-runtime-e2e:
     name: test (tau-runtime e2e / linux)
@@ -301,9 +395,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-mold: true
       - name: Build controlled-env binary
         run: cargo build --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml --release
       - name: Test tau-runtime e2e
         # Runtime-level integration tests: adapter threads through to
         # plugin spawn; sandbox plan validation runs pre-spawn.
-        run: cargo test -p tau-runtime --features integration-tests --tests
+        run: cargo nextest run -p tau-runtime --features integration-tests --tests
