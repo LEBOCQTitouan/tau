@@ -211,18 +211,6 @@ jobs:
       - name: Test tau-plugin-sdk (no default features)
         run: cargo nextest run -p tau-plugin-sdk --no-default-features --lib
 
-  build-tau-plugins:
-    name: build (tau-plugins)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-mold: true
-      - name: Build toy plugins (release)
-        run: cargo build --release -p echo-llm -p echo-tool
-
   build-fixtures-linux:
     name: build-fixtures / linux
     runs-on: ubuntu-latest
@@ -267,66 +255,6 @@ jobs:
           name: linux-fixture-binaries
           retention-days: 1
           path: _artifacts/
-
-  build-anthropic-plugin:
-    name: build (anthropic-plugin)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-mold: true
-      - name: Build anthropic-plugin (release)
-        run: cargo build --release -p anthropic
-
-  build-ollama-plugin:
-    name: build (ollama-plugin)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-mold: true
-      - name: Build ollama-plugin (release)
-        run: cargo build --release -p ollama
-
-  build-openai-plugin:
-    name: build (openai-plugin)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-mold: true
-      - name: Build openai-plugin (release)
-        run: cargo build --release -p openai
-
-  build-fs-read-plugin:
-    name: build (fs-read-plugin)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-mold: true
-      - name: Build fs-read-plugin (release)
-        run: cargo build --release -p fs-read
-
-  build-shell-plugin:
-    name: build (shell-plugin)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-mold: true
-      - name: Build shell-plugin (release)
-        run: cargo build --release -p shell
 
   build-tau-plugin-test-support:
     name: build (tau-plugin-test-support)
@@ -470,9 +398,6 @@ jobs:
           # actions/upload-artifact strips executable bits; restore them.
           chmod +x crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
           touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
-      # FALLBACK (removed in Task C7):
-      # - name: Build controlled-env binary
-      #   run: cargo build --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml --release
       - name: Test tau-sandbox-native e2e
         run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests --verbose
 
@@ -500,8 +425,5 @@ jobs:
           # actions/upload-artifact strips executable bits; restore them.
           chmod +x crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
           touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
-      # FALLBACK (removed in Task C7):
-      # - name: Build controlled-env binary
-      #   run: cargo build --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml --release
       - name: Test tau-runtime e2e
         run: cargo nextest run -p tau-runtime --features integration-tests --tests --verbose
