@@ -3013,6 +3013,7 @@ dependencies = [
 name = "tau-sandbox-native"
 version = "0.0.0"
 dependencies = [
+ "insta",
  "landlock",
  "libc",
  "nix 0.29.0",

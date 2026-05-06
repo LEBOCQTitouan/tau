@@ -1,27 +1,18 @@
 //! Per-host network filtering helpers for the Strict sandbox tier.
 //!
-//! # v0.1 status — per-host filtering not yet implemented
-//!
-//! True per-host egress filtering (e.g. nftables rules inside an isolated
-//! network namespace) is **deferred** from v0.1. The reasons are:
-//!
-//! - Setting up nftables inside a fresh user-namespaced netns requires
-//!   `CAP_NET_ADMIN` inside the namespace; acquiring and using it correctly
-//!   is non-trivial and introduces portability risks across Linux distributions
-//!   and kernel versions.
-//! - The nftables API is not exposed through a stable Rust crate with the
-//!   maturity required for Phase 0 work.
-//!
-//! # What this module does today
+//! # Sub-project F — per-host egress filtering
 //!
 //! Two decisions are made at plan-evaluation time (parent process, before fork):
 //!
 //! 1. **Unshare flags** (`unshare_flags_for_plan`):
-//!    - No `Capability::Network(Http)` in plan → `CLONE_NEWUSER | CLONE_NEWNET`:
-//!      child gets an isolated netns with no interfaces; all egress fails.
-//!    - `Capability::Network(Http)` present → `CLONE_NEWUSER` only (no `CLONE_NEWNET`):
-//!      child inherits the parent's network namespace; full egress is available.
-//!      A `tracing::warn!` is emitted to signal this v0.1 over-permissiveness.
+//!    - No `Capability::Network(Http)` → `CLONE_NEWUSER | CLONE_NEWNET`:
+//!      child is in a fresh empty netns. Combined with seccomp blocking
+//!      socket() syscalls, this gives full network isolation.
+//!    - `Capability::Network(Http)` present → `CLONE_NEWUSER` only: child
+//!      inherits the parent's netns (v0.1 fallback). Sub-project F task 6.5
+//!      will replace this with per-host nftables filtering inside a fresh
+//!      netns once the strict.rs post-spawn hook integration lands; the
+//!      net_filter module's helpers are already in place.
 //!
 //! 2. **Seccomp socket syscalls** (`extend_with_network_rules`):
 //!    - No `Capability::Network(Http)` → `SYS_socket`, `SYS_connect`,
@@ -31,39 +22,29 @@
 //!      added to the allow-list so HTTP clients can open TCP connections.
 //!      Server-side syscalls (`SYS_bind`, `SYS_listen`, `SYS_accept`,
 //!      `SYS_accept4`) are intentionally omitted.
-//!
-//! # TODO(future) — real per-host egress filtering (Phase 2)
-//!
-//! - Create a new netns via `unshare(CLONE_NEWNET)` for ALL plans (including those
-//!   with `Network(Http)`).
-//! - Inside the netns, configure a loopback + veth pair for outbound traffic.
-//! - Install nftables rules that allow egress only to the hosts listed in the
-//!   `Http { hosts }` capability.
-//! - Wire `SYS_socket`/`SYS_connect` additions to the allow-list behind the same
-//!   capability check (already done in v0.1).
-//! - Remove the `tracing::warn!` once real filtering is in place.
 
 use std::collections::BTreeMap;
-use std::sync::Once;
 
 use nix::sched::CloneFlags;
 use seccompiler::SeccompRule;
 use tau_domain::{Capability, NetCapability};
 use tau_ports::SandboxPlan;
 
-/// Return the `unshare(2)` flags appropriate for the plan's network capabilities.
+/// Returns the flags to pass to `unshare(2)` for the given plan.
 ///
-/// - If the plan has **any** `Capability::Network(Http)` capability, returns
-///   `CLONE_NEWUSER` only. The child inherits the parent's netns so HTTP
-///   clients can reach external hosts. A warning is logged because this is
-///   over-permissive (no per-host filtering yet).
-/// - Otherwise, returns `CLONE_NEWUSER | CLONE_NEWNET`. The child is placed in
-///   an empty netns with no interfaces; all network egress fails.
+/// - No `Capability::Network(Http)` in plan → `CLONE_NEWUSER | CLONE_NEWNET`:
+///   child is in a fresh empty netns. Combined with seccomp blocking
+///   socket() syscalls, this gives full network isolation.
+/// - `Capability::Network(Http)` in plan → `CLONE_NEWUSER` only (no
+///   CLONE_NEWNET): the child inherits the parent's netns so HTTP clients
+///   can resolve hostnames + connect.
 ///
-/// # v0.1 limitation
-///
-/// The `Network(Http)` path grants full parent netns access, not filtered
-/// per-host access. Per-host nftables-based filtering is deferred to Phase 2.
+/// **v0.1 fallback (still active until sub-project F task 6.5):** when
+/// `Network(Http)` is in the plan, `CLONE_NEWNET` is stripped so the child
+/// inherits the parent's full netns. This is over-permissive (no per-host
+/// filtering yet); F task 6.5 will switch to "always include CLONE_NEWNET +
+/// apply per-host nftables filter" once the strict.rs post-spawn hook
+/// integration lands.
 pub(crate) fn unshare_flags_for_plan(plan: &SandboxPlan) -> CloneFlags {
     let has_http = plan
         .capabilities
@@ -71,14 +52,8 @@ pub(crate) fn unshare_flags_for_plan(plan: &SandboxPlan) -> CloneFlags {
         .any(|c| matches!(c, Capability::Network(NetCapability::Http { .. })));
 
     if has_http {
-        static V01_NETNS_WARNING: Once = Once::new();
-        V01_NETNS_WARNING.call_once(|| {
-            tracing::warn!(
-                "v0.1 limitation: plan has Network(Http) capability; \
-                 child inherits parent netns (no per-host filtering). \
-                 Phase 2 will add nftables-based egress filtering."
-            );
-        });
+        // v0.1 fallback: inherit parent netns. F task 6.5 will replace this
+        // with per-host nftables filtering inside a fresh netns.
         CloneFlags::CLONE_NEWUSER
     } else {
         CloneFlags::CLONE_NEWUSER | CloneFlags::CLONE_NEWNET
@@ -145,7 +120,7 @@ mod tests {
     // ---- unshare_flags_for_plan tests ----
 
     /// An empty plan (no capabilities) should yield both CLONE_NEWUSER and
-    /// CLONE_NEWNET, isolating the child into an empty netns.
+    /// CLONE_NEWNET (sub-project F: always isolate into a fresh netns).
     #[test]
     fn unshare_flags_default_no_network() {
         let plan_json = serde_json::json!({
@@ -165,8 +140,10 @@ mod tests {
         );
     }
 
-    /// A plan with Network(Http) should yield only CLONE_NEWUSER (no CLONE_NEWNET),
-    /// so the child inherits the parent's netns.
+    /// A plan with Network(Http) drops CLONE_NEWNET (v0.1 fallback: child
+    /// inherits parent netns so HTTP clients can reach external hosts).
+    /// Sub-project F task 6.5 will switch this to "always include CLONE_NEWNET
+    /// + per-host nftables filter inside the new netns".
     #[test]
     fn unshare_flags_with_http_drops_newnet() {
         let plan_json = serde_json::json!({
@@ -186,7 +163,7 @@ mod tests {
         );
         assert!(
             !flags.contains(CloneFlags::CLONE_NEWNET),
-            "CLONE_NEWNET must be absent when Network(Http) is present"
+            "v0.1 fallback: CLONE_NEWNET stripped when Network(Http) is in plan"
         );
     }
 

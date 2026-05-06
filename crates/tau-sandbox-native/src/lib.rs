@@ -20,6 +20,8 @@ mod light;
 #[cfg(target_os = "linux")]
 mod net;
 #[cfg(target_os = "linux")]
+mod net_filter;
+#[cfg(target_os = "linux")]
 mod probe;
 #[cfg(target_os = "linux")]
 mod strict;
