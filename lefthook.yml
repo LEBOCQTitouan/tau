@@ -21,7 +21,7 @@
 # target/agent-* (sub-agents).
 #
 # Cross-compile prerequisite (one-time setup):
-#   brew install filosottile/musl-cross/musl-cross --with-x86_64
+#   brew install filosottile/musl-cross/musl-cross   # x86_64 included by default
 #   rustup target add x86_64-unknown-linux-musl
 # See .cargo/config.toml for the linker + CC env configuration.
 
@@ -55,7 +55,7 @@ pre-commit:
       # a glibc-compatible cross-compiler. Musl catches the same
       # cfg-gating issues (std::os::unix::*, linux-only APIs, etc.).
       # Linker + CC configured in .cargo/config.toml; requires:
-      #   brew install filosottile/musl-cross/musl-cross --with-x86_64
+      #   brew install filosottile/musl-cross/musl-cross   # x86_64 included by default
       run: env CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=target/lefthook/check-linux cargo check --workspace --all-targets --target x86_64-unknown-linux-musl
 
 pre-push:
