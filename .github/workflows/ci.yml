@@ -243,21 +243,30 @@ jobs:
         run: |
           cargo build --release \
             --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml
+      - name: Stage binaries into flat _artifacts directory
+        # actions/upload-artifact@v4 preserves directory structure relative
+        # to the workspace root. Without this staging step, downstream jobs
+        # would see binaries under ./prebuilt/target/release/ and
+        # ./prebuilt/crates/.../target/release/ — different roots break the
+        # uniform `mv ./prebuilt/<name>` pattern downstream. Flattening into
+        # _artifacts/ gives consumers a single predictable path.
+        run: |
+          mkdir -p _artifacts
+          cp target/release/anthropic-plugin _artifacts/
+          cp target/release/ollama-plugin _artifacts/
+          cp target/release/openai-plugin _artifacts/
+          cp target/release/fs-read-plugin _artifacts/
+          cp target/release/shell-plugin _artifacts/
+          cp target/release/echo-llm _artifacts/
+          cp target/release/echo-tool _artifacts/
+          cp target/release/tau _artifacts/
+          cp crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env _artifacts/
       - name: Upload fixture binaries
         uses: actions/upload-artifact@v4
         with:
           name: linux-fixture-binaries
           retention-days: 1
-          path: |
-            target/release/anthropic-plugin
-            target/release/ollama-plugin
-            target/release/openai-plugin
-            target/release/fs-read-plugin
-            target/release/shell-plugin
-            target/release/echo-llm
-            target/release/echo-tool
-            target/release/tau
-            crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+          path: _artifacts/
 
   build-anthropic-plugin:
     name: build (anthropic-plugin)
