@@ -120,14 +120,10 @@ pub(crate) fn apply_landlock(
     // per-command exec allow-list. Resolution happens in the parent before fork.
     let exec_paths = collect_exec_paths(plan)
         .into_iter()
-        .filter_map(|p| {
-            // Resolve symlinks so landlock's path matching covers both the
-            // link path and the canonical target — same treatment as read_paths.
-            match resolve_symlinks_for_landlock(&p) {
-                Ok(resolved) => Some(resolved),
-                Err(_) => None, // Skip unresolvable exec paths silently.
-            }
-        })
+        // Resolve symlinks so landlock's path matching covers both the
+        // link path and the canonical target — same treatment as read_paths.
+        // Unresolvable exec paths are silently skipped (.ok()).
+        .filter_map(|p| resolve_symlinks_for_landlock(&p).ok())
         .flatten()
         .collect::<Vec<_>>();
 
