@@ -22,6 +22,7 @@ nix         = { workspace = true }
 seccompiler = { workspace = true }
 
 [dev-dependencies]
+serde_json = "1"
 tempfile   = { workspace = true }
 tokio      = { workspace = true, features = ["macros", "rt"] }
 tau-domain = { workspace = true, features = ["serde", "test-fixtures"] }
