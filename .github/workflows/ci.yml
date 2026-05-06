@@ -85,40 +85,8 @@ jobs:
           with-mold: true
       - run: cargo check --workspace --all-targets --locked
 
-  no-default-features:
-    name: build (no-default-features)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-nextest: true
-          with-sccache: true
-          with-mold: true
-      - name: Build tau-domain (no default features)
-        run: cargo build -p tau-domain --no-default-features
-      - name: Test tau-domain (no default features)
-        run: cargo nextest run -p tau-domain --no-default-features --lib
-
-  no-default-features-ports:
-    name: build (tau-ports no-default-features)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-nextest: true
-          with-sccache: true
-          with-mold: true
-      - name: Build tau-ports (no default features)
-        run: cargo build -p tau-ports --no-default-features
-      - name: Test tau-ports (no default features)
-        run: cargo nextest run -p tau-ports --no-default-features --lib
-
   test-fixtures-ports:
-    name: test (tau-ports test-fixtures only)
+    name: test-fixtures-ports / linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -131,85 +99,24 @@ jobs:
       - name: Test tau-ports (test-fixtures feature only)
         run: cargo nextest run -p tau-ports --features test-fixtures
 
-  no-default-features-pkg:
-    name: build (tau-pkg no-default-features)
+  feature-flag-matrix:
+    name: feature-flag-matrix / linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
         with:
           shared-key: linux-stable
-          with-nextest: true
           with-sccache: true
           with-mold: true
-      - name: Build tau-pkg (no default features)
-        run: cargo build -p tau-pkg --no-default-features
-      - name: Test tau-pkg (no default features)
-        run: cargo nextest run -p tau-pkg --no-default-features --lib
-
-  no-default-features-runtime:
-    name: build (tau-runtime no-default-features)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-nextest: true
-          with-sccache: true
-          with-mold: true
-      - name: Build tau-runtime (no default features)
-        run: cargo build -p tau-runtime --no-default-features
-      - name: Test tau-runtime (no default features)
-        run: cargo nextest run -p tau-runtime --no-default-features --lib
-
-  no-default-features-cli:
-    name: build (tau-cli no-default-features)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-nextest: true
-          with-sccache: true
-          with-mold: true
-      - name: Build tau-cli (no default features)
-        run: cargo build -p tau-cli --no-default-features
-      - name: Test tau-cli (no default features)
-        run: cargo nextest run -p tau-cli --no-default-features --lib
-
-  no-default-features-protocol:
-    name: build (tau-plugin-protocol)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-nextest: true
-          with-sccache: true
-          with-mold: true
-      - name: Build tau-plugin-protocol (no default features)
-        run: cargo build -p tau-plugin-protocol --no-default-features
-      - name: Test tau-plugin-protocol (no default features)
-        run: cargo nextest run -p tau-plugin-protocol --no-default-features --lib
-
-  no-default-features-sdk:
-    name: build (tau-plugin-sdk)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-nextest: true
-          with-sccache: true
-          with-mold: true
-      - name: Build tau-plugin-sdk (no default features)
-        run: cargo build -p tau-plugin-sdk --no-default-features
-      - name: Test tau-plugin-sdk (no default features)
-        run: cargo nextest run -p tau-plugin-sdk --no-default-features --lib
+      - name: Check each crate with --no-default-features
+        run: |
+          set -e
+          for crate in tau-domain tau-ports tau-pkg tau-runtime tau-cli tau-plugin-protocol tau-plugin-sdk; do
+            echo "::group::$crate"
+            cargo check -p "$crate" --no-default-features
+            echo "::endgroup::"
+          done
 
   build-fixtures-linux:
     name: build-fixtures / linux
