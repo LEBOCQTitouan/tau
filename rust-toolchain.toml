@@ -2,3 +2,9 @@
 channel = "stable"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
+# Cross-compilation target used by the lefthook pre-commit `check-linux-x86`
+# step (see lefthook.yml). musl avoids the macOS glibc cross-toolchain
+# requirement and catches the same cfg-gating issues. rustup auto-installs
+# this target on first cargo invocation that resolves through the rustup
+# shim — eliminating a manual `rustup target add` step from contributor setup.
+targets = ["x86_64-unknown-linux-musl"]

@@ -19,3 +19,6 @@
 tarpaulin-report.html
 target/agent-*
 target/term
+
+# QEMU core dumps (from Podman x86_64 emulation attempts)
+qemu_*.core
