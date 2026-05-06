@@ -218,3 +218,46 @@ The architectural conflict (child PID unavailable during `wrap_spawn` / `pre_exe
 - Phase 0 verification PR #34 (closed): GHA uid_map write failure discovery
 - ADR-0014: [`0014-sandboxing.md`](0014-sandboxing.md) — original sandbox design
 - Followups doc: [`../superpowers/specs/2026-05-03-sandboxing-followups.md`](../superpowers/specs/2026-05-03-sandboxing-followups.md)
+
+## Addendum (2026-05-06): F task 6.5 shipped — Native adapter integration
+
+Sub-project F task 6.5 wired the per-host network filter machinery into the Native sandbox adapter's spawn lifecycle. Phase 1 PR #37 lands the architectural changes:
+
+### Trait extension
+
+A new `Sandbox::apply_post_spawn(&self, plan, child_pid, &mut handle) -> Result<(), SandboxError>` trait method runs concurrently with the child's `pre_exec` phase while the child blocks on a sync pipe. The default no-op implementation covers `Mock` / `Container` / `Light` / `Passthrough`. Only `NativeSandbox` overrides it.
+
+`SandboxHandle` gains (cfg(unix)):
+- `sync_write_fd: Option<OwnedFd>` — when present, dropping the handle closes the fd, releasing the child with EOF on its blocking read.
+- `nest_handle(Box<dyn Send>)` — append nested cleanup guards. The `NetFilterHandle` is nested here so the parent veth tears down LIFO-ordered after the child's process exits.
+- `signal_post_spawn_complete() -> io::Result<()>` — writes 1 byte to the sync pipe, releasing the child.
+
+### Native adapter wiring
+
+`apply_strict` (in `crates/tau-sandbox-native/src/strict.rs`):
+- Pre-allocates a `VethSubnet` if the plan has `Network(Http)` (the impure `setup_veth_pair_with_subnet` runs later, in `apply_post_spawn`).
+- Sets `TAU_NET_PARENT_VETH_IP` env var on the spawned `Command` BEFORE `cmd.spawn()` so the child can read its parent's bind IP.
+- Creates a sync pipe via `nix::unistd::pipe()`; the child reads 1 byte in `pre_exec` between `unshare` and `seccomp`, blocking until the parent signals completion.
+- Returns `(SandboxHandle, Option<VethSubnet>)` so `wrap_spawn` can stash the subnet.
+
+`NativeSandbox`:
+- Caches the F probe result in a `OnceLock<Result<(), NetFilterError>>` (probe runs once at first `validate_plan` call for a `Network(Http)` plan).
+- `validate_plan` hard-refuses `Network(Http)` plans on F-unavailable hosts (no nft binary, no CAP_NET_ADMIN-in-userns, etc.) — surfaces a clear `SandboxError::NetFilter` instead of silently degrading.
+- Per-spawn `Mutex<HashMap<RawFd, VethSubnet>>` keyed by `sync_write_fd` lets `apply_post_spawn` look up the pre-allocated subnet for each child.
+- `apply_post_spawn` override: looks up the subnet, calls `apply_per_host_filter(plan, child_pid, subnet)`, nests the returned `NetFilterHandle` in the `SandboxHandle`.
+
+`unshare_flags_for_plan` is flipped: ALWAYS returns `CLONE_NEWUSER | CLONE_NEWNET`. The v0.1 over-permissive fallback (drop `CLONE_NEWNET` when `Network(Http)` is in plan, leaving the child in the parent netns) is removed.
+
+### Runtime caller
+
+`tau-runtime::plugin_host::process::spawn_and_handshake` now calls `adapter.apply_post_spawn(plan, child_pid, &mut handle).await` followed by `handle.signal_post_spawn_complete()` after `cmd.spawn()`. All three post-spawn failure modes (child.id None, apply_post_spawn error, signal error) map uniformly to `RuntimeError::SandboxWrapFailed { plugin, source }` so callers can match on a single variant.
+
+### Out of scope — carried-over follow-ups
+
+Two items did NOT ship in Phase 1 and are tracked as gap rows in `docs/superpowers/specs/2026-05-03-sandboxing-followups.md`:
+
+1. **Container-adapter network filtering**: the 3 `layer4_container.rs` HTTP plugin tests (anthropic / ollama / openai cassette-replay) remain `#[ignore]`'d. They use the Container adapter (Docker), which inherits the trait's no-op `apply_post_spawn`. F's veth IP is a NativeSandbox construct; inside a Docker container the host is not reachable at that IP. Container-adapter network plumbing is a separate sub-project.
+
+2. **strict_net_filter integration tests hang in CI**: all 4 `strict_net_filter.rs` tests are `#[ignore]`'d. When `test-net-filter / linux` (privileged Docker) actually ran them, all 4 hung past 60s. Notably `no_network_cap_socket_denied_by_seccomp` also hangs (no `Network(Http)` in plan, no `apply_post_spawn` runs), suggesting the hang is in the seccomp `KillProcess` / `cmd.output()` propagation path on Linux — not in F-specific code. Needs a real-Linux debugging session to repro and fix.
+
+The `unshare_flags_for_plan` flip + `validate_plan` hard-refuse + post-spawn integration are validated by the lib unit tests + clippy under both default and `integration-tests` features.
