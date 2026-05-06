@@ -35,7 +35,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use tau_domain::{fixtures as domain_fixtures, AgentInstanceId, Capability, PluginKind, PluginManifest, PortKind};
+use tau_domain::{
+    fixtures as domain_fixtures, AgentInstanceId, Capability, PluginKind, PluginManifest, PortKind,
+};
 use tau_pkg::LockedPlugin;
 use tau_ports::{SandboxPlan, SandboxProbe, SessionContext};
 use tau_runtime::sandbox::registry::RegistryKind;

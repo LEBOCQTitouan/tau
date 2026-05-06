@@ -127,9 +127,9 @@ impl Sandbox for NativeSandbox {
 mod tests {
     use super::*;
     use tau_domain::fixtures as domain_fixtures;
-    use tau_ports::fixtures as ports_fixtures;
     #[cfg(target_os = "linux")]
     use tau_domain::CapabilityShape;
+    use tau_ports::fixtures as ports_fixtures;
 
     #[test]
     fn name_and_tier_round_trip() {
@@ -155,7 +155,8 @@ mod tests {
     #[test]
     fn validate_plan_rejects_unsupported_shape_at_light_tier() {
         let s = NativeSandbox::new("n", SandboxTier::Light);
-        let plan = ports_fixtures::plan_from_capabilities(vec![domain_fixtures::cap_custom("weird")]);
+        let plan =
+            ports_fixtures::plan_from_capabilities(vec![domain_fixtures::cap_custom("weird")]);
         let err = s.validate_plan(&plan).expect_err("must reject");
         #[cfg(target_os = "linux")]
         assert!(matches!(err, SandboxError::ShapeUnsupported { .. }));
@@ -178,9 +179,10 @@ mod tests {
         #[cfg(not(target_os = "linux"))]
         {
             let s = NativeSandbox::new("n", SandboxTier::Light);
-            let plan = ports_fixtures::plan_from_capabilities(vec![
-                domain_fixtures::cap_fs_read(&["/tmp"]),
-            ]);
+            let plan =
+                ports_fixtures::plan_from_capabilities(vec![domain_fixtures::cap_fs_read(&[
+                    "/tmp",
+                ])]);
             assert!(matches!(
                 s.validate_plan(&plan),
                 Err(SandboxError::Unavailable { .. })
