@@ -306,7 +306,11 @@ jobs:
           chmod +x crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
           touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
       - name: Test tau-sandbox-native e2e
-        run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests --verbose
+        # strict_net_filter tests need CAP_NET_ADMIN-in-userns to set up
+        # the veth pair + nftables ruleset (sub-project F task 6.5). They
+        # run in the dedicated test-net-filter / linux job inside privileged
+        # Docker; this non-privileged runner skips them via nextest filter.
+        run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests --verbose -E 'not binary(strict_net_filter)'
 
   test-net-filter:
     name: test-net-filter / linux
@@ -317,8 +321,8 @@ jobs:
         # Phase 0 verification (sub-project F) confirmed GHA host runners
         # block uid_map writes. Privileged Docker container has full root +
         # CAP_NET_ADMIN-in-userns, so the per-host filter setup works.
-        # The integration tests are #[ignore]'d pending sub-project F task 6.5
-        # (strict.rs post-spawn hook). This job verifies unit tests + compilation.
+        # F task 6.5 wired apply_post_spawn through; this job now actually
+        # runs the strict_net_filter integration tests end-to-end.
         run: |
           docker run --rm --privileged \
             -v "$PWD":/workspace \
@@ -329,7 +333,7 @@ jobs:
               apt-get update -qq
               apt-get install -y -qq iproute2 nftables
               cargo test -p tau-sandbox-native --lib net_filter
-              cargo test -p tau-sandbox-native --features integration-tests --test strict_net_filter --no-run
+              cargo test -p tau-sandbox-native --features integration-tests --test strict_net_filter
             '
 
   test-tau-runtime-e2e:
