@@ -111,9 +111,21 @@ pub enum SandboxTier {
 
 /// Opaque handle returned by [`Sandbox::wrap_spawn`]. Drops automatically
 /// release any resources the adapter holds (e.g. cgroup, namespace fd).
+///
+/// Sub-project F task 6.5 adds two fields:
+/// - `sync_write_fd`: when set, [`SandboxHandle::signal_post_spawn_complete`]
+///   writes 1 byte to it to release the child from a sync-pipe block in
+///   pre_exec. NativeSandbox sets this when applying per-host filtering.
+///   The `OwnedFd` is closed on drop if not consumed by `signal_post_spawn_complete`.
+/// - `nested`: drop guards that run LIFO before the main cleanup closure.
+///   NativeSandbox uses this to nest a `NetFilterHandle` whose Drop calls
+///   `ip link del`.
 #[non_exhaustive]
 pub struct SandboxHandle {
     cleanup: Option<Box<dyn FnOnce() + Send + 'static>>,
+    #[cfg(unix)]
+    sync_write_fd: Option<std::os::fd::OwnedFd>,
+    nested: Vec<Box<dyn Send>>,
 }
 
 impl SandboxHandle {
@@ -122,17 +134,90 @@ impl SandboxHandle {
     pub fn new<F: FnOnce() + Send + 'static>(cleanup: F) -> Self {
         Self {
             cleanup: Some(Box::new(cleanup)),
+            #[cfg(unix)]
+            sync_write_fd: None,
+            nested: Vec::new(),
         }
     }
 
     /// A handle that releases nothing (mock / no-op).
     pub fn noop() -> Self {
-        Self { cleanup: None }
+        Self {
+            cleanup: None,
+            #[cfg(unix)]
+            sync_write_fd: None,
+            nested: Vec::new(),
+        }
+    }
+
+    /// Encode the sync-pipe write fd. Used by NativeSandbox when applying
+    /// per-host network filtering (sub-project F task 6.5).
+    ///
+    /// Takes ownership of the `OwnedFd`; the fd will be closed either by
+    /// [`SandboxHandle::signal_post_spawn_complete`] (after writing 1 byte)
+    /// or by the `Drop` impl (without writing, causing child to read EOF).
+    #[cfg(unix)]
+    pub fn with_sync_write_fd(mut self, fd: std::os::fd::OwnedFd) -> Self {
+        self.sync_write_fd = Some(fd);
+        self
+    }
+
+    /// Read the raw fd value from the encoded sync_write_fd, if any.
+    /// Used by adapter implementations that need to inspect or duplicate the fd.
+    #[cfg(unix)]
+    pub fn sync_write_fd_value(&self) -> Option<std::os::fd::RawFd> {
+        use std::os::fd::AsRawFd;
+        self.sync_write_fd.as_ref().map(|fd| fd.as_raw_fd())
+    }
+
+    /// Add a drop guard nested inside this handle's lifetime.
+    ///
+    /// Drop order: nested guards drop LIFO (latest-attached drops first)
+    /// before the main cleanup closure. NativeSandbox uses this to nest
+    /// a `NetFilterHandle` whose Drop runs `ip link del <veth-host>`.
+    pub fn nest_handle(&mut self, guard: Box<dyn Send>) {
+        self.nested.push(guard);
+    }
+
+    /// Release the child from its pre_exec sync-pipe block by writing 1
+    /// byte to the encoded sync_write_fd, then closing the fd.
+    ///
+    /// Idempotent. No-op for handles without a sync_write_fd. Returns
+    /// `Err` if the write fails (e.g., child already exited).
+    #[cfg(unix)]
+    pub fn signal_post_spawn_complete(&mut self) -> std::io::Result<()> {
+        use std::io::Write;
+        if let Some(owned_fd) = self.sync_write_fd.take() {
+            // Convert OwnedFd → File (safe: File::from is a From impl).
+            let mut file = std::fs::File::from(owned_fd);
+            // Write exactly 1 byte; file is dropped (fd closed) afterwards.
+            file.write_all(&[0u8])?;
+        }
+        Ok(())
+    }
+
+    /// Release the child from its pre_exec sync-pipe block (no-op on non-Unix).
+    #[cfg(not(unix))]
+    pub fn signal_post_spawn_complete(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
 impl Drop for SandboxHandle {
     fn drop(&mut self) {
+        // Defensive: if signal_post_spawn_complete wasn't called and there's
+        // an OwnedFd remaining, drop it (closes the fd without writing).
+        // The child reads EOF in pre_exec and returns an error; the spawn's
+        // wait() reaps the child.
+        #[cfg(unix)]
+        drop(self.sync_write_fd.take());
+
+        // Drop nested guards LIFO (latest-attached drops first).
+        for guard in self.nested.drain(..).rev() {
+            drop(guard);
+        }
+
+        // Run main cleanup closure.
         if let Some(cleanup) = self.cleanup.take() {
             cleanup();
         }
@@ -179,4 +264,69 @@ pub trait Sandbox: Send + Sync {
         plan: &SandboxPlan,
         cmd: &mut Command,
     ) -> Result<SandboxHandle, SandboxError>;
+
+    /// Adapter-specific post-spawn setup. Called by the runtime after
+    /// `cmd.spawn()` succeeds and the child PID is known.
+    ///
+    /// Default: no-op. Mock + Container adapters use the default.
+    /// NativeSandbox (Linux) applies per-host nftables filtering inside
+    /// the child's netns when the plan has `Capability::Network(Http)`.
+    ///
+    /// On `Ok(())`: the caller MUST call
+    /// [`SandboxHandle::signal_post_spawn_complete`] to release the child
+    /// from its sync-pipe block in pre_exec.
+    /// On `Err(_)`: the caller drops `handle` (which dismisses sync_write_fd
+    /// → child reads EOF → exits cleanly) and reaps the child via wait().
+    async fn apply_post_spawn(
+        &self,
+        plan: &SandboxPlan,
+        child_pid: i32,
+        handle: &mut SandboxHandle,
+    ) -> Result<(), SandboxError> {
+        let _ = (plan, child_pid, handle);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nest_handle_drops_in_lifo_order() {
+        use std::sync::{Arc, Mutex};
+
+        let order: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
+        let order_main = Arc::clone(&order);
+
+        let mut handle = SandboxHandle::new(move || {
+            order_main.lock().unwrap().push("main_cleanup");
+        });
+
+        // Add 2 nested guards. Each pushes its label on Drop.
+        struct Guard(Arc<Mutex<Vec<&'static str>>>, &'static str);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                self.0.lock().unwrap().push(self.1);
+            }
+        }
+        handle.nest_handle(Box::new(Guard(Arc::clone(&order), "first_nested")));
+        handle.nest_handle(Box::new(Guard(Arc::clone(&order), "second_nested")));
+
+        drop(handle);
+
+        // Expected order: LIFO of nested, then main cleanup.
+        assert_eq!(
+            *order.lock().unwrap(),
+            vec!["second_nested", "first_nested", "main_cleanup"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_post_spawn_complete_is_noop_without_fd() {
+        let mut handle = SandboxHandle::new(|| {});
+        // No sync_write_fd set; signal should succeed no-op.
+        handle.signal_post_spawn_complete().expect("noop signal");
+    }
 }

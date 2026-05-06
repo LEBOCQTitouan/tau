@@ -10,17 +10,12 @@
 //! Internal modules: error, exec (CommandExecutor), probe, validate, resolve,
 //! netns (veth + nsenter), rules (nft ruleset gen + apply), handle.
 //!
-//! NOTE: this module is not yet wired into `strict.rs::apply_strict`. The
-//! integration is tracked as F task 6.5 (see INTEGRATION.md). Until then,
-//! the helpers + orchestrator are unused at runtime — `#[allow(dead_code)]`
-//! at module level silences the lints.
-
-#![allow(dead_code, unused_imports, clippy::vec_init_then_push)]
+//! Wired into `NativeSandbox::apply_post_spawn` as of F task 6.5 task 4.
 
 mod error;
 mod exec;
 mod handle;
-mod netns;
+pub(crate) mod netns;
 mod probe;
 mod resolve;
 mod rules;
@@ -58,6 +53,7 @@ const DNS_TIMEOUT: Duration = Duration::from_secs(5);
 pub async fn apply_per_host_filter(
     plan: &SandboxPlan,
     child_pid: i32,
+    subnet: netns::VethSubnet,
 ) -> Result<NetFilterHandle, NetFilterError> {
     // Extract Network(Http) capabilities. If none, return the noop handle.
     let mut hosts: Vec<String> = Vec::new();
@@ -80,9 +76,9 @@ pub async fn apply_per_host_filter(
         .into_iter()
         .collect();
 
-    // 3. Set up veth pair.
+    // 3. Set up veth pair using the pre-allocated subnet.
     let exec = exec::RealCommandExecutor;
-    let pair = netns::setup_veth_pair(&exec)?;
+    let pair = netns::setup_veth_pair_with_subnet(&exec, subnet)?;
     // From here, we MUST clean up the host-end veth on any subsequent failure
     // because the NetFilterHandle is constructed only at the end. Use a guard.
     let mut cleanup_guard = ScopedVethCleanup::new(pair.name_host.clone());

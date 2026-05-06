@@ -22,17 +22,30 @@ use super::exec::CommandExecutor;
 
 /// Parent + child interface names + the pre-allocated /30 subnet IPs.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // consumed by Task 6's orchestrator
-pub(super) struct VethPair {
+pub(crate) struct VethPair {
     pub name_host: String,
     pub name_child: String,
     pub parent_ip: Ipv4Addr,
     pub child_ip: Ipv4Addr,
 }
 
-/// Allocate a /30 subnet for a new veth pair.
+/// Pre-allocated /30 subnet for a veth pair.
 ///
-/// Returns (parent_ip, child_ip). /30 reserves 4 addresses:
+/// Returned by [`allocate_subnet`] (called in wrap_spawn, before fork) and
+/// consumed by [`setup_veth_pair_with_subnet`] (called in apply_post_spawn,
+/// after fork). The pre-allocation lets `wrap_spawn` set the
+/// `TAU_NET_PARENT_VETH_IP` env var on `cmd` BEFORE spawn.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct VethSubnet {
+    pub parent_ip: Ipv4Addr,
+    pub child_ip: Ipv4Addr,
+}
+
+/// Allocate a /30 subnet without touching the kernel.
+///
+/// Pure function. Atomically reserves a slot via static AtomicU32.
+///
+/// /30 reserves 4 addresses:
 /// - .0+0  network address
 /// - .0+1  parent
 /// - .0+2  child
@@ -42,17 +55,17 @@ pub(super) struct VethPair {
 /// (third octet's 252 hosts / 4 per pair = 63) reuses earlier IPs;
 /// `ip link add` fails on an existing host-end name, prompting the caller
 /// to retry (handled by the caller's seq atomic).
-fn next_subnet() -> (Ipv4Addr, Ipv4Addr) {
+pub(crate) fn allocate_subnet() -> VethSubnet {
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
     let third_octet = (pid % 256) as u8;
     // /30 hosts: 1, 5, 9, ..., 249. Wraps at 63 cycles per third-octet.
     let host_offset = ((seq * 4) % 252) as u8 + 1;
-    (
-        Ipv4Addr::new(10, 222, third_octet, host_offset),
-        Ipv4Addr::new(10, 222, third_octet, host_offset + 1),
-    )
+    VethSubnet {
+        parent_ip: Ipv4Addr::new(10, 222, third_octet, host_offset),
+        child_ip: Ipv4Addr::new(10, 222, third_octet, host_offset + 1),
+    }
 }
 
 /// Generate a unique pair of veth interface names.
@@ -81,12 +94,18 @@ fn next_veth_names() -> (String, String) {
 
 /// Create a veth pair on the host side. Assigns IP + brings up the host end.
 ///
+/// Takes a pre-allocated `VethSubnet` (from [`allocate_subnet`]) so the
+/// parent IP is known before fork and can be passed to the child via env var.
+///
 /// Returns the `VethPair` for downstream `move_peer_to_netns` +
 /// `assign_child_ip_and_up_via_nsenter`.
-#[allow(dead_code)] // consumed by Task 6's orchestrator
-pub(super) fn setup_veth_pair(exec: &dyn CommandExecutor) -> Result<VethPair, NetFilterError> {
+pub(crate) fn setup_veth_pair_with_subnet(
+    exec: &dyn CommandExecutor,
+    subnet: VethSubnet,
+) -> Result<VethPair, NetFilterError> {
     let (name_host, name_child) = next_veth_names();
-    let (parent_ip, child_ip) = next_subnet();
+    let parent_ip = subnet.parent_ip;
+    let child_ip = subnet.child_ip;
 
     // Step 1: create the veth pair.
     let out = exec
@@ -156,7 +175,6 @@ pub(super) fn setup_veth_pair(exec: &dyn CommandExecutor) -> Result<VethPair, Ne
 }
 
 /// Move the child end of the veth pair into the child's netns (via PID).
-#[allow(dead_code)]
 pub(super) fn move_peer_to_netns(
     exec: &dyn CommandExecutor,
     pair: &VethPair,
@@ -194,7 +212,6 @@ pub(super) fn move_peer_to_netns(
 /// - `ip addr add <child_ip>/30 dev <name_child>`
 /// - `ip link set <name_child> up`
 /// - `ip route add default via <parent_ip>`
-#[allow(dead_code)]
 pub(super) fn assign_child_ip_and_up_via_nsenter(
     exec: &dyn CommandExecutor,
     pair: &VethPair,
@@ -267,16 +284,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn next_subnet_returns_valid_ipv4_pair_in_10_222_range() {
-        let (parent, child) = next_subnet();
-        assert_eq!(parent.octets()[0], 10);
-        assert_eq!(parent.octets()[1], 222);
-        assert_eq!(child.octets()[0], 10);
-        assert_eq!(child.octets()[1], 222);
-        assert_eq!(parent.octets()[2], child.octets()[2], "same subnet");
+    fn allocate_subnet_returns_valid_ipv4_pair_in_10_222_range() {
+        let subnet = allocate_subnet();
+        assert_eq!(subnet.parent_ip.octets()[0], 10);
+        assert_eq!(subnet.parent_ip.octets()[1], 222);
+        assert_eq!(subnet.child_ip.octets()[0], 10);
+        assert_eq!(subnet.child_ip.octets()[1], 222);
         assert_eq!(
-            child.octets()[3],
-            parent.octets()[3] + 1,
+            subnet.parent_ip.octets()[2],
+            subnet.child_ip.octets()[2],
+            "same subnet"
+        );
+        assert_eq!(
+            subnet.child_ip.octets()[3],
+            subnet.parent_ip.octets()[3] + 1,
             "child is parent+1"
         );
     }
@@ -292,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn setup_veth_pair_invokes_three_ip_commands_in_order() {
+    fn setup_veth_pair_with_subnet_invokes_three_ip_commands_in_order() {
         // MockCommandExecutor uses Vec::pop() — last element in vec is consumed first.
         // All three responses are CannedOutput::ok(), so order does not matter here.
         let exec = MockCommandExecutor::new(vec![
@@ -300,36 +321,42 @@ mod tests {
             CannedOutput::ok(),
             CannedOutput::ok(),
         ]);
+        let subnet = VethSubnet {
+            parent_ip: Ipv4Addr::new(10, 222, 0, 1),
+            child_ip: Ipv4Addr::new(10, 222, 0, 2),
+        };
 
-        let pair = setup_veth_pair(&exec).expect("setup_veth_pair");
+        let pair = setup_veth_pair_with_subnet(&exec, subnet).expect("setup");
         assert!(pair.name_host.starts_with("tsb"));
         assert!(pair.name_child.starts_with("tsb"));
+        assert_eq!(pair.parent_ip, Ipv4Addr::new(10, 222, 0, 1));
+        assert_eq!(pair.child_ip, Ipv4Addr::new(10, 222, 0, 2));
 
         let calls = exec.calls();
         assert_eq!(calls.len(), 3);
         assert_eq!(calls[0].cmd, "ip");
-        assert_eq!(calls[0].args[0], "link");
-        assert_eq!(calls[0].args[1], "add");
+        assert_eq!(calls[0].args[0..2], ["link", "add"]);
         assert_eq!(calls[1].cmd, "ip");
-        assert_eq!(calls[1].args[0], "addr");
-        assert_eq!(calls[1].args[1], "add");
+        assert_eq!(calls[1].args[0..2], ["addr", "add"]);
         assert_eq!(calls[2].cmd, "ip");
-        assert_eq!(calls[2].args[0], "link");
-        assert_eq!(calls[2].args[1], "set");
+        assert_eq!(calls[2].args[0..2], ["link", "set"]);
         // Last arg should be "up".
         assert_eq!(calls[2].args.last().unwrap(), "up");
     }
 
     #[test]
-    fn setup_veth_pair_propagates_ip_failure() {
+    fn setup_veth_pair_with_subnet_propagates_ip_failure() {
         // First call fails immediately; only one canned response needed.
         // Vec::pop() returns the last element — single-element vec works fine.
         let exec = MockCommandExecutor::new(vec![CannedOutput::err(
             "RTNETLINK answers: Operation not permitted",
         )]);
-        let result = setup_veth_pair(&exec);
-        let err = result.unwrap_err();
-        assert!(matches!(err, NetFilterError::NetnsSetup { .. }));
+        let subnet = VethSubnet {
+            parent_ip: Ipv4Addr::new(10, 222, 0, 1),
+            child_ip: Ipv4Addr::new(10, 222, 0, 2),
+        };
+        let result = setup_veth_pair_with_subnet(&exec, subnet);
+        assert!(matches!(result, Err(NetFilterError::NetnsSetup { .. })));
     }
 
     #[test]

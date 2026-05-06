@@ -308,30 +308,18 @@ fn compile_filter(
 /// The order is fixed and must not be changed:
 /// 1. Landlock — uses `landlock_*` syscalls that seccomp would block if installed first.
 /// 2. unshare — must precede seccomp because `unshare(2)` is not in the allow-list.
-/// 3. seccomp — installed last; once active it blocks everything not in the allow-list.
+/// 3. sync-pipe read (F task 6.5) — block until parent completes per-host filter setup.
+/// 4. seccomp — installed last; once active it blocks everything not in the allow-list.
 ///
-/// # TODO sub-project F task 6.5: post-spawn hook for net-filter
-///
-/// Per-host network filtering (`net_filter::apply_per_host_filter`) must run in the
-/// **parent** after `fork` but before the child continues past the sync-pipe barrier.
-/// This requires knowing the child PID — which is only available after `cmd.spawn()`
-/// returns. However, `apply_strict` does not call `spawn()`; it only installs
-/// `pre_exec` and returns a `SandboxHandle`. The spawn happens in the runtime layer.
-///
-/// The integration therefore needs a post-spawn hook mechanism. Three options are
-/// documented in `crates/tau-sandbox-native/src/net_filter/INTEGRATION.md`:
-/// - α: modify the `Sandbox` trait's `wrap_spawn` to take a post-fork hook.
-/// - β: add a new `Sandbox::apply_post_spawn` method with a default no-op.
-/// - γ: runtime-layer-only extension specific to `NativeSandbox`.
-///
-/// Until F task 6.5 is implemented, `Network(Http)` plans create an isolated
-/// netns (via `CLONE_NEWNET`) but the per-host nftables ruleset is not applied —
-/// all egress is denied by the empty netns. This is safe (over-restrictive) but
-/// means `Network(Http)` plans will fail to reach the declared hosts.
+/// Returns `(SandboxHandle, Option<VethSubnet>)`. The `VethSubnet` is `Some` when the
+/// plan has `Network(Http)` and is consumed by `NativeSandbox::apply_post_spawn` (T4)
+/// to set up the veth pair + nftables ruleset. Without T4, the child hangs in pre_exec
+/// at the sync-pipe read because the write end is never written. This intermediate
+/// state is not yet shippable; T4-T5 complete the loop.
 pub(crate) fn apply_strict(
     plan: &SandboxPlan,
     cmd: &mut Command,
-) -> Result<SandboxHandle, SandboxError> {
+) -> Result<(SandboxHandle, Option<crate::net_filter::netns::VethSubnet>), SandboxError> {
     // Collect landlock paths from the plan (same logic as light tier).
     let (read_paths, write_paths) = crate::light::collect_landlock_paths(plan, cmd)?;
 
@@ -362,14 +350,55 @@ pub(crate) fn apply_strict(
     // net_filter/INTEGRATION.md for the post-spawn hook plan (F task 6.5).
     let unshare_flags = crate::net::unshare_flags_for_plan(plan);
 
+    // F task 6.5: pre-allocate a veth subnet if the plan has Network(Http).
+    // The parent IP is exposed to the child via TAU_NET_PARENT_VETH_IP so
+    // tests + downstream code can reach the parent's bind address.
+    let has_network_http = plan.capabilities.iter().any(|c| {
+        matches!(
+            c,
+            tau_domain::Capability::Network(tau_domain::NetCapability::Http { .. })
+        )
+    });
+
+    let veth_subnet = if has_network_http {
+        let subnet = crate::net_filter::netns::allocate_subnet();
+        // Set env var BEFORE cmd.spawn() so the child sees it.
+        cmd.env("TAU_NET_PARENT_VETH_IP", subnet.parent_ip.to_string());
+        Some(subnet)
+    } else {
+        None
+    };
+
+    // F task 6.5: create sync pipe so the child can block in pre_exec
+    // until the parent finishes per-host filter setup.
+    // SAFETY: pipe() only returns OwnedFd values; no unsafe needed here.
+    let sync_pipe = if has_network_http {
+        let (read_fd, write_fd) = nix::unistd::pipe().map_err(|e| SandboxError::WrapFailed {
+            message: format!("net-filter sync pipe: {e}"),
+        })?;
+        Some((read_fd, write_fd))
+    } else {
+        None
+    };
+
+    // Deconstruct the Option once to extract both ends.
+    // - read_fd → RawFd (i32, Copy) for capture in the pre_exec closure.
+    // - write_fd → OwnedFd stashed in SandboxHandle (closed by signal_post_spawn_complete).
+    use std::os::fd::IntoRawFd;
+    let (sync_read_raw, sync_write_owned) = match sync_pipe {
+        Some((read_fd, write_fd)) => (Some(read_fd.into_raw_fd()), Some(write_fd)),
+        None => (None, None),
+    };
+
     // KNOWN-LIMITATION: async-signal-safety — see light.rs for the full note.
     // Additional operations added here:
     // - `nix::sched::unshare` is a thin syscall wrapper; signal-safe.
     // - `seccompiler::apply_filter` calls `prctl` + `seccomp`; signal-safe.
+    // - `libc::read` / `libc::close` on the sync pipe fd are signal-safe.
     // The remaining allocation risk is from `install_landlock` (step 1).
     //
     // SAFETY: pre_exec runs in the child after fork() but before exec().
-    // All three operations (landlock, unshare, seccomp) are child-local
+    // All operations (landlock, unshare, sync-pipe, seccomp) are child-local
     // and do not affect the parent process.
     unsafe {
         cmd.pre_exec(move || {
@@ -382,6 +411,24 @@ pub(crate) fn apply_strict(
             // ruleset is installed by apply_per_host_filter (F task 6.5).
             unshare(unshare_flags).map_err(|e| std::io::Error::other(e.to_string()))?;
 
+            // Step 2.5 (F task 6.5): block on sync pipe if Network(Http) applies.
+            // Parent does per-host filter setup (veth + nft) while we wait here.
+            // Parent writes 1 byte on success → we proceed.
+            // Parent closes write_fd on failure → we read EOF → return Err.
+            if let Some(fd) = sync_read_raw {
+                let mut byte = [0u8; 1];
+                // SAFETY: read() is async-signal-safe; fd inherited via fork.
+                // Already inside the outer pre_exec unsafe block (line 403).
+                let n = libc::read(fd, byte.as_mut_ptr() as _, 1);
+                if n != 1 {
+                    return Err(std::io::Error::other(
+                        "net-filter setup failed (parent closed sync pipe before signal)",
+                    ));
+                }
+                // SAFETY: we own the fd; close after read.
+                libc::close(fd);
+            }
+
             // Step 3: install seccomp BPF allow-list (blocks unshare/landlock after this).
             seccompiler::apply_filter(bpf.as_slice())
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
@@ -390,7 +437,14 @@ pub(crate) fn apply_strict(
         });
     }
 
-    Ok(SandboxHandle::noop())
+    // F task 6.5: attach sync_write_fd to the handle if Network(Http) applies.
+    // The parent's apply_post_spawn writes to this fd to release the child.
+    let mut handle = SandboxHandle::noop();
+    if let Some(write_fd) = sync_write_owned {
+        handle = handle.with_sync_write_fd(write_fd);
+    }
+
+    Ok((handle, veth_subnet))
 }
 
 #[cfg(test)]
@@ -457,8 +511,10 @@ mod tests {
         let plan: tau_ports::SandboxPlan = serde_json::from_value(plan_json).expect("valid plan");
 
         let mut cmd = Command::new("/bin/true");
-        let handle = apply_strict(&plan, &mut cmd)
+        let (handle, veth_subnet) = apply_strict(&plan, &mut cmd)
             .expect("apply_strict must succeed on a plan with no capabilities");
+        // No Network(Http) capability → no subnet pre-allocated.
+        assert!(veth_subnet.is_none(), "no subnet for capability-less plan");
         drop(handle);
     }
 }

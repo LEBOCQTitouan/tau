@@ -400,7 +400,7 @@ async fn fs_read_layer4_container_reads_data_file() {
 /// from inside the container's network namespace without the nftables-in-netns
 /// rules that sub-project F will introduce.
 #[test]
-#[ignore = "Container netns isolation: localhost cassette server not reachable from container without sub-project F's nftables-in-netns work. See ADR-0017 Decision 3."]
+#[ignore = "F task 6.5 wires Native adapter only; Container adapter network filtering tracked as separate follow-up"]
 fn anthropic_layer4_container_completes_via_cassette() {
     todo!("sub-project F: nftables-in-netns needed to reach host loopback cassette server from container")
 }
@@ -411,7 +411,7 @@ fn anthropic_layer4_container_completes_via_cassette() {
 /// loopback is unreachable from the container netns without sub-project F's
 /// per-host nftables-in-netns filtering work.
 #[test]
-#[ignore = "Container netns isolation: localhost cassette server not reachable from container without sub-project F's nftables-in-netns work. See ADR-0017 Decision 3."]
+#[ignore = "F task 6.5 wires Native adapter only; Container adapter network filtering tracked as separate follow-up"]
 fn ollama_layer4_container_completes_via_cassette() {
     todo!("sub-project F: nftables-in-netns needed to reach host loopback cassette server from container")
 }
@@ -422,7 +422,7 @@ fn ollama_layer4_container_completes_via_cassette() {
 /// loopback is unreachable from the container netns without sub-project F's
 /// per-host nftables-in-netns filtering work.
 #[test]
-#[ignore = "Container netns isolation: localhost cassette server not reachable from container without sub-project F's nftables-in-netns work. See ADR-0017 Decision 3."]
+#[ignore = "F task 6.5 wires Native adapter only; Container adapter network filtering tracked as separate follow-up"]
 fn openai_layer4_container_completes_via_cassette() {
     todo!("sub-project F: nftables-in-netns needed to reach host loopback cassette server from container")
 }

@@ -82,7 +82,7 @@ pub async fn replay(path: impl AsRef<Path>) -> CassetteServer {
 }
 
 async fn start_server(entries: Vec<CassetteEntry>) -> CassetteServer {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let received: Arc<Mutex<Vec<RecordedRequest>>> = Arc::new(Mutex::new(Vec::new()));
     let received_clone = received.clone();
