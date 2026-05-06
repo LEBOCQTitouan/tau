@@ -9,6 +9,13 @@
 //!
 //! Internal modules: error, exec (CommandExecutor), probe, validate, resolve,
 //! netns (veth + nsenter), rules (nft ruleset gen + apply), handle.
+//!
+//! NOTE: this module is not yet wired into `strict.rs::apply_strict`. The
+//! integration is tracked as F task 6.5 (see INTEGRATION.md). Until then,
+//! the helpers + orchestrator are unused at runtime — `#[allow(dead_code)]`
+//! at module level silences the lints.
+
+#![allow(dead_code)]
 
 mod error;
 mod exec;
