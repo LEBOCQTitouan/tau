@@ -437,16 +437,12 @@ jobs:
           # check doesn't decide to rebuild.
           touch target/release/* \
                 crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
-      # FALLBACK (removed in Task C7 once green):
-      # - name: Build tau binary first
-      #   run: cargo build -p tau-cli --bin tau
-      # - name: Build all real plugin binaries (Layer 4 tests)
-      #   run: |
-      #     cargo build -p anthropic --release
-      #     cargo build -p ollama --release
-      #     cargo build -p openai --release
-      #     cargo build -p fs-read --release
-      #     cargo build -p shell --release
+      - name: Build tau binary (debug)
+        # Layer 3 tests at crates/tau-plugin-compat/tests/layer3_check_sandbox.rs
+        # hardcode the debug binary path (target/debug/tau). Build it here;
+        # the 5 release plugin binaries still come from the artifact, which
+        # is where the bulk of the time savings come from.
+        run: cargo build -p tau-cli --bin tau
       - name: Test tau-plugin-compat (integration-tests feature)
         run: cargo nextest run -p tau-plugin-compat --features integration-tests --tests --verbose
 
