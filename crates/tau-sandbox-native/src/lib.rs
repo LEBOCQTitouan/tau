@@ -46,8 +46,7 @@ pub struct NativeSandbox {
     /// F task 6.5: cached result of net_filter::probe_prerequisites().
     /// Lazy-initialized on first call to validate_plan for a Network(Http) plan.
     #[cfg(target_os = "linux")]
-    net_filter_probe_cached:
-        std::sync::OnceLock<Result<(), crate::net_filter::NetFilterError>>,
+    net_filter_probe_cached: std::sync::OnceLock<Result<(), crate::net_filter::NetFilterError>>,
 
     /// F task 6.5: per-spawn map from SandboxHandle::sync_write_fd_value()
     /// to the pre-allocated VethSubnet. wrap_spawn inserts; apply_post_spawn
@@ -141,17 +140,16 @@ impl Sandbox for NativeSandbox {
                 // Validate hostnames syntactically.
                 let mut hosts: Vec<String> = Vec::new();
                 for c in &plan.capabilities {
-                    if let tau_domain::Capability::Network(
-                        tau_domain::NetCapability::Http { hosts: h, .. },
-                    ) = c
+                    if let tau_domain::Capability::Network(tau_domain::NetCapability::Http {
+                        hosts: h,
+                        ..
+                    }) = c
                     {
                         hosts.extend(h.iter().cloned());
                     }
                 }
-                crate::net_filter::validate_hosts(&hosts).map_err(|e| {
-                    SandboxError::NetFilter {
-                        message: e.to_string(),
-                    }
+                crate::net_filter::validate_hosts(&hosts).map_err(|e| SandboxError::NetFilter {
+                    message: e.to_string(),
                 })?;
             }
         }
@@ -175,12 +173,12 @@ impl Sandbox for NativeSandbox {
             });
             if has_network_http {
                 // Look up the pre-allocated subnet by sync_write_fd.
-                let fd = handle.sync_write_fd_value().ok_or_else(|| {
-                    SandboxError::NetFilter {
+                let fd = handle
+                    .sync_write_fd_value()
+                    .ok_or_else(|| SandboxError::NetFilter {
                         message: "no sync_write_fd on SandboxHandle (Network(Http) plan)"
                             .to_string(),
-                    }
-                })?;
+                    })?;
                 let subnet = self
                     .veth_subnets
                     .lock()
@@ -190,12 +188,11 @@ impl Sandbox for NativeSandbox {
                         message: "no pre-allocated subnet for handle".to_string(),
                     })?;
 
-                let nf_handle =
-                    crate::net_filter::apply_per_host_filter(plan, child_pid, subnet)
-                        .await
-                        .map_err(|e| SandboxError::NetFilter {
-                            message: e.to_string(),
-                        })?;
+                let nf_handle = crate::net_filter::apply_per_host_filter(plan, child_pid, subnet)
+                    .await
+                    .map_err(|e| SandboxError::NetFilter {
+                        message: e.to_string(),
+                    })?;
 
                 handle.nest_handle(Box::new(nf_handle));
             }
@@ -219,13 +216,8 @@ impl Sandbox for NativeSandbox {
                     let (handle, veth_subnet) = strict::apply_strict(plan, cmd)?;
                     // F task 6.5: stash the subnet keyed by the handle's sync_write_fd.
                     // apply_post_spawn looks it up and removes it.
-                    if let (Some(fd), Some(subnet)) =
-                        (handle.sync_write_fd_value(), veth_subnet)
-                    {
-                        self.veth_subnets
-                            .lock()
-                            .expect("mutex")
-                            .insert(fd, subnet);
+                    if let (Some(fd), Some(subnet)) = (handle.sync_write_fd_value(), veth_subnet) {
+                        self.veth_subnets.lock().expect("mutex").insert(fd, subnet);
                     }
                     Ok(handle)
                 }

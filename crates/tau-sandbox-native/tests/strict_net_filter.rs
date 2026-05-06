@@ -85,8 +85,8 @@ fn list_tsb_interfaces() -> HashSet<String> {
     // Strip leading `<digits>: ` then take the token before the next `:`.
     text.lines()
         .filter_map(|line| {
-            let trimmed = line
-                .trim_start_matches(|c: char| c.is_ascii_digit() || c == ':' || c == ' ');
+            let trimmed =
+                line.trim_start_matches(|c: char| c.is_ascii_digit() || c == ':' || c == ' ');
             let name = trimmed.split(':').next()?.trim();
             if name.starts_with("tsb") {
                 Some(name.to_string())
@@ -225,8 +225,7 @@ async fn no_network_cap_socket_denied_by_seccomp() {
         String::from_utf8_lossy(&output.stdout),
     );
     assert!(
-        output.stdout.is_empty()
-            || !String::from_utf8_lossy(&output.stdout).contains("SOCKET_OK"),
+        output.stdout.is_empty() || !String::from_utf8_lossy(&output.stdout).contains("SOCKET_OK"),
         "expected no SOCKET_OK in stdout; got {:?}",
         String::from_utf8_lossy(&output.stdout),
     );

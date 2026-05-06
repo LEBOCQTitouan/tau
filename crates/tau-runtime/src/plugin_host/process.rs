@@ -270,15 +270,12 @@ impl PluginProcess {
         // modes map to RuntimeError::SandboxWrapFailed so callers can match
         // uniformly.
         if let (Some((plan, adapter)), Some(ref mut handle)) = (sandbox, sandbox_handle.as_mut()) {
-            let child_pid: i32 = child
-                .id()
-                .ok_or_else(|| RuntimeError::SandboxWrapFailed {
-                    plugin: plugin_name.clone(),
-                    source: tau_ports::SandboxError::Internal {
-                        message: "child exited before apply_post_spawn (id() returned None)"
-                            .to_owned(),
-                    },
-                })? as i32;
+            let child_pid: i32 = child.id().ok_or_else(|| RuntimeError::SandboxWrapFailed {
+                plugin: plugin_name.clone(),
+                source: tau_ports::SandboxError::Internal {
+                    message: "child exited before apply_post_spawn (id() returned None)".to_owned(),
+                },
+            })? as i32;
             adapter
                 .apply_post_spawn(plan, child_pid, handle)
                 .await
