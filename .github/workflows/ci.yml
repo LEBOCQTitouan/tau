@@ -223,6 +223,51 @@ jobs:
       - name: Build toy plugins (release)
         run: cargo build --release -p echo-llm -p echo-tool
 
+  build-fixtures-linux:
+    name: build-fixtures / linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-mold: true
+      - name: Build all release-mode binaries
+        run: |
+          cargo build --release \
+            -p anthropic -p ollama -p openai \
+            -p fs-read -p shell \
+            -p echo-llm -p echo-tool \
+            -p tau-cli
+      - name: Build controlled-env binary
+        run: |
+          cargo build --release \
+            --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml
+      - name: Stage binaries into flat _artifacts directory
+        # actions/upload-artifact@v4 preserves directory structure relative
+        # to the workspace root. Without this staging step, downstream jobs
+        # would see binaries under ./prebuilt/target/release/ and
+        # ./prebuilt/crates/.../target/release/ — different roots break the
+        # uniform `mv ./prebuilt/<name>` pattern downstream. Flattening into
+        # _artifacts/ gives consumers a single predictable path.
+        run: |
+          mkdir -p _artifacts
+          cp target/release/anthropic-plugin _artifacts/
+          cp target/release/ollama-plugin _artifacts/
+          cp target/release/openai-plugin _artifacts/
+          cp target/release/fs-read-plugin _artifacts/
+          cp target/release/shell-plugin _artifacts/
+          cp target/release/echo-llm _artifacts/
+          cp target/release/echo-tool _artifacts/
+          cp target/release/tau _artifacts/
+          cp crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env _artifacts/
+      - name: Upload fixture binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-fixture-binaries
+          retention-days: 1
+          path: _artifacts/
+
   build-anthropic-plugin:
     name: build (anthropic-plugin)
     runs-on: ubuntu-latest
@@ -314,6 +359,7 @@ jobs:
 
   test-conformance:
     name: test (conformance)
+    needs: build-fixtures-linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -323,6 +369,19 @@ jobs:
           with-nextest: true
           with-sccache: true
           with-mold: true
+      - name: Download fixture binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-fixture-binaries
+          path: ./prebuilt
+      - name: Place plugin binaries
+        run: |
+          mkdir -p target/release
+          mv ./prebuilt/anthropic-plugin ./prebuilt/ollama-plugin ./prebuilt/openai-plugin \
+             target/release/
+          # actions/upload-artifact strips executable bits; restore them.
+          chmod +x target/release/anthropic-plugin target/release/ollama-plugin target/release/openai-plugin
+          touch target/release/anthropic-plugin target/release/ollama-plugin target/release/openai-plugin
       - name: Run conformance suite against all 3 plugins
         run: |
           cargo nextest run -p anthropic --test conformance --no-capture
@@ -346,6 +405,7 @@ jobs:
 
   test-tau-plugin-compat:
     name: test (tau-plugin-compat / linux)
+    needs: build-fixtures-linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -354,28 +414,41 @@ jobs:
           shared-key: linux-stable
           with-nextest: true
           with-mold: true
-      - name: Build tau binary first
-        # Layer 3 tests spawn `tau resolve --check-sandbox` via the
-        # CARGO_BIN_EXE_tau env var. Building tau-cli first ensures the
-        # binary exists in target/debug for the helper to discover.
-        run: cargo build -p tau-cli --bin tau
-      - name: Build all real plugin binaries (Layer 4 tests)
-        # Sub-project D Task 5/6/7's Layer 4 tests need the real plugin
-        # binaries pre-built. Build the 5 real plugins in release mode.
+      - name: Download fixture binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-fixture-binaries
+          path: ./prebuilt
+      - name: Place binaries at cargo-expected paths
         run: |
-          cargo build -p anthropic --release
-          cargo build -p ollama --release
-          cargo build -p openai --release
-          cargo build -p fs-read --release
-          cargo build -p shell --release
+          mkdir -p target/release
+          mv ./prebuilt/anthropic-plugin ./prebuilt/ollama-plugin ./prebuilt/openai-plugin \
+             ./prebuilt/fs-read-plugin ./prebuilt/shell-plugin \
+             ./prebuilt/echo-llm ./prebuilt/echo-tool \
+             ./prebuilt/tau \
+             target/release/
+          mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
+          mv ./prebuilt/tau-controlled-env \
+             crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
+          # actions/upload-artifact strips executable bits; restore them.
+          chmod +x target/release/* \
+                   crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+          # Touch to bump mtime above source files so cargo's freshness
+          # check doesn't decide to rebuild.
+          touch target/release/* \
+                crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+      - name: Build tau binary (debug)
+        # Layer 3 tests at crates/tau-plugin-compat/tests/layer3_check_sandbox.rs
+        # hardcode the debug binary path (target/debug/tau). Build it here;
+        # the 5 release plugin binaries still come from the artifact, which
+        # is where the bulk of the time savings come from.
+        run: cargo build -p tau-cli --bin tau
       - name: Test tau-plugin-compat (integration-tests feature)
-        # Layer 3 tests run; 7 of 10 Layer 4 tests run after sub-project D
-        # (4 tool-plugin × 2 adapters + 3 native HTTP plugin via cassette);
-        # 3 container × HTTP plugin tests stay #[ignore]'d pending F.
-        run: cargo nextest run -p tau-plugin-compat --features integration-tests --tests
+        run: cargo nextest run -p tau-plugin-compat --features integration-tests --tests --verbose
 
   test-tau-sandbox-native-e2e:
     name: test (tau-sandbox-native e2e / linux)
+    needs: build-fixtures-linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -384,18 +457,28 @@ jobs:
           shared-key: linux-stable
           with-nextest: true
           with-mold: true
-      - name: Build controlled-env binary
-        # Sub-project D's e2e tests use this binary as a deterministic
-        # spawn target. Built in release mode with static linking
-        # (lto + strip + panic=abort) per its standalone Cargo.toml.
-        run: cargo build --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml --release
+      - name: Download fixture binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-fixture-binaries
+          path: ./prebuilt
+      - name: Place controlled-env binary
+        run: |
+          mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
+          mv ./prebuilt/tau-controlled-env \
+             crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
+          # actions/upload-artifact strips executable bits; restore them.
+          chmod +x crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+          touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+      # FALLBACK (removed in Task C7):
+      # - name: Build controlled-env binary
+      #   run: cargo build --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml --release
       - name: Test tau-sandbox-native e2e
-        # Real-kernel landlock + seccomp + network-filter tests gated
-        # cfg(feature = "integration-tests") + cfg(target_os = "linux").
-        run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests
+        run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests --verbose
 
   test-tau-runtime-e2e:
     name: test (tau-runtime e2e / linux)
+    needs: build-fixtures-linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -404,9 +487,21 @@ jobs:
           shared-key: linux-stable
           with-nextest: true
           with-mold: true
-      - name: Build controlled-env binary
-        run: cargo build --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml --release
+      - name: Download fixture binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-fixture-binaries
+          path: ./prebuilt
+      - name: Place controlled-env binary
+        run: |
+          mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
+          mv ./prebuilt/tau-controlled-env \
+             crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
+          # actions/upload-artifact strips executable bits; restore them.
+          chmod +x crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+          touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+      # FALLBACK (removed in Task C7):
+      # - name: Build controlled-env binary
+      #   run: cargo build --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml --release
       - name: Test tau-runtime e2e
-        # Runtime-level integration tests: adapter threads through to
-        # plugin spawn; sandbox plan validation runs pre-spawn.
-        run: cargo nextest run -p tau-runtime --features integration-tests --tests
+        run: cargo nextest run -p tau-runtime --features integration-tests --tests --verbose
