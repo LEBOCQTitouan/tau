@@ -15,7 +15,7 @@ tracing    = { workspace = true }
 # `net` feature required by net_filter::resolve (tokio::net::lookup_host) —
 # sub-project F. `rt` is needed because async fns inside the crate are
 # polled by the runtime crate's executor.
-tokio      = { workspace = true, features = ["net", "rt"] }
+tokio      = { workspace = true, features = ["net", "rt", "io-util", "time"] }
 thiserror  = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -28,7 +28,7 @@ seccompiler = { workspace = true }
 insta      = "1"
 serde_json = "1"
 tempfile   = { workspace = true }
-tokio      = { workspace = true, features = ["macros", "rt"] }
+tokio      = { workspace = true, features = ["macros", "rt", "io-util", "time"] }
 tau-domain = { workspace = true, features = ["serde", "test-fixtures"] }
 tau-ports  = { workspace = true, features = ["serde", "test-fixtures"] }
 
