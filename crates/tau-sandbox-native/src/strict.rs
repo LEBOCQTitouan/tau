@@ -400,7 +400,12 @@ pub(crate) fn apply_strict(
         // Replace the command: tau-net-bridge --proxy-sock=<path>
         //   --listen=127.0.0.1:8443 -- <original> <args>
         // std::process::Command has no "set program" method, so we rebuild it.
-        *cmd = std::process::Command::new(env!("CARGO_BIN_EXE_tau-net-bridge"));
+        // Bridge binary path: runtime env var, default to PATH lookup. Tests
+        // set TAU_NET_BRIDGE_PATH to env!("CARGO_BIN_EXE_tau-net-bridge")
+        // (that env var IS set in test contexts that depend on the bin target).
+        let bridge_path = std::env::var_os("TAU_NET_BRIDGE_PATH")
+            .unwrap_or_else(|| std::ffi::OsString::from("tau-net-bridge"));
+        *cmd = std::process::Command::new(bridge_path);
         cmd.arg(format!("--proxy-sock={}", proxy_sock_path.display()))
             .arg("--listen=127.0.0.1:8443")
             .arg("--")
