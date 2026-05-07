@@ -21,19 +21,31 @@ mod validate;
 pub use connect::{parse_connect_request, peek_sni, ConnectRequest};
 pub use validate::{validate_hosts, ValidationError};
 
+// The async runtime code below is unix-only — it relies on Unix-domain
+// sockets (`tokio::net::Unix*`). The strict-tier sandbox is also unix-only
+// (landlock, seccomp, namespaces), so this module's runtime API is only
+// reachable on unix-target builds. Pure-logic parts above (validate,
+// connect parsing) compile on any platform.
+
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(unix)]
 use tokio::net::{TcpStream, UnixListener, UnixStream};
+#[cfg(unix)]
 use tokio::task::JoinHandle;
 
 /// Handle to a running proxy task. Drop aborts the task and unlinks the
 /// temp Unix socket file.
+#[cfg(unix)]
 #[non_exhaustive]
 pub struct ProxyHandle {
     sock_path: PathBuf,
     task: JoinHandle<()>,
 }
 
+#[cfg(unix)]
 impl ProxyHandle {
     /// Returns the path to the Unix socket the proxy is listening on.
     pub fn sock_path(&self) -> &Path {
@@ -41,6 +53,7 @@ impl ProxyHandle {
     }
 }
 
+#[cfg(unix)]
 impl Drop for ProxyHandle {
     fn drop(&mut self) {
         self.task.abort();
@@ -54,6 +67,7 @@ impl Drop for ProxyHandle {
 /// Caller is responsible for granting the child access to the returned
 /// socket path (e.g. via landlock rules for native, bind-mount for container)
 /// so the bridge inside the sandbox can dial it.
+#[cfg(unix)]
 pub fn spawn_proxy(allowed_hosts: Vec<String>) -> std::io::Result<ProxyHandle> {
     let sock_path = make_temp_sock_path()?;
     let listener = UnixListener::bind(&sock_path)?;
@@ -61,6 +75,7 @@ pub fn spawn_proxy(allowed_hosts: Vec<String>) -> std::io::Result<ProxyHandle> {
     Ok(ProxyHandle { sock_path, task })
 }
 
+#[cfg(unix)]
 fn make_temp_sock_path() -> std::io::Result<PathBuf> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -73,6 +88,7 @@ fn make_temp_sock_path() -> std::io::Result<PathBuf> {
     Ok(p)
 }
 
+#[cfg(unix)]
 async fn accept_loop(listener: UnixListener, allowed_hosts: Vec<String>) {
     loop {
         match listener.accept().await {
@@ -92,6 +108,7 @@ async fn accept_loop(listener: UnixListener, allowed_hosts: Vec<String>) {
     }
 }
 
+#[cfg(unix)]
 async fn handle_connection(
     plugin_sock: &mut UnixStream,
     allowed_hosts: &[String],
@@ -147,11 +164,10 @@ async fn handle_connection(
     Ok(())
 }
 
+#[cfg(unix)]
 #[cfg(test)]
 mod proxy_lifecycle_tests {
     use super::*;
-    use tokio::io::AsyncReadExt as _;
-    use tokio::io::AsyncWriteExt as _;
 
     #[tokio::test]
     async fn proxy_handle_drop_unlinks_socket_file() {

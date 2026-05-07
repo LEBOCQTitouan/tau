@@ -91,6 +91,10 @@ pub(crate) fn wrap_command(
         .any(|c| matches!(c, Capability::Network(NetCapability::Http { .. })));
 
     // For Network(Http): spawn the userspace proxy, collect proxy config.
+    // Proxy support is unix-only (relies on Unix-domain sockets + the
+    // tau-net-bridge Linux binary). On non-unix targets, Network(Http) plans
+    // are hard-refused — Windows/etc. container support is a future iteration.
+    #[cfg(unix)]
     let (proxy_handle, proxy_config) = if has_network_http {
         // Collect allowed hosts from all Http capabilities.
         let mut allowed_hosts: Vec<String> = Vec::new();
@@ -122,6 +126,17 @@ pub(crate) fn wrap_command(
         };
 
         (Some(handle), Some(config))
+    } else {
+        (None, None)
+    };
+
+    #[cfg(not(unix))]
+    let (proxy_handle, proxy_config): (Option<()>, Option<ProxyConfig>) = if has_network_http {
+        return Err(SandboxError::Proxy {
+            message: "Network(Http) capability is unix-only in this iteration; \
+                      Windows container proxy is a future sub-project"
+                .to_string(),
+        });
     } else {
         (None, None)
     };
