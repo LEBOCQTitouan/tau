@@ -261,3 +261,7 @@ Two items did NOT ship in Phase 1 and are tracked as gap rows in `docs/superpowe
 2. **strict_net_filter integration tests hang in CI**: all 4 `strict_net_filter.rs` tests are `#[ignore]`'d. When `test-net-filter / linux` (privileged Docker) actually ran them, all 4 hung past 60s. Notably `no_network_cap_socket_denied_by_seccomp` also hangs (no `Network(Http)` in plan, no `apply_post_spawn` runs), suggesting the hang is in the seccomp `KillProcess` / `cmd.output()` propagation path on Linux — not in F-specific code. Needs a real-Linux debugging session to repro and fix.
 
 The `unshare_flags_for_plan` flip + `validate_plan` hard-refuse + post-spawn integration are validated by the lib unit tests + clippy under both default and `integration-tests` features.
+
+## Addendum (2026-05-07): Superseded by ADR-0020
+
+The veth + nftables + CAP_NET_ADMIN design has been replaced by a userspace HTTP-CONNECT proxy (see [ADR-0020 — Sandbox proxy](0020-sandbox-proxy.md)). The `tau-sandbox-native::net_filter` module described in this ADR was deleted in PR <TBD>. Reasons: privileged-Docker friction, 7 #[ignore]'d tests it left blocked, and a hang in the strict_net_filter integration tests under privileged-Docker CI.
