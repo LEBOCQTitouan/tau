@@ -308,9 +308,8 @@ jobs:
       - name: Test tau-sandbox-native e2e
         # strict_net_filter tests were replaced by strict_proxy tests (sub-project H,
         # ADR-0020). The proxy pattern needs no CAP_NET_ADMIN; all integration tests
-        # run on this stock ubuntu-latest runner. Filter retains the old binary name
-        # exclusion as a no-op safety net in case any build artifact lingers.
-        run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests --verbose -E 'not binary(strict_net_filter)'
+        # run on this stock ubuntu-latest runner.
+        run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests --verbose
 
   test-tau-runtime-e2e:
     name: test (tau-runtime e2e / linux)
