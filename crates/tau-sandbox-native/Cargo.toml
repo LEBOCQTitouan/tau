@@ -9,9 +9,10 @@ authors.workspace = true
 description = "Linux native sandbox adapter (landlock + seccomp + namespaces) for tau"
 
 [dependencies]
-tau-domain = { workspace = true, features = ["serde"] }
-tau-ports  = { workspace = true, features = ["serde"] }
-tracing    = { workspace = true }
+tau-domain          = { workspace = true, features = ["serde"] }
+tau-ports           = { workspace = true, features = ["serde"] }
+tau-sandbox-proxy   = { workspace = true }
+tracing             = { workspace = true }
 # `net` feature required by net_filter::resolve (tokio::net::lookup_host) —
 # sub-project F. `rt` is needed because async fns inside the crate are
 # polled by the runtime crate's executor.

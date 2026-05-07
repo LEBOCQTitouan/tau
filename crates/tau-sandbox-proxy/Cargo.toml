@@ -1,0 +1,17 @@
+[package]
+name = "tau-sandbox-proxy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "HTTP-CONNECT proxy for tau's sandboxed plugins (replaces F's veth+nft per ADR-0020)"
+
+[dependencies]
+tokio     = { workspace = true, features = ["io-util", "macros", "net", "rt", "time"] }
+thiserror = { workspace = true }
+tracing   = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "time", "rt-multi-thread"] }

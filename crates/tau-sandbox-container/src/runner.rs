@@ -4,12 +4,26 @@
 //! [`std::process::Command`] in-place. [`build_run_args`] is extracted as a
 //! pure function so it can be unit-tested without spawning anything.
 
+use std::path::PathBuf;
 use std::process::Command;
 
 use tau_domain::{Capability, FsCapability, NetCapability};
 use tau_ports::{SandboxError, SandboxHandle, SandboxPlan};
 
 use crate::probe::ResolvedRuntime;
+
+/// Proxy configuration for Network(Http) plans.
+///
+/// Holds the Unix socket path the proxy is listening on and the path to the
+/// `tau-net-bridge` binary that will be bind-mounted into the container.
+#[derive(Debug)]
+pub(crate) struct ProxyConfig {
+    /// Absolute path to the proxy Unix socket in the parent's temp dir.
+    pub(crate) sock_path: PathBuf,
+    /// Path to the `tau-net-bridge` binary that will be bind-mounted into the
+    /// container at `/usr/local/bin/tau-net-bridge`.
+    pub(crate) bridge_path: String,
+}
 
 /// Default base image used when no per-plugin override is configured.
 ///
@@ -24,8 +38,12 @@ const DEFAULT_BASE_IMAGE: &str = "ghcr.io/tau-runtime/sandbox-base:v0.1";
 /// is replaced with a new `Command` whose argv is the container runtime
 /// invocation.
 ///
-/// Returns [`SandboxHandle::noop`]: container teardown is handled by
-/// `--rm`; no parent-side cleanup is needed.
+/// For plans with [`tau_domain::NetCapability::Http`], spawns a userspace proxy
+/// task and bind-mounts it into the container via a Unix socket, along with the
+/// `tau-net-bridge` binary. The proxy guard is nested into the returned
+/// [`SandboxHandle`] for LIFO cleanup. The bridge binary path is read from the
+/// `TAU_NET_BRIDGE_PATH` environment variable (default: `"tau-net-bridge"`,
+/// resolved via `PATH`).
 ///
 /// ## Caller config
 ///
@@ -66,12 +84,54 @@ pub(crate) fn wrap_command(
         })
         .collect();
 
+    // Determine if the plan requests outbound HTTP.
+    let has_network_http = plan.capabilities.iter().any(|c| {
+        matches!(c, Capability::Network(NetCapability::Http { .. }))
+    });
+
+    // For Network(Http): spawn the userspace proxy, collect proxy config.
+    let (proxy_handle, proxy_config) = if has_network_http {
+        // Collect allowed hosts from all Http capabilities.
+        let mut allowed_hosts: Vec<String> = Vec::new();
+        for cap in &plan.capabilities {
+            if let Capability::Network(NetCapability::Http { hosts, .. }) = cap {
+                allowed_hosts.extend(hosts.iter().cloned());
+            }
+        }
+
+        // Validate hosts: rejects wildcards + non-loopback IP literals.
+        tau_sandbox_proxy::validate_hosts(&allowed_hosts).map_err(|e| SandboxError::Proxy {
+            message: format!("host validation: {e}"),
+        })?;
+
+        // Spawn the proxy task in the parent's tokio runtime.
+        let handle =
+            tau_sandbox_proxy::spawn_proxy(allowed_hosts).map_err(|e| SandboxError::Proxy {
+                message: format!("spawn_proxy: {e}"),
+            })?;
+        let sock_path = handle.sock_path().to_path_buf();
+
+        // Resolve bridge binary path: runtime env var, default to PATH lookup.
+        let bridge_path = std::env::var("TAU_NET_BRIDGE_PATH")
+            .unwrap_or_else(|_| "tau-net-bridge".to_string());
+
+        let config = ProxyConfig {
+            sock_path,
+            bridge_path,
+        };
+
+        (Some(handle), Some(config))
+    } else {
+        (None, None)
+    };
+
     let argv = build_run_args(
         plan,
         runtime,
         &original_program,
         &original_args,
         &forwarded_envs,
+        proxy_config.as_ref(),
     );
 
     // Replace cmd in-place: clear via re-assignment, then build new argv.
@@ -85,7 +145,14 @@ pub(crate) fn wrap_command(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    Ok(SandboxHandle::noop())
+    // Nest the proxy guard inside the SandboxHandle so it is dropped (LIFO)
+    // when the handle is dropped.
+    let mut handle = SandboxHandle::noop();
+    if let Some(p) = proxy_handle {
+        handle.nest_handle(Box::new(p));
+    }
+
+    Ok(handle)
 }
 
 /// Build the argv slice (without the `docker`/`podman` binary itself) that
@@ -95,6 +162,12 @@ pub(crate) fn wrap_command(
 /// into the container via `-e KEY=VALUE` flags. Typically these are env vars
 /// matching `TAU_*` or `RUST_LOG` captured from the original `Command`.
 ///
+/// `proxy` is `Some` when the plan has `Network(Http)` capabilities. When
+/// present, the proxy Unix socket is bind-mounted into the container at
+/// `/run/tau-proxy.sock:ro`, the bridge binary is bind-mounted at
+/// `/usr/local/bin/tau-net-bridge:ro`, and `HTTPS_PROXY=http://127.0.0.1:8443`
+/// is injected. The original program is also wrapped with `tau-net-bridge`.
+///
 /// Exposed for unit tests so argv shape can be verified without spawning.
 pub(crate) fn build_run_args(
     plan: &SandboxPlan,
@@ -102,6 +175,7 @@ pub(crate) fn build_run_args(
     program: &str,
     program_args: &[String],
     forwarded_envs: &[(String, String)],
+    proxy: Option<&ProxyConfig>,
 ) -> Vec<String> {
     // Both docker and podman share the same `run` argument shape.
     let _ = runtime;
@@ -157,6 +231,24 @@ pub(crate) fn build_run_args(
         }
     }
 
+    // Proxy bind-mounts and env injection for Network(Http) plans.
+    if let Some(proxy_cfg) = proxy {
+        let sock = proxy_cfg.sock_path.display().to_string();
+        // Bind-mount proxy socket (read-write so the plugin can connect to it).
+        argv.push("-v".into());
+        argv.push(format!("{sock}:/run/tau-proxy.sock:rw"));
+        // Bind-mount the bridge binary (read-only).
+        argv.push("-v".into());
+        argv.push(format!(
+            "{}:/usr/local/bin/tau-net-bridge:ro",
+            proxy_cfg.bridge_path
+        ));
+        // Inject HTTPS_PROXY so standard HTTP clients inside the container
+        // route through tau-net-bridge → proxy.
+        argv.push("-e".into());
+        argv.push("HTTPS_PROXY=http://127.0.0.1:8443".into());
+    }
+
     // Forward whitelisted env vars into the container.
     for (k, v) in forwarded_envs {
         argv.push("-e".into());
@@ -164,7 +256,15 @@ pub(crate) fn build_run_args(
     }
 
     // Image and original command come last.
+    // When a proxy is active, wrap with tau-net-bridge so outbound HTTPS
+    // routes through the proxy socket.
     argv.push(DEFAULT_BASE_IMAGE.into());
+    if proxy.is_some() {
+        argv.push("/usr/local/bin/tau-net-bridge".into());
+        argv.push("--proxy-sock=/run/tau-proxy.sock".into());
+        argv.push("--listen=127.0.0.1:8443".into());
+        argv.push("--".into());
+    }
     argv.push(program.into());
     for a in program_args {
         argv.push(a.clone());
@@ -202,7 +302,7 @@ mod tests {
             "kind": "fs.read",
             "paths": ["/etc/foo"]
         }]));
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
         assert!(
             argv.iter().any(|a| a == "/etc/foo:/etc/foo:ro"),
             "expected ro mount, got {argv:?}"
@@ -215,7 +315,7 @@ mod tests {
             "kind": "fs.write",
             "paths": ["/data/cache"]
         }]));
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
         assert!(
             argv.iter().any(|a| a == "/data/cache:/data/cache:rw"),
             "expected rw mount, got {argv:?}"
@@ -229,7 +329,7 @@ mod tests {
             "hosts": ["api.example.com"],
             "methods": ["GET"]
         }]));
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
         let pos = argv
             .iter()
             .position(|a| a == "--network")
@@ -240,7 +340,7 @@ mod tests {
     #[test]
     fn no_network_capability_uses_none() {
         let plan = plan_from(json!([]));
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
         let pos = argv
             .iter()
             .position(|a| a == "--network")
@@ -251,7 +351,7 @@ mod tests {
     #[test]
     fn read_only_root_and_tmpfs_present() {
         let plan = plan_from(json!([]));
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
         assert!(
             argv.iter().any(|a| a == "--read-only"),
             "missing --read-only"
@@ -266,7 +366,7 @@ mod tests {
     #[test]
     fn cap_drop_and_no_new_privs_present() {
         let plan = plan_from(json!([]));
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
         assert!(
             argv.iter().any(|a| a == "--cap-drop=ALL"),
             "missing --cap-drop=ALL"
@@ -280,7 +380,7 @@ mod tests {
     #[test]
     fn hardening_flags_present() {
         let plan = plan_from(json!([]));
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
         let user_pos = argv
             .iter()
             .position(|a| a == "--user")
@@ -298,7 +398,7 @@ mod tests {
     fn original_program_and_args_at_end() {
         let plan = plan_from(json!([]));
         let args: Vec<String> = vec!["hello".into(), "world".into()];
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &args, &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &args, &[], None);
         assert_eq!(argv[argv.len() - 3], "/bin/echo");
         assert_eq!(argv[argv.len() - 2], "hello");
         assert_eq!(argv[argv.len() - 1], "world");
@@ -310,7 +410,7 @@ mod tests {
             "kind": "fs.read",
             "paths": ["/srv/data/**"]
         }]));
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
         assert!(
             argv.iter().any(|a| a == "/srv/data:/srv/data:ro"),
             "expected globless mount, got {argv:?}"
@@ -322,8 +422,8 @@ mod tests {
         // Both runtimes should produce identical argv (the binary is set
         // outside build_run_args).
         let plan = plan_from(json!([]));
-        let docker_argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/true", &[], &[]);
-        let podman_argv = build_run_args(&plan, ResolvedRuntime::Podman, "/bin/true", &[], &[]);
+        let docker_argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/true", &[], &[], None);
+        let podman_argv = build_run_args(&plan, ResolvedRuntime::Podman, "/bin/true", &[], &[], None);
         assert_eq!(docker_argv, podman_argv);
     }
 
@@ -333,7 +433,7 @@ mod tests {
             "kind": "fs.read",
             "paths": ["/a", "/b", "/c"]
         }]));
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
         assert!(argv.iter().any(|a| a == "/a:/a:ro"));
         assert!(argv.iter().any(|a| a == "/b:/b:ro"));
         assert!(argv.iter().any(|a| a == "/c:/c:ro"));
@@ -342,7 +442,7 @@ mod tests {
     #[test]
     fn image_default_is_present_before_program() {
         let plan = plan_from(json!([]));
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
         let image_pos = argv
             .iter()
             .position(|a| a == DEFAULT_BASE_IMAGE)
@@ -360,7 +460,7 @@ mod tests {
     #[test]
     fn rm_and_stdin_flags_present() {
         let plan = plan_from(json!([]));
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
         assert!(argv.iter().any(|a| a == "--rm"), "missing --rm");
         assert!(argv.iter().any(|a| a == "-i"), "missing -i");
     }
@@ -369,7 +469,7 @@ mod tests {
     fn tau_env_vars_forwarded() {
         let plan = plan_from(json!([]));
         let envs = vec![("TAU_FOO".to_string(), "bar".to_string())];
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &envs);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &envs, None);
         let pos = argv
             .iter()
             .position(|a| a == "-e")
@@ -384,7 +484,7 @@ mod tests {
         // build_run_args only injects what is passed in forwarded_envs.
         // wrap_command filters; here we verify the contract: if we pass no
         // forwarded envs, no -e flags appear.
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[]);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
         assert!(
             !argv.iter().any(|a| a.starts_with("LANG=")),
             "LANG must not appear in argv: {argv:?}"
@@ -399,11 +499,77 @@ mod tests {
     fn rust_log_env_var_forwarded() {
         let plan = plan_from(json!([]));
         let envs = vec![("RUST_LOG".to_string(), "trace".to_string())];
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &envs);
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &envs, None);
         let pos = argv
             .iter()
             .position(|a| a == "-e")
             .expect("-e flag present for RUST_LOG");
         assert_eq!(argv[pos + 1], "RUST_LOG=trace");
+    }
+
+    #[test]
+    fn proxy_args_added_when_network_http_present() {
+        let plan = plan_from(json!([{
+            "kind": "net.http",
+            "hosts": ["api.example.com"],
+            "methods": ["GET"]
+        }]));
+        let proxy_cfg = ProxyConfig {
+            sock_path: std::path::PathBuf::from("/tmp/tau-proxy-12345-0.sock"),
+            bridge_path: "/usr/local/bin/tau-net-bridge".to_string(),
+        };
+        let argv = build_run_args(
+            &plan,
+            ResolvedRuntime::Docker,
+            "/bin/echo",
+            &[],
+            &[],
+            Some(&proxy_cfg),
+        );
+        // HTTPS_PROXY env must be present.
+        assert!(
+            argv.iter().any(|a| a == "HTTPS_PROXY=http://127.0.0.1:8443"),
+            "expected HTTPS_PROXY in argv: {argv:?}"
+        );
+        // Proxy socket bind-mount must be present.
+        assert!(
+            argv.iter()
+                .any(|a| a.contains("/run/tau-proxy.sock")),
+            "expected proxy socket mount in argv: {argv:?}"
+        );
+        // Bridge binary bind-mount must be present.
+        assert!(
+            argv.iter()
+                .any(|a| a.contains("/usr/local/bin/tau-net-bridge:ro")),
+            "expected bridge binary mount in argv: {argv:?}"
+        );
+        // tau-net-bridge wrapper must appear after the image.
+        let bridge_pos = argv
+            .iter()
+            .position(|a| a == "/usr/local/bin/tau-net-bridge")
+            .expect("tau-net-bridge wrapper in argv");
+        let image_pos = argv
+            .iter()
+            .position(|a| a == DEFAULT_BASE_IMAGE)
+            .expect("image in argv");
+        assert!(bridge_pos > image_pos, "bridge wrapper must follow image");
+    }
+
+    #[test]
+    fn no_proxy_args_when_no_network_http() {
+        let plan = plan_from(json!([]));
+        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &[], None);
+        assert!(
+            !argv.iter().any(|a| a.contains("HTTPS_PROXY=")),
+            "HTTPS_PROXY must not appear without network http: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|a| a.contains("tau-proxy.sock")),
+            "proxy socket must not appear without network http: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|a| a.contains("tau-net-bridge")),
+            "tau-net-bridge must not appear without network http: {argv:?}"
+        );
     }
 }

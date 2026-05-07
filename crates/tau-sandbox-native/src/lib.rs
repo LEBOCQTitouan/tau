@@ -12,7 +12,6 @@
 #![deny(missing_docs)]
 
 mod shape;
-mod proxy;
 
 #[cfg(target_os = "linux")]
 mod exec;

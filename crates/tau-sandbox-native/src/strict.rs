@@ -372,12 +372,12 @@ pub(crate) fn apply_strict(
         }
 
         // Validate hosts: rejects wildcards + non-loopback IP literals.
-        crate::proxy::validate_hosts(&allowed_hosts).map_err(|e| SandboxError::Proxy {
+        tau_sandbox_proxy::validate_hosts(&allowed_hosts).map_err(|e| SandboxError::Proxy {
             message: format!("host validation: {e}"),
         })?;
 
         // Spawn the proxy task in the parent's tokio runtime.
-        let handle = crate::proxy::spawn_proxy(allowed_hosts).map_err(|e| SandboxError::Proxy {
+        let handle = tau_sandbox_proxy::spawn_proxy(allowed_hosts).map_err(|e| SandboxError::Proxy {
             message: format!("spawn_proxy: {e}"),
         })?;
         let proxy_sock_path = handle.sock_path().to_path_buf();

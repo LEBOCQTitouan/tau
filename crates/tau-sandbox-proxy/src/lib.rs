@@ -1,5 +1,9 @@
-//! Sandbox proxy — userspace HTTP-CONNECT proxy replacing F's veth+nft
-//! per-host filter (sub-project H, ADR-0020).
+//! `tau-sandbox-proxy` — userspace HTTP-CONNECT proxy for tau sandboxed plugins.
+//!
+//! Shared by both the native (Linux landlock/seccomp) and container
+//! (docker/podman) sandbox adapters. Extracted from `tau-sandbox-native`
+//! because the proxy logic is purely tokio-based and cross-platform, while
+//! `tau-sandbox-native` itself is Linux-specific.
 //!
 //! Architecture: a tokio task in tau's parent address space accepts
 //! Unix-socket connections from the per-plugin `tau-net-bridge` binary.
@@ -14,8 +18,8 @@
 mod validate;
 mod connect;
 
-pub(crate) use validate::{validate_hosts, ValidationError};
-pub(crate) use connect::{ConnectRequest, parse_connect_request, peek_sni};
+pub use validate::{validate_hosts, ValidationError};
+pub use connect::{ConnectRequest, parse_connect_request, peek_sni};
 
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -25,13 +29,14 @@ use tokio::task::JoinHandle;
 /// Handle to a running proxy task. Drop aborts the task and unlinks the
 /// temp Unix socket file.
 #[non_exhaustive]
-pub(crate) struct ProxyHandle {
+pub struct ProxyHandle {
     sock_path: PathBuf,
     task: JoinHandle<()>,
 }
 
 impl ProxyHandle {
-    pub(crate) fn sock_path(&self) -> &Path {
+    /// Returns the path to the Unix socket the proxy is listening on.
+    pub fn sock_path(&self) -> &Path {
         &self.sock_path
     }
 }
@@ -46,10 +51,10 @@ impl Drop for ProxyHandle {
 /// Spawn a tokio task that listens for HTTP CONNECT requests on a
 /// temp Unix socket file. Returns a `ProxyHandle` whose Drop cleans up.
 ///
-/// Caller is responsible for installing landlock rules that grant the
-/// child read+write access to the returned socket path (so the bridge
-/// inside the netns can dial it).
-pub(crate) fn spawn_proxy(allowed_hosts: Vec<String>) -> std::io::Result<ProxyHandle> {
+/// Caller is responsible for granting the child access to the returned
+/// socket path (e.g. via landlock rules for native, bind-mount for container)
+/// so the bridge inside the sandbox can dial it.
+pub fn spawn_proxy(allowed_hosts: Vec<String>) -> std::io::Result<ProxyHandle> {
     let sock_path = make_temp_sock_path()?;
     let listener = UnixListener::bind(&sock_path)?;
     let task = tokio::spawn(accept_loop(listener, allowed_hosts));
