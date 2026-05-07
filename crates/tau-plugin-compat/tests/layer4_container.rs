@@ -21,13 +21,14 @@
 //! Skip-with-message on: (a) Docker not on PATH or daemon not running,
 //! (b) container adapter probe returns Unavailable.
 //!
-//! ## Tier B — `#[ignore]`'d, deferred to sub-project D (anthropic, ollama, openai)
+//! ## Tier B — HTTP cassette-replay (anthropic, ollama, openai)
 //!
-//! The wire path from `tau chat` / `tau run` through a container-sandboxed
-//! plugin process and back to a cassette-recorded HTTP response is
-//! non-trivial. Rather than fabricating a half-working version, these tests
-//! are scaffolded with `#[ignore]` and a rationale comment. Sub-project D
-//! Task 7 will wire the cassette-replay infra and lift the `#[ignore]`.
+//! Three LLM-backend tests exercising the Container adapter's proxy
+//! bind-mount (T7, sub-project H).  Each test starts an in-process
+//! `CassetteServer` on the host, spawns the plugin binary inside Docker
+//! with a `Network(Http)` plan, and verifies the response matches the
+//! cassette's expected "Hi there" reply.  The proxy (running in the host's
+//! network namespace) bridges the container to the host's `127.0.0.1`.
 
 #![cfg(feature = "integration-tests")]
 
@@ -39,7 +40,9 @@ use tau_domain::{
     fixtures as domain_fixtures, AgentInstanceId, Capability, PluginKind, PluginManifest, PortKind,
 };
 use tau_pkg::LockedPlugin;
-use tau_ports::{SandboxPlan, SandboxProbe, SessionContext};
+use tau_ports::{
+    CompletionRequest, ContentBlock, LlmProviderMessage, SandboxPlan, SandboxProbe, SessionContext,
+};
 use tau_runtime::sandbox::registry::RegistryKind;
 use tau_runtime::sandbox::resolve_adapter_forced;
 use tempfile::TempDir;
@@ -143,6 +146,53 @@ async fn resolve_container_or_skip() -> Option<tau_runtime::sandbox::SandboxAdap
             None
         }
     }
+}
+
+/// Construct a `LockedPlugin` for an LLM-backend plugin.
+fn make_llm_locked_plugin(bin_name: &str, binary_path: PathBuf) -> LockedPlugin {
+    let manifest = PluginManifest::new(
+        PortKind::LlmBackend,
+        PluginKind::RustCargo,
+        bin_name.to_string(),
+    );
+    LockedPlugin::new(
+        manifest,
+        binary_path,
+        std::time::SystemTime::UNIX_EPOCH,
+        String::new(),
+    )
+}
+
+/// Return the workspace root (two levels above this crate's manifest dir).
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf()
+}
+
+/// Build a minimal `CompletionRequest` that matches the cassette's "say hi"
+/// fixture.  The model string is provider-specific; pass whatever the
+/// cassette's response carries.
+fn make_cassette_completion_request(model: &str) -> CompletionRequest {
+    let mut req = CompletionRequest::new(model.to_string());
+    req.messages
+        .push(LlmProviderMessage::user(vec![ContentBlock::Text(
+            "say hi".into(),
+        )]));
+    req.max_tokens = Some(20);
+    req
+}
+
+/// Build the `net.http` capability that allows the plugin process to
+/// reach back to `127.0.0.1` (the in-process cassette server).
+///
+/// The proxy (T7 wiring) runs on the host and can connect to host loopback,
+/// so `127.0.0.1` is reachable from the container via the proxy bridge.
+fn make_net_http_localhost_cap() -> Capability {
+    domain_fixtures::cap_net_http(&["127.0.0.1", "localhost"], &["POST", "GET"])
 }
 
 /// Minimal base64 encoding for the test fixture assertion.
@@ -389,40 +439,292 @@ async fn fs_read_layer4_container_reads_data_file() {
 }
 
 // ---------------------------------------------------------------------------
-// Tier B tests — #[ignore]'d, deferred to sub-project D
+// Tier B tests — HTTP cassette-replay via Container adapter (sub-project H T9)
 // ---------------------------------------------------------------------------
+//
+// T7 (commit e64a23d) wired the Container adapter to spawn a userspace proxy
+// on the host, bind-mount its Unix socket + tau-net-bridge binary into the
+// container, set HTTPS_PROXY, and wrap the entrypoint with the bridge.  The
+// proxy runs in the host's network namespace, so it can reach 127.0.0.1
+// (where the in-process CassetteServer listens).  The container process
+// routes through the bridge → proxy → host loopback — no veth or
+// nftables-in-netns shenanigans needed.
 
-/// Test 3 (Tier B, ignored): anthropic — container adapter + cassette replay.
+/// Test 3: anthropic — container adapter + cassette replay.
 ///
-/// The container adapter runs the plugin binary inside an isolated Docker
-/// network namespace.  The in-process `CassetteServer` that Task 7 (native)
-/// uses binds on the host's loopback (`127.0.0.1`), which is not reachable
-/// from inside the container's network namespace without the nftables-in-netns
-/// rules that sub-project F will introduce.
-#[test]
-#[ignore = "F task 6.5 wires Native adapter only; Container adapter network filtering tracked as separate follow-up"]
-fn anthropic_layer4_container_completes_via_cassette() {
-    todo!("sub-project F: nftables-in-netns needed to reach host loopback cassette server from container")
+/// Spin up a `CassetteServer` for the anthropic happy-path cassette, spawn
+/// the anthropic plugin binary under the Container adapter with a
+/// `Network(Http)` plan, invoke `DynLlmBackend::complete`, and assert the
+/// response text matches the cassette's expected "Hi there" reply.
+///
+/// The proxy bind-mount (T7) lets the containerised plugin reach the host's
+/// `127.0.0.1:<port>` cassette server via tau-net-bridge.
+///
+/// Skips if: (a) Docker not available, (b) anthropic-plugin binary not built.
+#[tokio::test]
+async fn anthropic_layer4_container_completes_via_cassette() {
+    // 1. Require Docker.
+    if let Err(reason) = require_docker() {
+        eprintln!("SKIP: {reason}");
+        return;
+    }
+
+    // 2. Locate the pre-built anthropic plugin binary.
+    let bin_path = locate_plugin_bin("anthropic-plugin");
+    if !bin_path.exists() {
+        eprintln!(
+            "SKIP: anthropic-plugin binary not found at {}; \
+             run `cargo build -p tau-plugins-anthropic --release` first",
+            bin_path.display()
+        );
+        return;
+    }
+
+    // 3. Resolve the container sandbox adapter, skip gracefully if unavailable.
+    let adapter = match resolve_container_or_skip().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    // 4. Start a cassette-replay HTTP server from the anthropic happy-path
+    //    cassette.  The server binds to 0.0.0.0:<random_port> on the host,
+    //    but we address it via 127.0.0.1 which the proxy (running on the
+    //    host) can reach.
+    let cassette_path = workspace_root()
+        .join("crates/tau-plugins/anthropic/tests/cassettes/complete_happy_path.yaml");
+    let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
+    let api_base = cassette_server.uri().to_string();
+
+    // 5. Build the SandboxPlan with Network(Http) for localhost.
+    //    The proxy validates and allows loopback addresses; T7's wrap_command
+    //    injects HTTPS_PROXY + bind-mounts the proxy socket automatically.
+    let net_cap = make_net_http_localhost_cap();
+    let plan = SandboxPlan::new(vec![net_cap], None, None);
+
+    // 6. Synthesise a LockedPlugin for the anthropic binary (LlmBackend port).
+    let plugin = make_llm_locked_plugin("anthropic-plugin", bin_path);
+
+    // 7. Build the plugin config JSON, pointing base_url at the cassette
+    //    server.  Set api_key directly (test-only path).
+    let config = serde_json::json!({
+        "base_url": api_base,
+        "api_key": "sk-ant-test"
+    });
+
+    // 8. Spawn the anthropic plugin under the container sandbox via the driver.
+    let dyn_llm = tau_plugin_compat::driver::spawn_llm_under_sandbox(
+        &plugin,
+        config,
+        Some(Arc::new(adapter)),
+        Some(&plan),
+    )
+    .await;
+
+    let dyn_llm = match dyn_llm {
+        Ok(b) => b,
+        Err(e) => {
+            panic!("spawn anthropic-plugin under container adapter failed: {e:?}");
+        }
+    };
+
+    // 9. Invoke complete with a request that matches the cassette.
+    let req = make_cassette_completion_request("claude-3-5-haiku-latest");
+    let result = dyn_llm.complete(req).await;
+
+    // 10. Assert the response matches the cassette's expected outcome.
+    let resp = result.expect("anthropic complete via cassette must succeed");
+    assert_eq!(
+        resp.text, "Hi there",
+        "expected cassette response 'Hi there'; got: {:?}",
+        resp.text
+    );
+
+    let received = cassette_server.received_requests();
+    assert_eq!(
+        received.len(),
+        1,
+        "cassette server should have received exactly 1 request; got: {}",
+        received.len()
+    );
 }
 
-/// Test 4 (Tier B, ignored): ollama — container adapter + cassette replay.
+/// Test 4: ollama — container adapter + cassette replay.
 ///
-/// Same blocker as anthropic: the in-process `CassetteServer` on the host
-/// loopback is unreachable from the container netns without sub-project F's
-/// per-host nftables-in-netns filtering work.
-#[test]
-#[ignore = "F task 6.5 wires Native adapter only; Container adapter network filtering tracked as separate follow-up"]
-fn ollama_layer4_container_completes_via_cassette() {
-    todo!("sub-project F: nftables-in-netns needed to reach host loopback cassette server from container")
+/// Spin up a `CassetteServer` for the ollama happy-path cassette, spawn
+/// the ollama plugin binary under the Container adapter with a
+/// `Network(Http)` plan, invoke `DynLlmBackend::complete`, and assert the
+/// response text matches the cassette's expected "Hi there" reply.
+///
+/// Ollama doesn't require an API key; `bearer_token_env` is set to an
+/// unset name so no Authorization header is injected.
+///
+/// Skips if: (a) Docker not available, (b) ollama-plugin binary not built.
+#[tokio::test]
+async fn ollama_layer4_container_completes_via_cassette() {
+    // 1. Require Docker.
+    if let Err(reason) = require_docker() {
+        eprintln!("SKIP: {reason}");
+        return;
+    }
+
+    // 2. Locate the pre-built ollama plugin binary.
+    let bin_path = locate_plugin_bin("ollama-plugin");
+    if !bin_path.exists() {
+        eprintln!(
+            "SKIP: ollama-plugin binary not found at {}; \
+             run `cargo build -p tau-plugins-ollama --release` first",
+            bin_path.display()
+        );
+        return;
+    }
+
+    // 3. Resolve the container sandbox adapter.
+    let adapter = match resolve_container_or_skip().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    // 4. Start the cassette-replay server.
+    let cassette_path =
+        workspace_root().join("crates/tau-plugins/ollama/tests/cassettes/complete_happy_path.yaml");
+    let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
+    let api_base = cassette_server.uri().to_string();
+
+    // 5. Build the SandboxPlan with Network(Http) for localhost.
+    let net_cap = make_net_http_localhost_cap();
+    let plan = SandboxPlan::new(vec![net_cap], None, None);
+
+    // 6. Synthesise the LockedPlugin (LlmBackend port).
+    let plugin = make_llm_locked_plugin("ollama-plugin", bin_path);
+
+    // 7. Build the config JSON.
+    let config = serde_json::json!({
+        "base_url": api_base,
+        "bearer_token_env": "OLLAMA_BEARER_TOKEN_DEFINITELY_NOT_SET_FOR_TESTS"
+    });
+
+    // 8. Spawn under the container sandbox.
+    let dyn_llm = tau_plugin_compat::driver::spawn_llm_under_sandbox(
+        &plugin,
+        config,
+        Some(Arc::new(adapter)),
+        Some(&plan),
+    )
+    .await;
+
+    let dyn_llm = match dyn_llm {
+        Ok(b) => b,
+        Err(e) => {
+            panic!("spawn ollama-plugin under container adapter failed: {e:?}");
+        }
+    };
+
+    // 9. Invoke complete.
+    let req = make_cassette_completion_request("llama3.2");
+    let result = dyn_llm.complete(req).await;
+
+    // 10. Assert response matches cassette.
+    let resp = result.expect("ollama complete via cassette must succeed");
+    assert_eq!(
+        resp.text, "Hi there",
+        "expected cassette response 'Hi there'; got: {:?}",
+        resp.text
+    );
+
+    let received = cassette_server.received_requests();
+    assert_eq!(
+        received.len(),
+        1,
+        "cassette server should have received exactly 1 request; got: {}",
+        received.len()
+    );
 }
 
-/// Test 5 (Tier B, ignored): openai — container adapter + cassette replay.
+/// Test 5: openai — container adapter + cassette replay.
 ///
-/// Same blocker as anthropic: the in-process `CassetteServer` on the host
-/// loopback is unreachable from the container netns without sub-project F's
-/// per-host nftables-in-netns filtering work.
-#[test]
-#[ignore = "F task 6.5 wires Native adapter only; Container adapter network filtering tracked as separate follow-up"]
-fn openai_layer4_container_completes_via_cassette() {
-    todo!("sub-project F: nftables-in-netns needed to reach host loopback cassette server from container")
+/// Spin up a `CassetteServer` for the openai happy-path cassette, spawn
+/// the openai plugin binary under the Container adapter with a
+/// `Network(Http)` plan, invoke `DynLlmBackend::complete`, and assert the
+/// response text matches the cassette's expected "Hi there" reply.
+///
+/// Skips if: (a) Docker not available, (b) openai-plugin binary not built.
+#[tokio::test]
+async fn openai_layer4_container_completes_via_cassette() {
+    // 1. Require Docker.
+    if let Err(reason) = require_docker() {
+        eprintln!("SKIP: {reason}");
+        return;
+    }
+
+    // 2. Locate the pre-built openai plugin binary.
+    let bin_path = locate_plugin_bin("openai-plugin");
+    if !bin_path.exists() {
+        eprintln!(
+            "SKIP: openai-plugin binary not found at {}; \
+             run `cargo build -p tau-plugins-openai --release` first",
+            bin_path.display()
+        );
+        return;
+    }
+
+    // 3. Resolve the container sandbox adapter.
+    let adapter = match resolve_container_or_skip().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    // 4. Start the cassette-replay server.
+    let cassette_path =
+        workspace_root().join("crates/tau-plugins/openai/tests/cassettes/complete_happy_path.yaml");
+    let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
+    let api_base = cassette_server.uri().to_string();
+
+    // 5. Build the SandboxPlan with Network(Http) for localhost.
+    let net_cap = make_net_http_localhost_cap();
+    let plan = SandboxPlan::new(vec![net_cap], None, None);
+
+    // 6. Synthesise the LockedPlugin (LlmBackend port).
+    let plugin = make_llm_locked_plugin("openai-plugin", bin_path);
+
+    // 7. Build the config JSON.
+    let config = serde_json::json!({
+        "base_url": api_base,
+        "api_key": "sk-test"
+    });
+
+    // 8. Spawn under the container sandbox.
+    let dyn_llm = tau_plugin_compat::driver::spawn_llm_under_sandbox(
+        &plugin,
+        config,
+        Some(Arc::new(adapter)),
+        Some(&plan),
+    )
+    .await;
+
+    let dyn_llm = match dyn_llm {
+        Ok(b) => b,
+        Err(e) => {
+            panic!("spawn openai-plugin under container adapter failed: {e:?}");
+        }
+    };
+
+    // 9. Invoke complete.
+    let req = make_cassette_completion_request("gpt-4o-mini");
+    let result = dyn_llm.complete(req).await;
+
+    // 10. Assert response matches cassette.
+    let resp = result.expect("openai complete via cassette must succeed");
+    assert_eq!(
+        resp.text, "Hi there",
+        "expected cassette response 'Hi there'; got: {:?}",
+        resp.text
+    );
+
+    let received = cassette_server.received_requests();
+    assert_eq!(
+        received.len(),
+        1,
+        "cassette server should have received exactly 1 request; got: {}",
+        received.len()
+    );
 }
