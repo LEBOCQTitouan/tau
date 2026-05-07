@@ -18,9 +18,8 @@ fn main() -> std::io::Result<()> {
     use std::process::Command;
 
     let args: Vec<String> = std::env::args().collect();
-    let parsed = parse_args(&args).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("args: {e}"))
-    })?;
+    let parsed = parse_args(&args)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("args: {e}")))?;
 
     bring_lo_up()?;
 
@@ -155,10 +154,7 @@ fn run_bridge_loop(listener: std::net::TcpListener, proxy_sock: &std::path::Path
 }
 
 #[cfg(target_os = "linux")]
-fn splice_bidirectional(
-    tcp: std::net::TcpStream,
-    unix: std::os::unix::net::UnixStream,
-) {
+fn splice_bidirectional(tcp: std::net::TcpStream, unix: std::os::unix::net::UnixStream) {
     let tcp_clone = match tcp.try_clone() {
         Ok(c) => c,
         Err(_) => return,

@@ -15,11 +15,11 @@
 //! Pass-through mode only — proxy does NOT terminate TLS. Plugin's TLS
 //! handshake goes end-to-end with the real remote server.
 
-mod validate;
 mod connect;
+mod validate;
 
+pub use connect::{parse_connect_request, peek_sni, ConnectRequest};
 pub use validate::{validate_hosts, ValidationError};
-pub use connect::{ConnectRequest, parse_connect_request, peek_sni};
 
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -101,16 +101,22 @@ async fn handle_connection(
     let req = match parse_connect_request(&buf[..n]) {
         Ok(r) => r,
         Err(_) => {
-            plugin_sock.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await?;
+            plugin_sock
+                .write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+                .await?;
             return Ok(());
         }
     };
     if !allowed_hosts.iter().any(|h| h == &req.host) {
-        plugin_sock.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n").await?;
+        plugin_sock
+            .write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n")
+            .await?;
         return Ok(());
     }
     if req.port != 443 {
-        plugin_sock.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await?;
+        plugin_sock
+            .write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+            .await?;
         return Ok(());
     }
     let mut remote = TcpStream::connect((req.host.as_str(), req.port)).await?;
@@ -128,9 +134,7 @@ async fn handle_connection(
             )));
         }
     } else {
-        return Err(std::io::Error::other(
-            "missing SNI in TLS ClientHello",
-        ));
+        return Err(std::io::Error::other("missing SNI in TLS ClientHello"));
     }
     // Forward the peeked bytes onward, then splice
     remote.write_all(&peek_buf[..n]).await?;
@@ -177,7 +181,9 @@ mod proxy_lifecycle_tests {
     async fn malformed_request_returns_400() {
         let h = spawn_proxy(vec!["example.com".to_string()]).expect("spawn");
         let mut conn = UnixStream::connect(h.sock_path()).await.expect("connect");
-        conn.write_all(b"GET / HTTP/1.1\r\n\r\n").await.expect("write");
+        conn.write_all(b"GET / HTTP/1.1\r\n\r\n")
+            .await
+            .expect("write");
         let mut resp = [0u8; 256];
         let n = conn.read(&mut resp).await.expect("read");
         let s = std::str::from_utf8(&resp[..n]).expect("utf8");

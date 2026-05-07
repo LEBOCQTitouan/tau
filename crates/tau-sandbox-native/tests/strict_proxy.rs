@@ -131,11 +131,7 @@ async fn proxy_handle_drop_cleans_up_temp_socket() {
     let proxy_files_before: Vec<_> = std::fs::read_dir(&temp_dir)
         .expect("read temp dir")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with("tau-proxy-")
-        })
+        .filter(|e| e.file_name().to_string_lossy().starts_with("tau-proxy-"))
         .collect();
     assert!(
         !proxy_files_before.is_empty(),
@@ -150,22 +146,12 @@ async fn proxy_handle_drop_cleans_up_temp_socket() {
     let proxy_files_after: Vec<_> = std::fs::read_dir(&temp_dir)
         .expect("read temp dir")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with("tau-proxy-")
-        })
+        .filter(|e| e.file_name().to_string_lossy().starts_with("tau-proxy-"))
         .collect();
 
     // Every socket that existed before must be gone.
-    let names_before: Vec<_> = proxy_files_before
-        .iter()
-        .map(|e| e.file_name())
-        .collect();
-    let names_after: Vec<_> = proxy_files_after
-        .iter()
-        .map(|e| e.file_name())
-        .collect();
+    let names_before: Vec<_> = proxy_files_before.iter().map(|e| e.file_name()).collect();
+    let names_after: Vec<_> = proxy_files_after.iter().map(|e| e.file_name()).collect();
     for name in &names_before {
         assert!(
             !names_after.contains(name),

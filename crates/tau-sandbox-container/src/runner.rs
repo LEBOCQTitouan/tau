@@ -85,9 +85,10 @@ pub(crate) fn wrap_command(
         .collect();
 
     // Determine if the plan requests outbound HTTP.
-    let has_network_http = plan.capabilities.iter().any(|c| {
-        matches!(c, Capability::Network(NetCapability::Http { .. }))
-    });
+    let has_network_http = plan
+        .capabilities
+        .iter()
+        .any(|c| matches!(c, Capability::Network(NetCapability::Http { .. })));
 
     // For Network(Http): spawn the userspace proxy, collect proxy config.
     let (proxy_handle, proxy_config) = if has_network_http {
@@ -112,8 +113,8 @@ pub(crate) fn wrap_command(
         let sock_path = handle.sock_path().to_path_buf();
 
         // Resolve bridge binary path: runtime env var, default to PATH lookup.
-        let bridge_path = std::env::var("TAU_NET_BRIDGE_PATH")
-            .unwrap_or_else(|_| "tau-net-bridge".to_string());
+        let bridge_path =
+            std::env::var("TAU_NET_BRIDGE_PATH").unwrap_or_else(|_| "tau-net-bridge".to_string());
 
         let config = ProxyConfig {
             sock_path,
@@ -398,7 +399,14 @@ mod tests {
     fn original_program_and_args_at_end() {
         let plan = plan_from(json!([]));
         let args: Vec<String> = vec!["hello".into(), "world".into()];
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &args, &[], None);
+        let argv = build_run_args(
+            &plan,
+            ResolvedRuntime::Docker,
+            "/bin/echo",
+            &args,
+            &[],
+            None,
+        );
         assert_eq!(argv[argv.len() - 3], "/bin/echo");
         assert_eq!(argv[argv.len() - 2], "hello");
         assert_eq!(argv[argv.len() - 1], "world");
@@ -422,8 +430,10 @@ mod tests {
         // Both runtimes should produce identical argv (the binary is set
         // outside build_run_args).
         let plan = plan_from(json!([]));
-        let docker_argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/true", &[], &[], None);
-        let podman_argv = build_run_args(&plan, ResolvedRuntime::Podman, "/bin/true", &[], &[], None);
+        let docker_argv =
+            build_run_args(&plan, ResolvedRuntime::Docker, "/bin/true", &[], &[], None);
+        let podman_argv =
+            build_run_args(&plan, ResolvedRuntime::Podman, "/bin/true", &[], &[], None);
         assert_eq!(docker_argv, podman_argv);
     }
 
@@ -469,7 +479,14 @@ mod tests {
     fn tau_env_vars_forwarded() {
         let plan = plan_from(json!([]));
         let envs = vec![("TAU_FOO".to_string(), "bar".to_string())];
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &envs, None);
+        let argv = build_run_args(
+            &plan,
+            ResolvedRuntime::Docker,
+            "/bin/echo",
+            &[],
+            &envs,
+            None,
+        );
         let pos = argv
             .iter()
             .position(|a| a == "-e")
@@ -499,7 +516,14 @@ mod tests {
     fn rust_log_env_var_forwarded() {
         let plan = plan_from(json!([]));
         let envs = vec![("RUST_LOG".to_string(), "trace".to_string())];
-        let argv = build_run_args(&plan, ResolvedRuntime::Docker, "/bin/echo", &[], &envs, None);
+        let argv = build_run_args(
+            &plan,
+            ResolvedRuntime::Docker,
+            "/bin/echo",
+            &[],
+            &envs,
+            None,
+        );
         let pos = argv
             .iter()
             .position(|a| a == "-e")
@@ -528,13 +552,13 @@ mod tests {
         );
         // HTTPS_PROXY env must be present.
         assert!(
-            argv.iter().any(|a| a == "HTTPS_PROXY=http://127.0.0.1:8443"),
+            argv.iter()
+                .any(|a| a == "HTTPS_PROXY=http://127.0.0.1:8443"),
             "expected HTTPS_PROXY in argv: {argv:?}"
         );
         // Proxy socket bind-mount must be present.
         assert!(
-            argv.iter()
-                .any(|a| a.contains("/run/tau-proxy.sock")),
+            argv.iter().any(|a| a.contains("/run/tau-proxy.sock")),
             "expected proxy socket mount in argv: {argv:?}"
         );
         // Bridge binary bind-mount must be present.

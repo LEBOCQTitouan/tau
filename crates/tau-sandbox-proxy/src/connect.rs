@@ -30,17 +30,15 @@ pub fn parse_connect_request(buf: &[u8]) -> Result<ConnectRequest, ParseError> {
         .iter()
         .position(|&b| b == b'\r' || b == b'\n')
         .ok_or(ParseError::Malformed("no CRLF"))?;
-    let line = std::str::from_utf8(&buf[..line_end])
-        .map_err(|_| ParseError::Malformed("non-utf8"))?;
+    let line =
+        std::str::from_utf8(&buf[..line_end]).map_err(|_| ParseError::Malformed("non-utf8"))?;
     let mut parts = line.split_whitespace();
     let method = parts.next().ok_or(ParseError::Malformed("empty"))?;
     if method != "CONNECT" {
         return Err(ParseError::NonConnect);
     }
     let target = parts.next().ok_or(ParseError::Malformed("no target"))?;
-    let (host, port) = target
-        .rsplit_once(':')
-        .ok_or(ParseError::MissingPort)?;
+    let (host, port) = target.rsplit_once(':').ok_or(ParseError::MissingPort)?;
     let port: u16 = port.parse().map_err(|_| ParseError::MissingPort)?;
     Ok(ConnectRequest {
         host: host.to_string(),

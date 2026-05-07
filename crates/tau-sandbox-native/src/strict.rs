@@ -377,9 +377,10 @@ pub(crate) fn apply_strict(
         })?;
 
         // Spawn the proxy task in the parent's tokio runtime.
-        let handle = tau_sandbox_proxy::spawn_proxy(allowed_hosts).map_err(|e| SandboxError::Proxy {
-            message: format!("spawn_proxy: {e}"),
-        })?;
+        let handle =
+            tau_sandbox_proxy::spawn_proxy(allowed_hosts).map_err(|e| SandboxError::Proxy {
+                message: format!("spawn_proxy: {e}"),
+            })?;
         let proxy_sock_path = handle.sock_path().to_path_buf();
 
         // Grant the child read+write access to the proxy socket via landlock.

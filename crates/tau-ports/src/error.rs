@@ -468,9 +468,6 @@ mod tests {
         let e = SandboxError::Proxy {
             message: "proxy task spawn failed".to_string(),
         };
-        assert_eq!(
-            format!("{e}"),
-            "sandbox proxy: proxy task spawn failed"
-        );
+        assert_eq!(format!("{e}"), "sandbox proxy: proxy task spawn failed");
     }
 }
