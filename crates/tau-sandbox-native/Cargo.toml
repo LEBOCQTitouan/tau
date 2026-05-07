@@ -23,6 +23,8 @@ landlock    = { workspace = true }
 libc        = { workspace = true }
 nix         = { workspace = true }
 seccompiler = { workspace = true }
+rtnetlink   = "0.14"
+futures     = "0.3"
 
 [dev-dependencies]
 insta      = "1"
@@ -37,3 +39,7 @@ default = []
 # Gated by `cargo test --features integration-tests` for tests that
 # actually invoke landlock/seccomp on the host kernel.
 integration-tests = []
+
+[[bin]]
+name = "tau-net-bridge"
+path = "src/bin/tau-net-bridge.rs"
