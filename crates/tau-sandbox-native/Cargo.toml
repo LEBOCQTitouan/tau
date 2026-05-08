@@ -9,13 +9,14 @@ authors.workspace = true
 description = "Linux native sandbox adapter (landlock + seccomp + namespaces) for tau"
 
 [dependencies]
-tau-domain = { workspace = true, features = ["serde"] }
-tau-ports  = { workspace = true, features = ["serde"] }
-tracing    = { workspace = true }
+tau-domain          = { workspace = true, features = ["serde"] }
+tau-ports           = { workspace = true, features = ["serde"] }
+tau-sandbox-proxy   = { workspace = true }
+tracing             = { workspace = true }
 # `net` feature required by net_filter::resolve (tokio::net::lookup_host) —
 # sub-project F. `rt` is needed because async fns inside the crate are
 # polled by the runtime crate's executor.
-tokio      = { workspace = true, features = ["net", "rt"] }
+tokio      = { workspace = true, features = ["net", "rt", "io-util", "time"] }
 thiserror  = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -23,12 +24,14 @@ landlock    = { workspace = true }
 libc        = { workspace = true }
 nix         = { workspace = true }
 seccompiler = { workspace = true }
+rtnetlink   = "0.14"
+futures     = "0.3"
 
 [dev-dependencies]
 insta      = "1"
 serde_json = "1"
 tempfile   = { workspace = true }
-tokio      = { workspace = true, features = ["macros", "rt"] }
+tokio      = { workspace = true, features = ["macros", "rt", "io-util", "time"] }
 tau-domain = { workspace = true, features = ["serde", "test-fixtures"] }
 tau-ports  = { workspace = true, features = ["serde", "test-fixtures"] }
 
@@ -37,3 +40,7 @@ default = []
 # Gated by `cargo test --features integration-tests` for tests that
 # actually invoke landlock/seccomp on the host kernel.
 integration-tests = []
+
+[[bin]]
+name = "tau-net-bridge"
+path = "src/bin/tau-net-bridge.rs"

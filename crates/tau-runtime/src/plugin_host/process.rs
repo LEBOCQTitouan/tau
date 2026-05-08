@@ -226,7 +226,7 @@ impl PluginProcess {
         // Order is deliberate: validate_plan_against_adapter (Layer 3)
         // runs BEFORE wrap_spawn (Layer 4) so a bad plan never reaches
         // the adapter.
-        let mut sandbox_handle: Option<SandboxHandle> = if let Some((plan, adapter)) = sandbox {
+        let sandbox_handle: Option<SandboxHandle> = if let Some((plan, adapter)) = sandbox {
             // Layer 3: cross-check plan capabilities against adapter shapes.
             validate_plan_against_adapter(&plugin_name, plan, adapter).map_err(
                 |errors: Vec<SandboxValidationError>| RuntimeError::SandboxValidationFailed {
@@ -256,42 +256,6 @@ impl PluginProcess {
                 plugin: plugin_name.clone(),
                 source,
             })?;
-
-        // Post-spawn sandbox configuration (per-host network filtering for
-        // strict tier). Runs while child is blocked on the sync-pipe between
-        // unshare and seccomp.
-        //
-        // For Mock / Container / Passthrough adapters apply_post_spawn is the
-        // trait's default no-op, and their handles have no sync_write_fd, so
-        // signal_post_spawn_complete is also a no-op.
-        //
-        // On failure: dropping handle closes sync_write_fd, which the child
-        // reads as EOF in pre_exec and exits with an error. All three failure
-        // modes map to RuntimeError::SandboxWrapFailed so callers can match
-        // uniformly.
-        if let (Some((plan, adapter)), Some(ref mut handle)) = (sandbox, sandbox_handle.as_mut()) {
-            let child_pid: i32 = child.id().ok_or_else(|| RuntimeError::SandboxWrapFailed {
-                plugin: plugin_name.clone(),
-                source: tau_ports::SandboxError::Internal {
-                    message: "child exited before apply_post_spawn (id() returned None)".to_owned(),
-                },
-            })? as i32;
-            adapter
-                .apply_post_spawn(plan, child_pid, handle)
-                .await
-                .map_err(|source| RuntimeError::SandboxWrapFailed {
-                    plugin: plugin_name.clone(),
-                    source,
-                })?;
-            handle
-                .signal_post_spawn_complete()
-                .map_err(|e| RuntimeError::SandboxWrapFailed {
-                    plugin: plugin_name.clone(),
-                    source: tau_ports::SandboxError::Internal {
-                        message: format!("signal_post_spawn_complete failed: {e}"),
-                    },
-                })?;
-        }
 
         let stdin = child
             .stdin

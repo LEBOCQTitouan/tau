@@ -194,10 +194,11 @@ pub enum SandboxError {
         /// Identifier of the limit that was exceeded.
         limit: String,
     },
-    /// Per-host network filter failed to set up or apply (sub-project F).
-    /// The wrapped message includes the underlying NetFilterError.
-    #[error("sandbox network filter: {message}")]
-    NetFilter {
+    /// Sandbox proxy failed to set up or relay a connection.
+    /// Includes proxy task spawn errors, allow-list violations surfaced
+    /// from the bridge, etc.
+    #[error("sandbox proxy: {message}")]
+    Proxy {
         /// Free-form message including the failure context.
         message: String,
     },
@@ -463,13 +464,10 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_error_net_filter_renders() {
-        let e = SandboxError::NetFilter {
-            message: "nftables binary missing".to_string(),
+    fn sandbox_error_proxy_renders() {
+        let e = SandboxError::Proxy {
+            message: "proxy task spawn failed".to_string(),
         };
-        assert_eq!(
-            format!("{e}"),
-            "sandbox network filter: nftables binary missing"
-        );
+        assert_eq!(format!("{e}"), "sandbox proxy: proxy task spawn failed");
     }
 }
