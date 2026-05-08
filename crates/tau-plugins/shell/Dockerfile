@@ -8,8 +8,7 @@ WORKDIR /workspace
 COPY rust-toolchain.toml ./
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-# T4 will add the `xtask` workspace member; uncomment then.
-# COPY xtask ./xtask
+COPY xtask ./xtask
 
 RUN cargo build --release -p shell --bin shell-plugin
 

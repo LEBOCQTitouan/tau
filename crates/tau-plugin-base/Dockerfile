@@ -12,8 +12,7 @@ COPY rust-toolchain.toml ./
 # We pull in workspace metadata + the source crates the bridge depends on.
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-# T4 will add the `xtask` workspace member; uncomment then.
-# COPY xtask ./xtask
+COPY xtask ./xtask
 
 RUN cargo build --release -p tau-sandbox-native --bin tau-net-bridge
 

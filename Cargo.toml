@@ -24,6 +24,7 @@ members = [
     "crates/tau-sandbox-container",
     "crates/tau-sandbox-native",
     "crates/tau-sandbox-proxy",
+    "xtask",
 ]
 exclude = [
     "crates/tau-plugin-compat/fixtures/controlled-env-binary",
