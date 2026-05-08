@@ -137,11 +137,6 @@ pub(crate) fn wrap_command(
         proxy_config.as_ref(),
     );
 
-    // T-DIAG: temporary CI diagnostic — log the full docker run argv so we
-    // can inspect what's reaching docker on Linux runners. Remove after
-    // sub-project I lands.
-    eprintln!("[tau-sandbox-container DIAG] {} {}", runtime.binary(), argv.join(" "));
-
     // Replace cmd in-place: clear via re-assignment, then build new argv.
     *cmd = Command::new(runtime.binary());
     for arg in &argv {
