@@ -52,16 +52,143 @@ host-path bind-mount and replacing it with a per-plugin image — and uses the
 investigation as a forcing function to lay the foundation for the per-plugin
 container image roadmap (Phases 1–4 below).
 
-## Investigation (filled in by T1)
+## Investigation
 
-> **Placeholder.** T1 (the debug session) writes its findings here before any
-> implementation code is committed. If the findings refute the hypothesis,
-> the rest of the spec is revised before T2 starts.
->
-> Expected to capture: exact `docker run` argv that failed; container stderr
-> / `docker logs`; the actual error message from the failed exec; whether the
-> root cause is missing-binary, libc mismatch, stdio plumbing, fork
-> semantics, or something else.
+**Date:** 2026-05-08
+**Host:** macOS Apple Silicon (darwin-arm64), Podman 5.8.2
+**Image used:** debian:bookworm-slim — `ghcr.io/tau-runtime/sandbox-base:v0.1` pull failed
+with HTTP 403 (image does not exist / not published). `debian:bookworm-slim` is the
+correct substitute per the spec's Locked Decision 6 (Debian-slim base).
+
+**Hypothesis tested.** "EOF before handshake" in the 5 `#[ignore]`'d Container-adapter
+tests is caused structurally: `docker run <image> <host-path>` fails when `<host-path>`
+does not exist inside the container's filesystem. The plugin host reads EOF on stdin
+because the plugin process never started.
+
+**Caveat — arch mismatch on macOS.** `target/release/*-plugin` binaries on this host
+are darwin-arm64 Mach-O (`file target/release/shell-plugin` → `Mach-O 64-bit executable arm64`).
+They cannot run inside Linux containers even if bind-mounted at a path that exists inside
+the container ("exec format error" instead of "no such file"). This is a separate
+confounding factor from the bug being investigated. To isolate the structural path-missing
+failure, Negative control 1 demonstrates the direct path-not-found error (host path not
+visible inside container), and Negative control 2 uses a definitely-non-existent path
+to confirm the same failure mode independently of arch.
+
+**Evidence.**
+
+### Negative control 1: macOS host binary path passed to `podman run`
+
+Command:
+
+    podman run --rm -i \
+      --user nobody \
+      --cap-drop=ALL \
+      --security-opt=no-new-privileges \
+      --read-only \
+      --pids-limit 256 \
+      --ipc=none \
+      --tmpfs /tmp:size=64m \
+      --network none \
+      debian:bookworm-slim \
+      /Users/titouanlebocq/code/tau/target/release/shell-plugin \
+      </dev/null
+
+Output (verbatim):
+
+    Error: preparing container 86b381fa4faadbbd4bf5b1c57f7a0b552d24ae24d874f45f7f532324a391f608 for attach: crun: executable file `/Users/titouanlebocq/code/tau/target/release/shell-plugin` not found: No such file or directory: OCI runtime attempted to invoke a command that was not found
+
+Conclusion: exec failed as expected — the host path `/Users/.../shell-plugin` is not
+present inside the container's filesystem. The OCI runtime (crun) reports "No such file
+or directory" before any plugin code could run. This is the exact mechanism that produces
+EOF on stdin in the plugin host.
+
+### Negative control 2: definitely-non-existent path passed to `podman run`
+
+Command:
+
+    podman run --rm -i \
+      --user nobody \
+      --cap-drop=ALL \
+      --security-opt=no-new-privileges \
+      --read-only \
+      --pids-limit 256 \
+      --ipc=none \
+      --tmpfs /tmp:size=64m \
+      --network none \
+      debian:bookworm-slim \
+      /tmp/this-path-definitely-does-not-exist-12345 \
+      </dev/null
+
+Output (verbatim):
+
+    Error: preparing container 92b8dbb30874888c47d8b1c964d06f45c8e8abd11bc5fae33cb79a5e66bf8c1b for attach: crun: executable file `/tmp/this-path-definitely-does-not-exist-12345` not found: No such file or directory: OCI runtime attempted to invoke a command that was not found
+
+Conclusion: confirms the structural failure mode — when the program path doesn't exist
+inside the container, `podman run` / `docker run` fails before any plugin code runs.
+Same mechanism as the CI bug: the Linux runner's `target/release/shell-plugin` host
+path doesn't exist inside the Linux container either.
+
+### Positive control: path that exists inside the container's image
+
+Command:
+
+    podman run --rm -i \
+      --user nobody \
+      --cap-drop=ALL \
+      --security-opt=no-new-privileges \
+      --read-only \
+      --pids-limit 256 \
+      --ipc=none \
+      --tmpfs /tmp:size=64m \
+      --network none \
+      debian:bookworm-slim \
+      /bin/echo "exec works when path exists in container" \
+      </dev/null
+
+Output (verbatim):
+
+    exec works when path exists in container
+
+Conclusion: confirms `docker run <image> <path>` works when `<path>` is reachable inside
+the container. The fix shape — bake the plugin binary into the image at a known
+in-container path (`/usr/local/bin/<name>`) — directly addresses the negative control.
+
+### Code-path confirmation: `tau-sandbox-container::runner::wrap_command`
+
+`crates/tau-sandbox-container/src/runner.rs:67` captures the host program path via
+`cmd.get_program()`:
+
+    let original_program = cmd.get_program().to_string_lossy().into_owned();
+
+This is the runtime's host path (e.g. `target/release/shell-plugin` or an absolute path
+on the runner). At line 144–151, `build_run_args` receives `&original_program`. At lines
+277–284, `build_run_args` appends `DEFAULT_BASE_IMAGE` and then `program` (the host path)
+as the container's program argument:
+
+    argv.push(DEFAULT_BASE_IMAGE.into());
+    // ... (bridge wrapping for HTTP plans omitted) ...
+    argv.push(program.into());  // ← the host path, exec'd inside the container
+
+For HTTP plans (`proxy.is_some()`), the bridge wrapping at lines 279–283 wraps the host
+path as the argument to `tau-net-bridge ... --`, but the same host path is still passed
+as the program to exec inside the container. Bridge wrapping is one fork deeper, but the
+same missing-path root cause applies.
+
+**Hypothesis status: CONFIRMED.**
+
+The 5 `#[ignore]`'d Container-adapter tests fail because `docker run` is asked to exec
+a host path that doesn't exist inside the container. The OCI runtime errors immediately
+("No such file or directory"), the plugin process never starts, the plugin host reads EOF
+on stdin, and the handshake times out. Bridge wrapping (HTTP plans) and the proxy
+machinery (sub-project H) are red herrings — the same root cause affects non-HTTP plans
+too (sub-project D's `shell` and `fs-read` tests have the identical symptom).
+
+**Implications for the design.**
+
+The spec's plan (per-plugin images with the binary baked at `/usr/local/bin/<name>`)
+directly addresses the root cause. No design changes needed. T2-T6 implement the fix.
+
+**Sign-off:** ready to proceed to T2.
 
 ## Locked decisions
 
