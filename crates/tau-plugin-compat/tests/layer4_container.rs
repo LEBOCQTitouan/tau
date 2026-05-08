@@ -79,6 +79,29 @@ fn require_docker() -> Result<(), String> {
     Ok(())
 }
 
+/// Skip the test gracefully if the per-plugin image isn't built locally.
+///
+/// Returns `true` if the image is present, `false` (with an eprintln SKIP
+/// message) if not. Tests should early-return when this returns `false`.
+fn image_present_or_skip(bin_name: &str) -> bool {
+    let tag = format!("tau-plugin-{bin_name}:dev");
+    // Probe podman first, then docker (matching ContainerRuntime::Auto).
+    for runtime in ["podman", "docker"] {
+        let out = std::process::Command::new(runtime)
+            .args(["image", "inspect", &tag])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if matches!(out, Ok(s) if s.success()) {
+            return true;
+        }
+    }
+    eprintln!(
+        "SKIP: {tag} not present locally; run `cargo xtask build-plugin-images --name {bin_name}` first"
+    );
+    false
+}
+
 /// Locate the pre-built plugin binary.
 ///
 /// Resolution order mirrors `layer4_native.rs`:
@@ -248,11 +271,13 @@ fn base64_encode(input: &[u8]) -> String {
 /// Skips cleanly if Docker is not available or container adapter probe
 /// returns Unavailable.
 #[tokio::test]
-#[ignore = "Container adapter spawns plugin but plugin closes stdout before handshake (PluginHandshakeFailed: EOF before handshake response). Container's docker-run + binary-mount plumbing needs investigation; tool plugins under native (Task 5) work cleanly. Defer to a sub-project D follow-up or sub-project F."]
 async fn shell_layer4_container_runs_echo_hello() {
     // 1. Require Docker — without a running daemon, Container adapter is a no-op.
     if let Err(reason) = require_docker() {
         eprintln!("SKIP: {reason}");
+        return;
+    }
+    if !image_present_or_skip("shell-plugin") {
         return;
     }
 
@@ -340,11 +365,13 @@ async fn shell_layer4_container_runs_echo_hello() {
 /// Skips cleanly if Docker is not available or container adapter probe
 /// returns Unavailable.
 #[tokio::test]
-#[ignore = "Container adapter spawns plugin but plugin closes stdout before handshake (PluginHandshakeFailed: EOF before handshake response). Container's docker-run + binary-mount plumbing needs investigation; tool plugins under native (Task 5) work cleanly. Defer to a sub-project D follow-up or sub-project F."]
 async fn fs_read_layer4_container_reads_data_file() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
         eprintln!("SKIP: {reason}");
+        return;
+    }
+    if !image_present_or_skip("fs-read-plugin") {
         return;
     }
 
@@ -462,14 +489,13 @@ async fn fs_read_layer4_container_reads_data_file() {
 ///
 /// Skips if: (a) Docker not available, (b) anthropic-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project H follow-up: PluginHandshakeFailed 'EOF before handshake response' \
-            when the bridge wraps the plugin entrypoint inside Docker. Strict-tier proxy \
-            passes (strict_proxy integration tests); only Container-adapter wrapping fails. \
-            Needs interactive Linux debugging session — see sandboxing-followups.md gap row."]
 async fn anthropic_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
         eprintln!("SKIP: {reason}");
+        return;
+    }
+    if !image_present_or_skip("anthropic-plugin") {
         return;
     }
 
@@ -564,12 +590,13 @@ async fn anthropic_layer4_container_completes_via_cassette() {
 ///
 /// Skips if: (a) Docker not available, (b) ollama-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project H follow-up: same as anthropic_layer4_container_completes_via_cassette — \
-            Container-adapter bridge wrapping fails with 'EOF before handshake response'."]
 async fn ollama_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
         eprintln!("SKIP: {reason}");
+        return;
+    }
+    if !image_present_or_skip("ollama-plugin") {
         return;
     }
 
@@ -655,12 +682,13 @@ async fn ollama_layer4_container_completes_via_cassette() {
 ///
 /// Skips if: (a) Docker not available, (b) openai-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project H follow-up: same as anthropic_layer4_container_completes_via_cassette — \
-            Container-adapter bridge wrapping fails with 'EOF before handshake response'."]
 async fn openai_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
         eprintln!("SKIP: {reason}");
+        return;
+    }
+    if !image_present_or_skip("openai-plugin") {
         return;
     }
 
