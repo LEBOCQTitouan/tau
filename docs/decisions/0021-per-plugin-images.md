@@ -53,40 +53,50 @@ This is **Phase 1** of a four-phase roadmap:
 
 ## Tests closed by this ADR
 
-All 5 originally-`#[ignore]`'d Container-adapter integration tests in
-`crates/tau-plugin-compat/tests/layer4_container.rs` are closed:
+Of the 5 originally-`#[ignore]`'d Container-adapter integration tests in
+`crates/tau-plugin-compat/tests/layer4_container.rs`, **2 close** via this
+ADR; **3 are deferred to sub-project J**:
 
-- `shell_layer4_container_runs_echo_hello`
-- `fs_read_layer4_container_reads_data_file`
-- `anthropic_layer4_container_completes_via_cassette`
-- `ollama_layer4_container_completes_via_cassette`
-- `openai_layer4_container_completes_via_cassette`
+| Test | Status |
+|---|---|
+| `shell_layer4_container_runs_echo_hello` | ✅ closes |
+| `fs_read_layer4_container_reads_data_file` | ✅ closes |
+| `anthropic_layer4_container_completes_via_cassette` | 🔄 sub-project J |
+| `ollama_layer4_container_completes_via_cassette` | 🔄 sub-project J |
+| `openai_layer4_container_completes_via_cassette` | 🔄 sub-project J |
 
-The 2 non-HTTP tests (`shell`, `fs-read`) close cleanly via the
-per-plugin-image fix alone — the plugin binary now lives at a known
-in-image path and exec succeeds.
+The 2 non-HTTP tests close cleanly via the per-plugin-image fix alone —
+the plugin binary now lives at a known in-image path and exec succeeds.
 
-The 3 HTTP cassette tests required two additional changes layered on top:
+This PR also ships the **groundwork** for closing the remaining 3 HTTP
+cassette tests, but doesn't get them green in CI:
 
 1. **Plain-HTTP forwarding in `tau-sandbox-proxy`** — the existing CONNECT
    path is HTTPS-only; cassette servers speak plain HTTP. The proxy now
    detects the first request line and dispatches CONNECT or HTTP. The
    HTTP path validates the `Host` against the allowlist, opens TCP, and
    rewrites the request line to RFC 7230 origin-form before splicing.
+   This is a real production-relevant improvement — plugins talking to
+   local services (Ollama, etc.) now route through the proxy with
+   allowlist enforcement, not just HTTPS.
 
 2. **`--add-host=host.docker.internal:host-gateway` + URL rewrite in
    tests** — Docker `--network bridge` does NOT route container
    `127.0.0.1` to the host's `127.0.0.1` (Podman's slirp4netns does, but
-   relying on that means the test bypasses the proxy entirely). The
-   stable cross-runtime hostname `host.docker.internal` (Docker 20.10+,
-   Podman 4.7+) resolves to the bridge gateway via the magic
-   `host-gateway` value. Tests rewrite the cassette URL from
-   `http://127.0.0.1:<port>` to `http://host.docker.internal:<port>` and
-   include `host.docker.internal` in the plugin's HTTP allowlist.
+   relying on that means the test bypasses the proxy entirely).
 
-The plain-HTTP proxy support is the production-relevant change — plugins
-talking to local services (Ollama, etc.) now route through the proxy
-even for plain HTTP, with allowlist enforcement.
+The 3 HTTP cassette tests pass on macOS Apple Silicon Podman locally
+(via slirp4netns — for the wrong reason) but fail in CI on Linux Docker
+`--network bridge` despite both fixes above. Sub-project J needs an
+interactive Linux Docker debug session to figure out why
+`host.docker.internal` is not reaching the cassette server (DNS, iptables,
+or some bridge config detail that the local-Podman-via-Apple-Virtualization
+path masks).
+
+This PR also ships the development tooling that will make sub-project J
+faster: `scripts/test-linux-integration.sh` (Linux Podman + DooD via
+socket bind-mount, gives a closer-to-CI environment for debugging) and
+the lefthook pre-push gate from PR #42.
 
 See `docs/superpowers/specs/2026-05-08-per-plugin-images-design.md` for the
 full design including locked decisions 1-8 and Phase 1 risks.
