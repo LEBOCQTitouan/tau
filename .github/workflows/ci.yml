@@ -285,6 +285,11 @@ jobs:
       - name: Build per-plugin images (sub-project I)
         run: cargo run -p xtask -- build-plugin-images
         env:
+          # GHA Linux runners ship both podman and docker. xtask's auto-probe
+          # picks podman first, but BUILDX_CACHE_* directives are buildx-
+          # specific (podman rejects type=gha). Force docker so buildx cache
+          # works.
+          TAU_CONTAINER_RUNTIME: docker
           BUILDX_CACHE_FROM: type=gha
           BUILDX_CACHE_TO: type=gha,mode=max
           BUILDKIT_PROGRESS: plain

@@ -73,6 +73,19 @@ fn main() -> Result<()> {
 /// Probe `podman` first, then `docker`. Mirrors PR #40's
 /// `ContainerRuntime::Auto` ordering.
 fn detect_runtime() -> Result<String> {
+    // Honor explicit override first. CI sets TAU_CONTAINER_RUNTIME=docker
+    // because GHA Linux runners ship both podman and docker, and the
+    // BUILDX_CACHE_FROM/TO `type=gha` directive is buildx-specific (podman
+    // rejects it). Local dev leaves the env unset → probe order applies.
+    if let Ok(forced) = std::env::var("TAU_CONTAINER_RUNTIME") {
+        let forced = forced.trim();
+        if !forced.is_empty() {
+            if probe_one(forced) {
+                return Ok(forced.to_string());
+            }
+            bail!("TAU_CONTAINER_RUNTIME=`{forced}` is not on PATH or unresponsive");
+        }
+    }
     for bin in ["podman", "docker"] {
         if probe_one(bin) {
             return Ok(bin.to_string());
