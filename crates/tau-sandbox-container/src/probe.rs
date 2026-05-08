@@ -42,11 +42,28 @@ impl ResolvedRuntime {
 /// because it is daemonless, rootless-by-default, and Apache-2.0-licensed
 /// (no commercial-use restriction the way Docker Desktop has).
 ///
+/// **Env-var override.** When the caller passes [`ContainerRuntime::Auto`],
+/// the `TAU_CONTAINER_RUNTIME` env var (if set to `docker` or `podman`)
+/// pins the choice without probing. Explicit `Docker`/`Podman` selections
+/// from the caller are honored as-is and ignore the env var.
+///
+/// CI sets `TAU_CONTAINER_RUNTIME=docker` so plugin-compat tests use the
+/// same runtime as `cargo xtask build-plugin-images` did when constructing
+/// the per-plugin images, matching image storage.
+///
 /// **Note:** When the probe returns `Unavailable`, the `ResolvedRuntime`
 /// placeholder (`Podman`) must not be used — callers MUST check the
 /// `SandboxProbe` branch first.
 pub(crate) async fn run_probe(runtime: ContainerRuntime) -> (SandboxProbe, ResolvedRuntime) {
-    match runtime {
+    let effective = match runtime {
+        ContainerRuntime::Auto => match std::env::var("TAU_CONTAINER_RUNTIME").ok().as_deref() {
+            Some("docker") => ContainerRuntime::Docker,
+            Some("podman") => ContainerRuntime::Podman,
+            _ => ContainerRuntime::Auto,
+        },
+        other => other,
+    };
+    match effective {
         ContainerRuntime::Docker => (probe_one("docker").await, ResolvedRuntime::Docker),
         ContainerRuntime::Podman => (probe_one("podman").await, ResolvedRuntime::Podman),
         ContainerRuntime::Auto => match probe_one("podman").await {

@@ -242,6 +242,12 @@ jobs:
     name: test (tau-plugin-compat / linux)
     needs: build-fixtures-linux
     runs-on: ubuntu-latest
+    env:
+      # GHA Linux runners ship both podman and docker. The xtask + adapter
+      # probes both default to podman; pin to docker for the whole job so
+      # plugin-compat tests run against the same runtime that xtask used to
+      # build the images (image storage matches).
+      TAU_CONTAINER_RUNTIME: docker
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
@@ -278,6 +284,20 @@ jobs:
         # the 5 release plugin binaries still come from the artifact, which
         # is where the bulk of the time savings come from.
         run: cargo build -p tau-cli --bin tau
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+      - name: Build per-plugin images (sub-project I)
+        run: cargo run -p xtask -- build-plugin-images
+        env:
+          # TAU_CONTAINER_RUNTIME is set at the job level. BUILDX_CACHE_*
+          # are buildx-specific (docker buildx); xtask reads them and
+          # forwards as --cache-from / --cache-to to the build call.
+          BUILDX_CACHE_FROM: type=gha
+          BUILDX_CACHE_TO: type=gha,mode=max
+          BUILDKIT_PROGRESS: plain
+          DOCKER_BUILDKIT: "1"
       - name: Test tau-plugin-compat (integration-tests feature)
         run: cargo nextest run -p tau-plugin-compat --features integration-tests --tests --verbose
 

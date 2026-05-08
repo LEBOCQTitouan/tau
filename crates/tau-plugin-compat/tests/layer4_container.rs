@@ -79,6 +79,29 @@ fn require_docker() -> Result<(), String> {
     Ok(())
 }
 
+/// Skip the test gracefully if the per-plugin image isn't built locally.
+///
+/// Returns `true` if the image is present, `false` (with an eprintln SKIP
+/// message) if not. Tests should early-return when this returns `false`.
+fn image_present_or_skip(bin_name: &str) -> bool {
+    let tag = format!("tau-plugin-{bin_name}:dev");
+    // Probe podman first, then docker (matching ContainerRuntime::Auto).
+    for runtime in ["podman", "docker"] {
+        let out = std::process::Command::new(runtime)
+            .args(["image", "inspect", &tag])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if matches!(out, Ok(s) if s.success()) {
+            return true;
+        }
+    }
+    eprintln!(
+        "SKIP: {tag} not present locally; run `cargo xtask build-plugin-images --name {bin_name}` first"
+    );
+    false
+}
+
 /// Locate the pre-built plugin binary.
 ///
 /// Resolution order mirrors `layer4_native.rs`:
@@ -187,12 +210,37 @@ fn make_cassette_completion_request(model: &str) -> CompletionRequest {
 }
 
 /// Build the `net.http` capability that allows the plugin process to
-/// reach back to `127.0.0.1` (the in-process cassette server).
+/// reach the in-process cassette server running on the host.
 ///
-/// The proxy (T7 wiring) runs on the host and can connect to host loopback,
-/// so `127.0.0.1` is reachable from the container via the proxy bridge.
+/// `host.docker.internal` is the cross-runtime hostname (Docker since 20.10
+/// + Podman 4.7+) that the Container adapter wires up via
+/// `--add-host=host.docker.internal:host-gateway`. The plugin connects to
+/// `host.docker.internal:<port>`, which resolves to the bridge gateway
+/// (the host's view of the container network) — i.e. the host itself,
+/// where the cassette-replay server is bound.
+///
+/// `127.0.0.1` and `localhost` remain in the allowlist for symmetry with
+/// production usage where a local model server (Ollama, etc.) runs on
+/// loopback inside the container's own netns.
 fn make_net_http_localhost_cap() -> Capability {
-    domain_fixtures::cap_net_http(&["127.0.0.1", "localhost"], &["POST", "GET"])
+    domain_fixtures::cap_net_http(
+        &["127.0.0.1", "localhost", "host.docker.internal"],
+        &["POST", "GET"],
+    )
+}
+
+/// Rewrite a cassette-server URI from `127.0.0.1:<port>` to
+/// `host.docker.internal:<port>` so the plugin running inside a container
+/// can reach the test server bound on the host's loopback.
+///
+/// The cassette server (`tau_plugin_test_support::cassette::replay`) binds
+/// `0.0.0.0:<random>`, so it's reachable on any host-side address — but its
+/// `uri()` returns `http://127.0.0.1:<port>`. From inside a container with
+/// `--network bridge`, container-loopback is empty; we must dial the host
+/// gateway instead.
+fn rewrite_cassette_uri_for_container(uri: &str) -> String {
+    uri.replace("127.0.0.1", "host.docker.internal")
+        .replace("localhost", "host.docker.internal")
 }
 
 /// Minimal base64 encoding for the test fixture assertion.
@@ -248,11 +296,13 @@ fn base64_encode(input: &[u8]) -> String {
 /// Skips cleanly if Docker is not available or container adapter probe
 /// returns Unavailable.
 #[tokio::test]
-#[ignore = "Container adapter spawns plugin but plugin closes stdout before handshake (PluginHandshakeFailed: EOF before handshake response). Container's docker-run + binary-mount plumbing needs investigation; tool plugins under native (Task 5) work cleanly. Defer to a sub-project D follow-up or sub-project F."]
 async fn shell_layer4_container_runs_echo_hello() {
     // 1. Require Docker — without a running daemon, Container adapter is a no-op.
     if let Err(reason) = require_docker() {
         eprintln!("SKIP: {reason}");
+        return;
+    }
+    if !image_present_or_skip("shell-plugin") {
         return;
     }
 
@@ -340,11 +390,13 @@ async fn shell_layer4_container_runs_echo_hello() {
 /// Skips cleanly if Docker is not available or container adapter probe
 /// returns Unavailable.
 #[tokio::test]
-#[ignore = "Container adapter spawns plugin but plugin closes stdout before handshake (PluginHandshakeFailed: EOF before handshake response). Container's docker-run + binary-mount plumbing needs investigation; tool plugins under native (Task 5) work cleanly. Defer to a sub-project D follow-up or sub-project F."]
 async fn fs_read_layer4_container_reads_data_file() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
         eprintln!("SKIP: {reason}");
+        return;
+    }
+    if !image_present_or_skip("fs-read-plugin") {
         return;
     }
 
@@ -462,14 +514,21 @@ async fn fs_read_layer4_container_reads_data_file() {
 ///
 /// Skips if: (a) Docker not available, (b) anthropic-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project H follow-up: PluginHandshakeFailed 'EOF before handshake response' \
-            when the bridge wraps the plugin entrypoint inside Docker. Strict-tier proxy \
-            passes (strict_proxy integration tests); only Container-adapter wrapping fails. \
-            Needs interactive Linux debugging session — see sandboxing-followups.md gap row."]
+#[ignore = "sub-project J: passes on macOS Apple Silicon Podman (slirp4netns rootless \
+            networking lets container 127.0.0.1 reach host 127.0.0.1 directly, bypassing \
+            the proxy + add-host setup) but fails on Linux Docker --network bridge in CI \
+            despite --add-host=host.docker.internal:host-gateway and the plain-HTTP proxy \
+            extension. The image foundation, plain-HTTP proxy support, and host-gateway \
+            wiring all ship in this PR; sub-project J needs an interactive Linux Docker \
+            session to figure out why the request to host.docker.internal isn't reaching \
+            the cassette server (DNS? iptables? subtle bridge config?)."]
 async fn anthropic_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
         eprintln!("SKIP: {reason}");
+        return;
+    }
+    if !image_present_or_skip("anthropic-plugin") {
         return;
     }
 
@@ -497,7 +556,7 @@ async fn anthropic_layer4_container_completes_via_cassette() {
     let cassette_path = workspace_root()
         .join("crates/tau-plugins/anthropic/tests/cassettes/complete_happy_path.yaml");
     let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
-    let api_base = cassette_server.uri().to_string();
+    let api_base = rewrite_cassette_uri_for_container(&cassette_server.uri().to_string());
 
     // 5. Build the SandboxPlan with Network(Http) for localhost.
     //    The proxy validates and allows loopback addresses; T7's wrap_command
@@ -564,12 +623,15 @@ async fn anthropic_layer4_container_completes_via_cassette() {
 ///
 /// Skips if: (a) Docker not available, (b) ollama-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project H follow-up: same as anthropic_layer4_container_completes_via_cassette — \
-            Container-adapter bridge wrapping fails with 'EOF before handshake response'."]
+#[ignore = "sub-project J: same as anthropic — passes on macOS Podman, fails on Linux \
+            Docker. Container-networking semantics gap on Linux Docker bridge."]
 async fn ollama_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
         eprintln!("SKIP: {reason}");
+        return;
+    }
+    if !image_present_or_skip("ollama-plugin") {
         return;
     }
 
@@ -594,7 +656,7 @@ async fn ollama_layer4_container_completes_via_cassette() {
     let cassette_path =
         workspace_root().join("crates/tau-plugins/ollama/tests/cassettes/complete_happy_path.yaml");
     let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
-    let api_base = cassette_server.uri().to_string();
+    let api_base = rewrite_cassette_uri_for_container(&cassette_server.uri().to_string());
 
     // 5. Build the SandboxPlan with Network(Http) for localhost.
     let net_cap = make_net_http_localhost_cap();
@@ -655,12 +717,15 @@ async fn ollama_layer4_container_completes_via_cassette() {
 ///
 /// Skips if: (a) Docker not available, (b) openai-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project H follow-up: same as anthropic_layer4_container_completes_via_cassette — \
-            Container-adapter bridge wrapping fails with 'EOF before handshake response'."]
+#[ignore = "sub-project J: same as anthropic — passes on macOS Podman, fails on Linux \
+            Docker. Container-networking semantics gap on Linux Docker bridge."]
 async fn openai_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
         eprintln!("SKIP: {reason}");
+        return;
+    }
+    if !image_present_or_skip("openai-plugin") {
         return;
     }
 
@@ -685,7 +750,7 @@ async fn openai_layer4_container_completes_via_cassette() {
     let cassette_path =
         workspace_root().join("crates/tau-plugins/openai/tests/cassettes/complete_happy_path.yaml");
     let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
-    let api_base = cassette_server.uri().to_string();
+    let api_base = rewrite_cassette_uri_for_container(&cassette_server.uri().to_string());
 
     // 5. Build the SandboxPlan with Network(Http) for localhost.
     let net_cap = make_net_http_localhost_cap();
