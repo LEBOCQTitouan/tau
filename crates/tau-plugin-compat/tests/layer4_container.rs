@@ -489,12 +489,6 @@ async fn fs_read_layer4_container_reads_data_file() {
 ///
 /// Skips if: (a) Docker not available, (b) anthropic-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project I follow-up: HTTP-only cassette server vs CONNECT-only proxy. \
-            Plugin starts cleanly (image-based fix from sub-project I works) but reqwest \
-            does not route plain HTTP requests through HTTPS_PROXY, so the request to \
-            http://127.0.0.1:<port> goes direct to the container's loopback (empty) \
-            and fails. Needs either HTTPS cassette infrastructure or plain-HTTP support \
-            in tau-sandbox-proxy. Tracked as sub-project J."]
 async fn anthropic_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
@@ -596,8 +590,6 @@ async fn anthropic_layer4_container_completes_via_cassette() {
 ///
 /// Skips if: (a) Docker not available, (b) ollama-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project I follow-up: same as anthropic_layer4_container_completes_via_cassette — \
-            HTTP-only cassette + CONNECT-only proxy. Tracked as sub-project J."]
 async fn ollama_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
@@ -690,8 +682,6 @@ async fn ollama_layer4_container_completes_via_cassette() {
 ///
 /// Skips if: (a) Docker not available, (b) openai-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project I follow-up: same as anthropic_layer4_container_completes_via_cassette — \
-            HTTP-only cassette + CONNECT-only proxy. Tracked as sub-project J."]
 async fn openai_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
