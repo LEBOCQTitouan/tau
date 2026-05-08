@@ -212,35 +212,18 @@ fn make_cassette_completion_request(model: &str) -> CompletionRequest {
 /// Build the `net.http` capability that allows the plugin process to
 /// reach the in-process cassette server running on the host.
 ///
-/// `host.docker.internal` is the cross-runtime hostname (Docker since 20.10
-/// + Podman 4.7+) that the Container adapter wires up via
-/// `--add-host=host.docker.internal:host-gateway`. The plugin connects to
-/// `host.docker.internal:<port>`, which resolves to the bridge gateway
-/// (the host's view of the container network) — i.e. the host itself,
-/// where the cassette-replay server is bound.
+/// The plugin's reqwest client routes all HTTP/HTTPS requests through
+/// `HTTP_PROXY` / `HTTPS_PROXY` (set by `wrap_command` to point at the
+/// in-container bridge). The bridge forwards the byte stream over a
+/// Unix socket to the host-side proxy task, which parses the request
+/// line, validates `Host` against this allowlist, and opens a TCP
+/// connection from the host's network namespace.
 ///
-/// `127.0.0.1` and `localhost` remain in the allowlist for symmetry with
-/// production usage where a local model server (Ollama, etc.) runs on
-/// loopback inside the container's own netns.
+/// `127.0.0.1` is the cassette server's address in the host's loopback —
+/// the proxy task runs on the host, so dialing `127.0.0.1:<port>` reaches
+/// the cassette directly.
 fn make_net_http_localhost_cap() -> Capability {
-    domain_fixtures::cap_net_http(
-        &["127.0.0.1", "localhost", "host.docker.internal"],
-        &["POST", "GET"],
-    )
-}
-
-/// Rewrite a cassette-server URI from `127.0.0.1:<port>` to
-/// `host.docker.internal:<port>` so the plugin running inside a container
-/// can reach the test server bound on the host's loopback.
-///
-/// The cassette server (`tau_plugin_test_support::cassette::replay`) binds
-/// `0.0.0.0:<random>`, so it's reachable on any host-side address — but its
-/// `uri()` returns `http://127.0.0.1:<port>`. From inside a container with
-/// `--network bridge`, container-loopback is empty; we must dial the host
-/// gateway instead.
-fn rewrite_cassette_uri_for_container(uri: &str) -> String {
-    uri.replace("127.0.0.1", "host.docker.internal")
-        .replace("localhost", "host.docker.internal")
+    domain_fixtures::cap_net_http(&["127.0.0.1", "localhost"], &["POST", "GET"])
 }
 
 /// Minimal base64 encoding for the test fixture assertion.
@@ -514,14 +497,6 @@ async fn fs_read_layer4_container_reads_data_file() {
 ///
 /// Skips if: (a) Docker not available, (b) anthropic-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project J: passes on macOS Apple Silicon Podman (slirp4netns rootless \
-            networking lets container 127.0.0.1 reach host 127.0.0.1 directly, bypassing \
-            the proxy + add-host setup) but fails on Linux Docker --network bridge in CI \
-            despite --add-host=host.docker.internal:host-gateway and the plain-HTTP proxy \
-            extension. The image foundation, plain-HTTP proxy support, and host-gateway \
-            wiring all ship in this PR; sub-project J needs an interactive Linux Docker \
-            session to figure out why the request to host.docker.internal isn't reaching \
-            the cassette server (DNS? iptables? subtle bridge config?)."]
 async fn anthropic_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
@@ -556,7 +531,7 @@ async fn anthropic_layer4_container_completes_via_cassette() {
     let cassette_path = workspace_root()
         .join("crates/tau-plugins/anthropic/tests/cassettes/complete_happy_path.yaml");
     let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
-    let api_base = rewrite_cassette_uri_for_container(&cassette_server.uri().to_string());
+    let api_base = cassette_server.uri().to_string();
 
     // 5. Build the SandboxPlan with Network(Http) for localhost.
     //    The proxy validates and allows loopback addresses; T7's wrap_command
@@ -623,8 +598,6 @@ async fn anthropic_layer4_container_completes_via_cassette() {
 ///
 /// Skips if: (a) Docker not available, (b) ollama-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project J: same as anthropic — passes on macOS Podman, fails on Linux \
-            Docker. Container-networking semantics gap on Linux Docker bridge."]
 async fn ollama_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
@@ -656,7 +629,7 @@ async fn ollama_layer4_container_completes_via_cassette() {
     let cassette_path =
         workspace_root().join("crates/tau-plugins/ollama/tests/cassettes/complete_happy_path.yaml");
     let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
-    let api_base = rewrite_cassette_uri_for_container(&cassette_server.uri().to_string());
+    let api_base = cassette_server.uri().to_string();
 
     // 5. Build the SandboxPlan with Network(Http) for localhost.
     let net_cap = make_net_http_localhost_cap();
@@ -717,8 +690,6 @@ async fn ollama_layer4_container_completes_via_cassette() {
 ///
 /// Skips if: (a) Docker not available, (b) openai-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project J: same as anthropic — passes on macOS Podman, fails on Linux \
-            Docker. Container-networking semantics gap on Linux Docker bridge."]
 async fn openai_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
@@ -750,7 +721,7 @@ async fn openai_layer4_container_completes_via_cassette() {
     let cassette_path =
         workspace_root().join("crates/tau-plugins/openai/tests/cassettes/complete_happy_path.yaml");
     let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
-    let api_base = rewrite_cassette_uri_for_container(&cassette_server.uri().to_string());
+    let api_base = cassette_server.uri().to_string();
 
     // 5. Build the SandboxPlan with Network(Http) for localhost.
     let net_cap = make_net_http_localhost_cap();
