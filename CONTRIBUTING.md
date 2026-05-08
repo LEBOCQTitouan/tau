@@ -82,6 +82,25 @@ cargo test --workspace --doc
 
 All five exit `0` on success.
 
+## Running container-sandbox tests locally
+
+The `tau-plugin-compat` integration tests under
+`tests/layer4_container.rs` require per-plugin Docker images to be built
+locally. Run once after pulling, and again whenever you edit a plugin's
+source:
+
+```bash
+cargo xtask build-plugin-images          # all 5 plugins
+cargo xtask build-plugin-images --name shell-plugin   # just one
+```
+
+Tests skip gracefully (with a hint message) if the relevant image is not
+present.
+
+The build auto-detects the container runtime — Podman first, Docker
+fallback. On Apple Silicon, install Podman via `brew install podman` and
+start the VM with `podman machine init && podman machine start`.
+
 ## Filing an ADR
 
 If your change touches anything in the QG18 list — guidelines, public
