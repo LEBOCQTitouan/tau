@@ -244,6 +244,12 @@ pub(crate) fn build_run_args(
         argv.push(format!("{sock}:/run/tau-proxy.sock:rw"));
         argv.push("-e".into());
         argv.push("HTTPS_PROXY=http://127.0.0.1:8443".into());
+        argv.push("-e".into());
+        argv.push("HTTP_PROXY=http://127.0.0.1:8443".into());
+        argv.push("-e".into());
+        argv.push("https_proxy=http://127.0.0.1:8443".into());
+        argv.push("-e".into());
+        argv.push("http_proxy=http://127.0.0.1:8443".into());
         argv.push("--entrypoint=/usr/local/bin/tau-net-bridge".into());
     }
 
@@ -687,6 +693,18 @@ mod tests {
                 .any(|a| a == "HTTPS_PROXY=http://127.0.0.1:8443"),
             "expected HTTPS_PROXY in argv: {argv:?}"
         );
+        // HTTP_PROXY (uppercase) must also be present.
+        assert!(
+            argv.iter()
+                .any(|a| a == "HTTP_PROXY=http://127.0.0.1:8443"),
+            "expected HTTP_PROXY in argv: {argv:?}"
+        );
+        // http_proxy (lowercase) must be present for reqwest on UNIX.
+        assert!(
+            argv.iter()
+                .any(|a| a == "http_proxy=http://127.0.0.1:8443"),
+            "expected http_proxy in argv: {argv:?}"
+        );
         // Proxy socket bind-mount must be present.
         assert!(
             argv.iter().any(|a| a.contains("/run/tau-proxy.sock")),
@@ -728,6 +746,14 @@ mod tests {
         assert!(
             !argv.iter().any(|a| a.contains("HTTPS_PROXY=")),
             "HTTPS_PROXY must not appear without network http: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|a| a.contains("HTTP_PROXY=")),
+            "HTTP_PROXY must not appear without network http: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|a| a.contains("http_proxy=")),
+            "http_proxy must not appear without network http: {argv:?}"
         );
         assert!(
             !argv.iter().any(|a| a.contains("tau-proxy.sock")),
