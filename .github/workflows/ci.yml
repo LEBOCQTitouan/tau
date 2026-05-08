@@ -242,6 +242,12 @@ jobs:
     name: test (tau-plugin-compat / linux)
     needs: build-fixtures-linux
     runs-on: ubuntu-latest
+    env:
+      # GHA Linux runners ship both podman and docker. The xtask + adapter
+      # probes both default to podman; pin to docker for the whole job so
+      # plugin-compat tests run against the same runtime that xtask used to
+      # build the images (image storage matches).
+      TAU_CONTAINER_RUNTIME: docker
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
@@ -285,11 +291,9 @@ jobs:
       - name: Build per-plugin images (sub-project I)
         run: cargo run -p xtask -- build-plugin-images
         env:
-          # GHA Linux runners ship both podman and docker. xtask's auto-probe
-          # picks podman first, but BUILDX_CACHE_* directives are buildx-
-          # specific (podman rejects type=gha). Force docker so buildx cache
-          # works.
-          TAU_CONTAINER_RUNTIME: docker
+          # TAU_CONTAINER_RUNTIME is set at the job level. BUILDX_CACHE_*
+          # are buildx-specific (docker buildx); xtask reads them and
+          # forwards as --cache-from / --cache-to to the build call.
           BUILDX_CACHE_FROM: type=gha
           BUILDX_CACHE_TO: type=gha,mode=max
           BUILDKIT_PROGRESS: plain
