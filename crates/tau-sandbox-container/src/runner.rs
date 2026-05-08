@@ -186,12 +186,26 @@ pub(crate) fn build_run_args(
     // Both docker and podman share the same `run` argument shape.
     let _ = runtime;
 
+    // For HTTP plans the bridge needs to dial a Unix socket bind-mounted
+    // from the host. Docker Desktop on macOS ignores the host-side mode
+    // bits and presents bind-mounts as root:root 660 inside the container,
+    // so a non-root user inside the container cannot open the socket.
+    // Linux Docker preserves host UIDs but the host UID won't generally
+    // match `nobody` (65534) either. Run the container as root for HTTP
+    // plans; cap-drop=ALL + no-new-privileges + read-only + seccomp
+    // default keeps the sandbox properties roughly equivalent to nobody.
+    let has_http = plan
+        .capabilities
+        .iter()
+        .any(|c| matches!(c, Capability::Network(NetCapability::Http { .. })));
+    let user = if has_http { "0" } else { "nobody" };
+
     let mut argv: Vec<String> = vec![
         "run".into(),
         "--rm".into(),
         "-i".into(),
         "--user".into(),
-        "nobody".into(),
+        user.into(),
         "--cap-drop=ALL".into(),
         "--security-opt=no-new-privileges".into(),
         "--read-only".into(),
@@ -203,21 +217,9 @@ pub(crate) fn build_run_args(
     ];
 
     // Network: bridge only when the plan requests HTTP; otherwise none.
-    let has_http = plan
-        .capabilities
-        .iter()
-        .any(|c| matches!(c, Capability::Network(NetCapability::Http { .. })));
     argv.push("--network".into());
     if has_http {
         argv.push("bridge".into());
-        // Make the host's loopback reachable from the container under a
-        // stable hostname. Docker's `host-gateway` magic value resolves to
-        // the bridge gateway IP (the host's view of the container network);
-        // Podman 4.7+ honors the same syntax. This unblocks plugins that
-        // need to reach a service running on the host (e.g. cassette-replay
-        // test servers in `tau-plugin-compat`) without forcing
-        // `--network host` (which would defeat sandboxing).
-        argv.push("--add-host=host.docker.internal:host-gateway".into());
     } else {
         argv.push("none".into());
     }
@@ -388,31 +390,6 @@ mod tests {
             .position(|a| a == "--network")
             .expect("--network present");
         assert_eq!(argv[pos + 1], "bridge");
-        assert!(
-            argv.iter()
-                .any(|a| a == "--add-host=host.docker.internal:host-gateway"),
-            "expected host.docker.internal add-host for HTTP plan: {argv:?}"
-        );
-    }
-
-    #[test]
-    fn no_http_capability_omits_add_host() {
-        // Non-HTTP plans use --network=none and don't need the host-gateway
-        // shortcut (the container can't reach the host anyway).
-        let plan = plan_from(json!([]));
-        let argv = build_run_args(
-            &plan,
-            ResolvedRuntime::Docker,
-            "tau-plugin-test:dev",
-            "/bin/echo",
-            &[],
-            &[],
-            None,
-        );
-        assert!(
-            !argv.iter().any(|a| a.starts_with("--add-host=")),
-            "non-HTTP plans must not add a host-gateway entry: {argv:?}"
-        );
     }
 
     #[test]

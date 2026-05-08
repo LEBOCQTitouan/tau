@@ -53,50 +53,55 @@ This is **Phase 1** of a four-phase roadmap:
 
 ## Tests closed by this ADR
 
-Of the 5 originally-`#[ignore]`'d Container-adapter integration tests in
-`crates/tau-plugin-compat/tests/layer4_container.rs`, **2 close** via this
-ADR; **3 are deferred to sub-project J**:
+All 5 originally-`#[ignore]`'d Container-adapter integration tests in
+`crates/tau-plugin-compat/tests/layer4_container.rs` close:
 
 | Test | Status |
 |---|---|
-| `shell_layer4_container_runs_echo_hello` | ✅ closes |
-| `fs_read_layer4_container_reads_data_file` | ✅ closes |
-| `anthropic_layer4_container_completes_via_cassette` | 🔄 sub-project J |
-| `ollama_layer4_container_completes_via_cassette` | 🔄 sub-project J |
-| `openai_layer4_container_completes_via_cassette` | 🔄 sub-project J |
+| `shell_layer4_container_runs_echo_hello` | ✅ |
+| `fs_read_layer4_container_reads_data_file` | ✅ |
+| `anthropic_layer4_container_completes_via_cassette` | ✅ |
+| `ollama_layer4_container_completes_via_cassette` | ✅ |
+| `openai_layer4_container_completes_via_cassette` | ✅ |
 
-The 2 non-HTTP tests close cleanly via the per-plugin-image fix alone —
-the plugin binary now lives at a known in-image path and exec succeeds.
+The 2 non-HTTP tests close via the per-plugin-image fix alone — the
+plugin binary now lives at a known in-image path and exec succeeds.
 
-This PR also ships the **groundwork** for closing the remaining 3 HTTP
-cassette tests, but doesn't get them green in CI:
+The 3 HTTP cassette tests required two further fixes layered on top of
+the image work, both shipped in sub-project I (under PR #41 — initially
+deferred to sub-project J, then reopened and fixed in the same PR
+series):
 
-1. **Plain-HTTP forwarding in `tau-sandbox-proxy`** — the existing CONNECT
-   path is HTTPS-only; cassette servers speak plain HTTP. The proxy now
-   detects the first request line and dispatches CONNECT or HTTP. The
-   HTTP path validates the `Host` against the allowlist, opens TCP, and
-   rewrites the request line to RFC 7230 origin-form before splicing.
-   This is a real production-relevant improvement — plugins talking to
-   local services (Ollama, etc.) now route through the proxy with
-   allowlist enforcement, not just HTTPS.
+1. **Plain-HTTP forwarding in `tau-sandbox-proxy`** — the existing
+   CONNECT path is HTTPS-only; cassette servers speak plain HTTP. The
+   proxy now detects the first request line and dispatches CONNECT or
+   HTTP. The HTTP path validates the `Host` against the allowlist,
+   opens TCP, and rewrites the request line to RFC 7230 origin-form
+   before splicing. Production-relevant: plugins talking to local
+   services (Ollama, etc.) now route through the proxy with allowlist
+   enforcement, not just HTTPS.
 
-2. **`--add-host=host.docker.internal:host-gateway` + URL rewrite in
-   tests** — Docker `--network bridge` does NOT route container
-   `127.0.0.1` to the host's `127.0.0.1` (Podman's slirp4netns does, but
-   relying on that means the test bypasses the proxy entirely).
+2. **Container runs as root (uid 0) when the plan has
+   `Network(Http)`** — the bridge inside the container needs to dial
+   the host-bound proxy Unix socket. Docker Desktop on macOS presents
+   bind-mounted Unix sockets as `root:root 660` regardless of host-side
+   permissions; Linux Docker preserves host UIDs but those won't match
+   `nobody` (65534) either. Running as root inside the container is
+   safe because `--cap-drop=ALL` + `--security-opt=no-new-privileges`
+   + `--read-only` + seccomp-default keep the security envelope
+   essentially equivalent to `nobody`. Non-HTTP plans still run as
+   `nobody`.
 
-The 3 HTTP cassette tests pass on macOS Apple Silicon Podman locally
-(via slirp4netns — for the wrong reason) but fail in CI on Linux Docker
-`--network bridge` despite both fixes above. Sub-project J needs an
-interactive Linux Docker debug session to figure out why
-`host.docker.internal` is not reaching the cassette server (DNS, iptables,
-or some bridge config detail that the local-Podman-via-Apple-Virtualization
-path masks).
+   Plus a defence-in-depth chmod on the host: `tau-sandbox-proxy`
+   sets the proxy socket to `0666` after binding, so a
+   sandbox-container running as a non-root UID could still dial it on
+   Linux Docker (where bind-mount UIDs are preserved). Belt-and-braces.
 
-This PR also ships the development tooling that will make sub-project J
-faster: `scripts/test-linux-integration.sh` (Linux Podman + DooD via
-socket bind-mount, gives a closer-to-CI environment for debugging) and
-the lefthook pre-push gate from PR #42.
+The investigation that found the second fix — running root vs.
+nobody — was bounded by `scripts/test-linux-integration.sh` (Linux
+Podman DooD) and a one-off reqwest probe binary; root cause surfaced
+when the bridge's `proxy connect failed: Permission denied` warning
+finally became visible against Docker Desktop.
 
 See `docs/superpowers/specs/2026-05-08-per-plugin-images-design.md` for the
 full design including locked decisions 1-8 and Phase 1 risks.

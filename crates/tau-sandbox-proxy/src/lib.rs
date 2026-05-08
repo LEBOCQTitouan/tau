@@ -75,8 +75,19 @@ impl Drop for ProxyHandle {
 /// so the bridge inside the sandbox can dial it.
 #[cfg(unix)]
 pub fn spawn_proxy(allowed_hosts: Vec<String>) -> std::io::Result<ProxyHandle> {
+    use std::os::unix::fs::PermissionsExt;
     let sock_path = make_temp_sock_path()?;
     let listener = UnixListener::bind(&sock_path)?;
+    // The container's bridge runs as a non-root user (tau, uid 1000 in
+    // tau-plugin-base) whose UID does not match the host user that bound
+    // this socket. Make the socket world-writable so the bridge can dial
+    // it from inside any sandboxed container regardless of its UID. This
+    // is safe: the socket is in a per-pid temp file, and connections are
+    // already validated against the plan's host allowlist before any
+    // forwarding happens. Removing this chmod produces silent
+    // "Permission denied" inside the container — see the Bridge's
+    // `proxy connect failed` warning.
+    std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o666))?;
     let task = tokio::spawn(accept_loop(listener, allowed_hosts));
     Ok(ProxyHandle { sock_path, task })
 }
