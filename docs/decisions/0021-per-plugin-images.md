@@ -60,14 +60,28 @@ Of the 5 originally-`#[ignore]`'d Container-adapter integration tests in
 - `fs_read_layer4_container_reads_data_file`
 
 The 3 HTTP-cassette tests (`anthropic_*`, `ollama_*`, `openai_*`) remain
-`#[ignore]`'d but with a **new and accurate reason**: the per-plugin-image
-fix lets the plugin start, but reqwest does not route plain HTTP requests
-through `HTTPS_PROXY`, so requests to the in-process cassette server at
-`http://127.0.0.1:<port>` go direct to the container's loopback (empty)
-and fail. This is a separate architectural gap — proxy is CONNECT-only
-(HTTPS), cassette is plain HTTP — that needs **sub-project J**: either
-HTTPS cassette infrastructure (with self-signed cert + plugin trust
-override) OR plain-HTTP support in `tau-sandbox-proxy`.
+`#[ignore]`'d. This PR does extend `tau-sandbox-proxy` with plain-HTTP
+forwarding (alongside the existing CONNECT path) and sets
+`HTTP_PROXY`/`HTTPS_PROXY` (uppercase + lowercase) on the container,
+which made the 3 tests pass locally on macOS Apple Silicon Podman. But
+the same code fails on Linux Docker `--network bridge` in CI: Podman's
+slirp4netns rootless networking lets container `127.0.0.1` reach the
+host's `127.0.0.1` directly (bypassing the proxy), while Docker's bridge
+network does not. The "local pass" was for the wrong reason.
+
+Sub-project J needs to either:
+
+1. Make the cassette URL reachable from the container without bypassing
+   the proxy: explicit `--add-host=host.docker.internal:host-gateway`
+   on Linux + a cassette URL rewrite hook so the plugin gets a hostname
+   that resolves to the host gateway.
+2. Or: investigate why `reqwest` doesn't appear to use `HTTP_PROXY` for
+   loopback URLs in the Docker case (possibly implicit no-proxy filtering
+   for `127.0.0.1`/`localhost` even when `HTTP_PROXY` is set).
+3. Or: serve the cassette over HTTPS with a self-signed cert + a test-only
+   plugin trust override; the existing CONNECT path then handles it.
+
+Each path has its own tradeoffs; sub-project J's brainstorm picks one.
 
 See `docs/superpowers/specs/2026-05-08-per-plugin-images-design.md` for the
 full design including locked decisions 1-8 and Phase 1 risks.
