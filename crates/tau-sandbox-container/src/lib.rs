@@ -31,7 +31,10 @@ pub enum ContainerRuntime {
     Docker,
     /// Use the `podman` binary on PATH.
     Podman,
-    /// Probe `docker` first, then `podman`; first found wins.
+    /// Probe `podman` first, then `docker`; first found wins.
+    ///
+    /// Podman is preferred because it is daemonless, rootless-by-default,
+    /// and Apache-2.0-licensed.
     Auto,
 }
 
