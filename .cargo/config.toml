@@ -1,0 +1,19 @@
+# .cargo/config.toml — workspace-level cargo configuration
+#
+# Cross-compilation: x86_64-unknown-linux-musl
+# -------------------------------------------------
+# Used by the pre-commit `check-linux-x86` hook in lefthook.yml.
+# Goal: catch cfg-gating issues (e.g., `std::os::unix::*` unix-only
+# imports) locally before push.
+#
+# Requires: musl-cross from the FiloSottile homebrew tap
+#   brew install filosottile/musl-cross/musl-cross   # x86_64 included by default
+# The Rust target is auto-installed by rustup via rust-toolchain.toml's
+# `targets = ["x86_64-unknown-linux-musl"]` — no manual `rustup target add`.
+
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"
+
+[env]
+CC_x86_64_unknown_linux_musl = "x86_64-linux-musl-gcc"
+AR_x86_64_unknown_linux_musl = "x86_64-linux-musl-ar"

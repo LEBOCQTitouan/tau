@@ -74,7 +74,6 @@ pub(crate) fn baseline_syscall_map() -> std::collections::BTreeMap<i64, Vec<Secc
         libc::SYS_getdents64,
         libc::SYS_fcntl,
         libc::SYS_dup,
-        libc::SYS_dup2,
         libc::SYS_dup3,
         libc::SYS_pipe2,
         libc::SYS_mkdirat,
@@ -93,6 +92,7 @@ pub(crate) fn baseline_syscall_map() -> std::collections::BTreeMap<i64, Vec<Secc
     );
 
     // Arch-specific file I/O constants that only exist on x86_64.
+    // dup2 is legacy (aarch64 uses dup3 exclusively).
     #[cfg(target_arch = "x86_64")]
     allow!(
         libc::SYS_stat,
@@ -101,6 +101,7 @@ pub(crate) fn baseline_syscall_map() -> std::collections::BTreeMap<i64, Vec<Secc
         libc::SYS_pipe,
         libc::SYS_open,
         libc::SYS_creat,
+        libc::SYS_dup2,
     );
 
     // openat2, newfstatat, statx, faccessat2 via raw syscall numbers.
@@ -185,24 +186,26 @@ pub(crate) fn baseline_syscall_map() -> std::collections::BTreeMap<i64, Vec<Secc
     );
 
     // ---- Polling / async ----
+    // ppoll, epoll_create1, epoll_ctl, epoll_pwait — exist on both x86_64 and aarch64.
+    // poll, epoll_wait — x86_64 only (aarch64 uses ppoll and epoll_pwait exclusively).
     allow!(
-        libc::SYS_poll,
         libc::SYS_ppoll,
         libc::SYS_epoll_create1,
         libc::SYS_epoll_ctl,
-        libc::SYS_epoll_wait,
+        libc::SYS_epoll_pwait,
         libc::SYS_eventfd2,
         libc::SYS_timerfd_create,
         libc::SYS_timerfd_settime,
         libc::SYS_futex,
     );
 
-    // epoll_create (legacy), select, pselect6, epoll_pwait, eventfd — x86_64 only.
-    // aarch64 only has the newer variants (epoll_create1, ppoll, pselect6via ppoll).
+    // poll, epoll_create (legacy), epoll_wait, select, pselect6, eventfd — x86_64 only.
+    // aarch64 uses only the newer variants (ppoll, epoll_create1, epoll_pwait).
     #[cfg(target_arch = "x86_64")]
     allow!(
+        libc::SYS_poll,
         libc::SYS_epoll_create,
-        libc::SYS_epoll_pwait,
+        libc::SYS_epoll_wait,
         libc::SYS_select,
         libc::SYS_pselect6,
         libc::SYS_eventfd,
