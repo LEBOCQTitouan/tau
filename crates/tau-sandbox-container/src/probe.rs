@@ -37,21 +37,23 @@ impl ResolvedRuntime {
 /// and the resolved runtime so both can be cached together in a single
 /// [`tokio::sync::OnceCell`], eliminating any per-spawn re-probe.
 ///
-/// For [`ContainerRuntime::Auto`] docker is tried first; podman is the
-/// fallback if docker is not found or is unresponsive.
+/// For [`ContainerRuntime::Auto`] podman is tried first; docker is the
+/// fallback if podman is not found or is unresponsive. Podman is preferred
+/// because it is daemonless, rootless-by-default, and Apache-2.0-licensed
+/// (no commercial-use restriction the way Docker Desktop has).
 ///
 /// **Note:** When the probe returns `Unavailable`, the `ResolvedRuntime`
-/// placeholder (`Docker`) must not be used — callers MUST check the
+/// placeholder (`Podman`) must not be used — callers MUST check the
 /// `SandboxProbe` branch first.
 pub(crate) async fn run_probe(runtime: ContainerRuntime) -> (SandboxProbe, ResolvedRuntime) {
     match runtime {
         ContainerRuntime::Docker => (probe_one("docker").await, ResolvedRuntime::Docker),
         ContainerRuntime::Podman => (probe_one("podman").await, ResolvedRuntime::Podman),
-        ContainerRuntime::Auto => match probe_one("docker").await {
-            ok @ SandboxProbe::Available { .. } => (ok, ResolvedRuntime::Docker),
+        ContainerRuntime::Auto => match probe_one("podman").await {
+            ok @ SandboxProbe::Available { .. } => (ok, ResolvedRuntime::Podman),
             _ => {
-                let podman_probe = probe_one("podman").await;
-                (podman_probe, ResolvedRuntime::Podman)
+                let docker_probe = probe_one("docker").await;
+                (docker_probe, ResolvedRuntime::Docker)
             }
         },
     }
