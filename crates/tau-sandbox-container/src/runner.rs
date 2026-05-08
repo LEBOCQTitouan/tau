@@ -210,6 +210,14 @@ pub(crate) fn build_run_args(
     argv.push("--network".into());
     if has_http {
         argv.push("bridge".into());
+        // Make the host's loopback reachable from the container under a
+        // stable hostname. Docker's `host-gateway` magic value resolves to
+        // the bridge gateway IP (the host's view of the container network);
+        // Podman 4.7+ honors the same syntax. This unblocks plugins that
+        // need to reach a service running on the host (e.g. cassette-replay
+        // test servers in `tau-plugin-compat`) without forcing
+        // `--network host` (which would defeat sandboxing).
+        argv.push("--add-host=host.docker.internal:host-gateway".into());
     } else {
         argv.push("none".into());
     }
@@ -380,6 +388,31 @@ mod tests {
             .position(|a| a == "--network")
             .expect("--network present");
         assert_eq!(argv[pos + 1], "bridge");
+        assert!(
+            argv.iter()
+                .any(|a| a == "--add-host=host.docker.internal:host-gateway"),
+            "expected host.docker.internal add-host for HTTP plan: {argv:?}"
+        );
+    }
+
+    #[test]
+    fn no_http_capability_omits_add_host() {
+        // Non-HTTP plans use --network=none and don't need the host-gateway
+        // shortcut (the container can't reach the host anyway).
+        let plan = plan_from(json!([]));
+        let argv = build_run_args(
+            &plan,
+            ResolvedRuntime::Docker,
+            "tau-plugin-test:dev",
+            "/bin/echo",
+            &[],
+            &[],
+            None,
+        );
+        assert!(
+            !argv.iter().any(|a| a.starts_with("--add-host=")),
+            "non-HTTP plans must not add a host-gateway entry: {argv:?}"
+        );
     }
 
     #[test]

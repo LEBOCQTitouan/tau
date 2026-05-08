@@ -53,35 +53,40 @@ This is **Phase 1** of a four-phase roadmap:
 
 ## Tests closed by this ADR
 
-Of the 5 originally-`#[ignore]`'d Container-adapter integration tests in
-`crates/tau-plugin-compat/tests/layer4_container.rs`, **2 are closed**:
+All 5 originally-`#[ignore]`'d Container-adapter integration tests in
+`crates/tau-plugin-compat/tests/layer4_container.rs` are closed:
 
 - `shell_layer4_container_runs_echo_hello`
 - `fs_read_layer4_container_reads_data_file`
+- `anthropic_layer4_container_completes_via_cassette`
+- `ollama_layer4_container_completes_via_cassette`
+- `openai_layer4_container_completes_via_cassette`
 
-The 3 HTTP-cassette tests (`anthropic_*`, `ollama_*`, `openai_*`) remain
-`#[ignore]`'d. This PR does extend `tau-sandbox-proxy` with plain-HTTP
-forwarding (alongside the existing CONNECT path) and sets
-`HTTP_PROXY`/`HTTPS_PROXY` (uppercase + lowercase) on the container,
-which made the 3 tests pass locally on macOS Apple Silicon Podman. But
-the same code fails on Linux Docker `--network bridge` in CI: Podman's
-slirp4netns rootless networking lets container `127.0.0.1` reach the
-host's `127.0.0.1` directly (bypassing the proxy), while Docker's bridge
-network does not. The "local pass" was for the wrong reason.
+The 2 non-HTTP tests (`shell`, `fs-read`) close cleanly via the
+per-plugin-image fix alone — the plugin binary now lives at a known
+in-image path and exec succeeds.
 
-Sub-project J needs to either:
+The 3 HTTP cassette tests required two additional changes layered on top:
 
-1. Make the cassette URL reachable from the container without bypassing
-   the proxy: explicit `--add-host=host.docker.internal:host-gateway`
-   on Linux + a cassette URL rewrite hook so the plugin gets a hostname
-   that resolves to the host gateway.
-2. Or: investigate why `reqwest` doesn't appear to use `HTTP_PROXY` for
-   loopback URLs in the Docker case (possibly implicit no-proxy filtering
-   for `127.0.0.1`/`localhost` even when `HTTP_PROXY` is set).
-3. Or: serve the cassette over HTTPS with a self-signed cert + a test-only
-   plugin trust override; the existing CONNECT path then handles it.
+1. **Plain-HTTP forwarding in `tau-sandbox-proxy`** — the existing CONNECT
+   path is HTTPS-only; cassette servers speak plain HTTP. The proxy now
+   detects the first request line and dispatches CONNECT or HTTP. The
+   HTTP path validates the `Host` against the allowlist, opens TCP, and
+   rewrites the request line to RFC 7230 origin-form before splicing.
 
-Each path has its own tradeoffs; sub-project J's brainstorm picks one.
+2. **`--add-host=host.docker.internal:host-gateway` + URL rewrite in
+   tests** — Docker `--network bridge` does NOT route container
+   `127.0.0.1` to the host's `127.0.0.1` (Podman's slirp4netns does, but
+   relying on that means the test bypasses the proxy entirely). The
+   stable cross-runtime hostname `host.docker.internal` (Docker 20.10+,
+   Podman 4.7+) resolves to the bridge gateway via the magic
+   `host-gateway` value. Tests rewrite the cassette URL from
+   `http://127.0.0.1:<port>` to `http://host.docker.internal:<port>` and
+   include `host.docker.internal` in the plugin's HTTP allowlist.
+
+The plain-HTTP proxy support is the production-relevant change — plugins
+talking to local services (Ollama, etc.) now route through the proxy
+even for plain HTTP, with allowlist enforcement.
 
 See `docs/superpowers/specs/2026-05-08-per-plugin-images-design.md` for the
 full design including locked decisions 1-8 and Phase 1 risks.

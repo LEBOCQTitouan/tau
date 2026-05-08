@@ -210,12 +210,37 @@ fn make_cassette_completion_request(model: &str) -> CompletionRequest {
 }
 
 /// Build the `net.http` capability that allows the plugin process to
-/// reach back to `127.0.0.1` (the in-process cassette server).
+/// reach the in-process cassette server running on the host.
 ///
-/// The proxy (T7 wiring) runs on the host and can connect to host loopback,
-/// so `127.0.0.1` is reachable from the container via the proxy bridge.
+/// `host.docker.internal` is the cross-runtime hostname (Docker since 20.10
+/// + Podman 4.7+) that the Container adapter wires up via
+/// `--add-host=host.docker.internal:host-gateway`. The plugin connects to
+/// `host.docker.internal:<port>`, which resolves to the bridge gateway
+/// (the host's view of the container network) — i.e. the host itself,
+/// where the cassette-replay server is bound.
+///
+/// `127.0.0.1` and `localhost` remain in the allowlist for symmetry with
+/// production usage where a local model server (Ollama, etc.) runs on
+/// loopback inside the container's own netns.
 fn make_net_http_localhost_cap() -> Capability {
-    domain_fixtures::cap_net_http(&["127.0.0.1", "localhost"], &["POST", "GET"])
+    domain_fixtures::cap_net_http(
+        &["127.0.0.1", "localhost", "host.docker.internal"],
+        &["POST", "GET"],
+    )
+}
+
+/// Rewrite a cassette-server URI from `127.0.0.1:<port>` to
+/// `host.docker.internal:<port>` so the plugin running inside a container
+/// can reach the test server bound on the host's loopback.
+///
+/// The cassette server (`tau_plugin_test_support::cassette::replay`) binds
+/// `0.0.0.0:<random>`, so it's reachable on any host-side address — but its
+/// `uri()` returns `http://127.0.0.1:<port>`. From inside a container with
+/// `--network bridge`, container-loopback is empty; we must dial the host
+/// gateway instead.
+fn rewrite_cassette_uri_for_container(uri: &str) -> String {
+    uri.replace("127.0.0.1", "host.docker.internal")
+        .replace("localhost", "host.docker.internal")
 }
 
 /// Minimal base64 encoding for the test fixture assertion.
@@ -489,13 +514,6 @@ async fn fs_read_layer4_container_reads_data_file() {
 ///
 /// Skips if: (a) Docker not available, (b) anthropic-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project J: passes on macOS Apple Silicon Podman (slirp4netns lets \
-            container 127.0.0.1 reach host 127.0.0.1 directly, bypassing the proxy) \
-            but fails on Linux Docker --network bridge (no such gateway). The plain-HTTP \
-            proxy support (T11) does the right thing logically; the gap is container \
-            networking semantics. Needs either explicit --add-host=host.docker.internal:\
-            host-gateway + cassette URL rewrite, OR forcing reqwest to honor HTTP_PROXY \
-            for loopback URLs (some clients have implicit no_proxy for 127.0.0.1)."]
 async fn anthropic_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
@@ -530,7 +548,7 @@ async fn anthropic_layer4_container_completes_via_cassette() {
     let cassette_path = workspace_root()
         .join("crates/tau-plugins/anthropic/tests/cassettes/complete_happy_path.yaml");
     let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
-    let api_base = cassette_server.uri().to_string();
+    let api_base = rewrite_cassette_uri_for_container(&cassette_server.uri().to_string());
 
     // 5. Build the SandboxPlan with Network(Http) for localhost.
     //    The proxy validates and allows loopback addresses; T7's wrap_command
@@ -597,9 +615,6 @@ async fn anthropic_layer4_container_completes_via_cassette() {
 ///
 /// Skips if: (a) Docker not available, (b) ollama-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project J: same as anthropic_layer4_container_completes_via_cassette — \
-            passes on macOS Podman, fails on Linux Docker. Container-networking \
-            semantics gap, not a proxy-logic gap."]
 async fn ollama_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
@@ -631,7 +646,7 @@ async fn ollama_layer4_container_completes_via_cassette() {
     let cassette_path =
         workspace_root().join("crates/tau-plugins/ollama/tests/cassettes/complete_happy_path.yaml");
     let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
-    let api_base = cassette_server.uri().to_string();
+    let api_base = rewrite_cassette_uri_for_container(&cassette_server.uri().to_string());
 
     // 5. Build the SandboxPlan with Network(Http) for localhost.
     let net_cap = make_net_http_localhost_cap();
@@ -692,9 +707,6 @@ async fn ollama_layer4_container_completes_via_cassette() {
 ///
 /// Skips if: (a) Docker not available, (b) openai-plugin binary not built.
 #[tokio::test]
-#[ignore = "sub-project J: same as anthropic_layer4_container_completes_via_cassette — \
-            passes on macOS Podman, fails on Linux Docker. Container-networking \
-            semantics gap, not a proxy-logic gap."]
 async fn openai_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
     if let Err(reason) = require_docker() {
@@ -726,7 +738,7 @@ async fn openai_layer4_container_completes_via_cassette() {
     let cassette_path =
         workspace_root().join("crates/tau-plugins/openai/tests/cassettes/complete_happy_path.yaml");
     let cassette_server = tau_plugin_test_support::cassette::replay(&cassette_path).await;
-    let api_base = cassette_server.uri().to_string();
+    let api_base = rewrite_cassette_uri_for_container(&cassette_server.uri().to_string());
 
     // 5. Build the SandboxPlan with Network(Http) for localhost.
     let net_cap = make_net_http_localhost_cap();
