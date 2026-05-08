@@ -695,14 +695,12 @@ mod tests {
         );
         // HTTP_PROXY (uppercase) must also be present.
         assert!(
-            argv.iter()
-                .any(|a| a == "HTTP_PROXY=http://127.0.0.1:8443"),
+            argv.iter().any(|a| a == "HTTP_PROXY=http://127.0.0.1:8443"),
             "expected HTTP_PROXY in argv: {argv:?}"
         );
         // http_proxy (lowercase) must be present for reqwest on UNIX.
         assert!(
-            argv.iter()
-                .any(|a| a == "http_proxy=http://127.0.0.1:8443"),
+            argv.iter().any(|a| a == "http_proxy=http://127.0.0.1:8443"),
             "expected http_proxy in argv: {argv:?}"
         );
         // Proxy socket bind-mount must be present.

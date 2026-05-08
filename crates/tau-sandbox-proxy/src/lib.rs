@@ -214,8 +214,7 @@ async fn handle_http(
         Err(e) => {
             plugin_sock
                 .write_all(
-                    format!("HTTP/1.1 502 Bad Gateway\r\n\r\nupstream connect: {e}\r\n")
-                        .as_bytes(),
+                    format!("HTTP/1.1 502 Bad Gateway\r\n\r\nupstream connect: {e}\r\n").as_bytes(),
                 )
                 .await?;
             return Ok(());

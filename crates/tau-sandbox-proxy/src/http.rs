@@ -123,8 +123,8 @@ fn find_host_header(buf: &[u8]) -> Result<String, HttpParseError> {
             // End of headers.
             return Err(HttpParseError::NoHost);
         }
-        let line_str = std::str::from_utf8(line)
-            .map_err(|_| HttpParseError::Malformed("non-utf8 header"))?;
+        let line_str =
+            std::str::from_utf8(line).map_err(|_| HttpParseError::Malformed("non-utf8 header"))?;
         if let Some((name, value)) = line_str.split_once(':') {
             if name.eq_ignore_ascii_case("host") {
                 return Ok(value.trim().to_string());
