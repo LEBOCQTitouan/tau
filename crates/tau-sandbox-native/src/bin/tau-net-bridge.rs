@@ -115,8 +115,15 @@ fn bring_lo_up() -> std::io::Result<()> {
     use rtnetlink::new_connection;
     use tokio::runtime::Builder;
 
+    // Best-effort: empty netns from Native adapter starts with lo down and we
+    // have CAP_NET_ADMIN-in-userns so set-up succeeds. Inside Docker containers
+    // (Container adapter), lo is already up but we don't have CAP_NET_ADMIN
+    // and the set-up call fails with EPERM. Either way, the listener bind on
+    // 127.0.0.1:8443 below is the load-bearing check: if lo isn't actually
+    // usable, the bind fails loudly. Don't fail the bridge if we can't bring
+    // lo up — log a warning and let the bind try.
     let rt = Builder::new_current_thread().enable_all().build()?;
-    rt.block_on(async {
+    let attempt: std::io::Result<()> = rt.block_on(async {
         let (connection, handle, _) = new_connection().map_err(std::io::Error::other)?;
         tokio::spawn(connection);
         let mut links = handle.link().get().match_name("lo".to_string()).execute();
@@ -132,8 +139,11 @@ fn bring_lo_up() -> std::io::Result<()> {
             .execute()
             .await
             .map_err(std::io::Error::other)?;
-        Ok::<_, std::io::Error>(())
-    })?;
+        Ok(())
+    });
+    if let Err(e) = attempt {
+        eprintln!("bridge: bring lo up failed (continuing — lo may already be up): {e}");
+    }
     Ok(())
 }
 
