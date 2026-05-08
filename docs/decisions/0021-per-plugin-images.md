@@ -45,8 +45,29 @@ This is **Phase 1** of a four-phase roadmap:
   stage. Locked decision 5: optimise only if profiling demands.
 - Local dev iteration adds a `cargo xtask build-plugin-images` step before
   container tests run.
+- CI pins `TAU_CONTAINER_RUNTIME=docker` (job-level env) so xtask + adapter
+  agree on which runtime owns the per-plugin image storage. Local dev
+  leaves it unset → both default to podman.
 - ADR-0020 (sandbox proxy) unchanged. ADR-0019 (per-host net filter) remains
   superseded.
+
+## Tests closed by this ADR
+
+Of the 5 originally-`#[ignore]`'d Container-adapter integration tests in
+`crates/tau-plugin-compat/tests/layer4_container.rs`, **2 are closed**:
+
+- `shell_layer4_container_runs_echo_hello`
+- `fs_read_layer4_container_reads_data_file`
+
+The 3 HTTP-cassette tests (`anthropic_*`, `ollama_*`, `openai_*`) remain
+`#[ignore]`'d but with a **new and accurate reason**: the per-plugin-image
+fix lets the plugin start, but reqwest does not route plain HTTP requests
+through `HTTPS_PROXY`, so requests to the in-process cassette server at
+`http://127.0.0.1:<port>` go direct to the container's loopback (empty)
+and fail. This is a separate architectural gap — proxy is CONNECT-only
+(HTTPS), cassette is plain HTTP — that needs **sub-project J**: either
+HTTPS cassette infrastructure (with self-signed cert + plugin trust
+override) OR plain-HTTP support in `tau-sandbox-proxy`.
 
 See `docs/superpowers/specs/2026-05-08-per-plugin-images-design.md` for the
 full design including locked decisions 1-8 and Phase 1 risks.
