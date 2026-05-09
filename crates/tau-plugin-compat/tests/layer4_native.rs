@@ -164,7 +164,7 @@ async fn resolve_native_or_skip() -> Option<tau_runtime::sandbox::SandboxAdapter
 /// - The shell plugin's `SessionContext.granted_capabilities` path
 ///   admission check (process.spawn allow-list)
 #[tokio::test]
-#[ignore = "Plugin EOFs before handshake under strict tier — needs fs.read for plugin's runtime state (config, tmp, /proc, etc.). Each plugin's startup I/O surface needs cataloging for proper plan derivation. Defer to a sub-project D follow-up that builds plugin-specific plans, or sub-project F."]
+#[ignore = "Handshakes successfully under T2's baseline (landlock + seccomp) but fails during invoke: std's Command::spawn does PATH-search via execvp, landlock denies exec on /usr/local/{sbin,bin} before reaching /usr/bin/echo. Root cause is sub-project E (per-command exec gating); not closeable by startup-IO work. T1 finding 2026-05-09."]
 async fn shell_layer4_native_runs_echo_hello() {
     // 1. Locate the pre-built shell plugin binary.  The CI workflow must
     //    have compiled it beforehand.
@@ -261,7 +261,6 @@ async fn shell_layer4_native_runs_echo_hello() {
 /// - Task 3's symlink-resolution fix: `/tmp` may be a symlink on Ubuntu.
 /// - The fs-read plugin's glob-based path admission check.
 #[tokio::test]
-#[ignore = "Plugin EOFs before handshake under strict tier — needs fs.read for plugin's runtime state (config, tmp, /proc, etc.). Each plugin's startup I/O surface needs cataloging for proper plan derivation. Defer to a sub-project D follow-up that builds plugin-specific plans, or sub-project F."]
 async fn fs_read_layer4_native_reads_data_file() {
     // 1. Locate the pre-built fs-read-plugin binary.
     let bin_path = locate_fs_read_bin();
@@ -292,7 +291,15 @@ async fn fs_read_layer4_native_reads_data_file() {
 
     let fs_read_cap: Capability = domain_fixtures::cap_fs_read(&[&tmpdir_glob]);
 
-    let plan = SandboxPlan::new(vec![fs_read_cap.clone()], None, None);
+    // Per-plugin startup-IO paths beyond the runtime baseline. Empty for
+    // fs-read in PR 1 — runtime baseline (BASELINE_SYSTEM_READ_PATHS) is
+    // sufficient. Wired in to lay the API surface for PR 2's HTTP plugins.
+    let extras = tau_plugin_compat::startup_io::startup_io_paths_for("fs-read-plugin");
+    let mut caps = vec![fs_read_cap.clone()];
+    if !extras.is_empty() {
+        caps.push(domain_fixtures::cap_fs_read(extras));
+    }
+    let plan = SandboxPlan::new(caps, None, None);
 
     // 4. Synthesise a LockedPlugin for the fs-read binary.
     let plugin = make_locked_plugin("fs-read-plugin", bin_path);
