@@ -174,11 +174,15 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 ---
 
-## Task 2: Extend `light.rs::system_read_paths` with discovered baseline
+## Task 2: Extend baseline (landlock paths + seccomp syscalls)
+
+> **Amended after T1 (2026-05-09).** T1 surfaced that the seccomp baseline in `strict.rs::baseline_syscall_map()` is missing `SYS_sched_getaffinity` — tokio's `Builder::new_multi_thread().build()` calls it to size the worker pool, and the `KillProcess` mismatch action SIGSYSes the child producing the same "EOF before handshake" symptom as a landlock denial. This task now covers both halves of the runtime baseline (filesystem + syscall) so T4's tests can actually pass.
 
 **Files:**
 - Modify: `crates/tau-sandbox-native/src/light.rs:226-236` (the `system_read_paths` array)
 - Modify: `crates/tau-sandbox-native/src/light.rs` (add unit tests in `mod tests`)
+- Modify: `crates/tau-sandbox-native/src/strict.rs:163` (add `SYS_sched_getaffinity` + `SYS_sched_setaffinity` to the scheduling syscall group)
+- Modify: `crates/tau-sandbox-native/src/strict.rs` (add unit test in `mod tests`)
 
 - [ ] **Step 1: Refactor `system_read_paths` to a top-level constant for testability**
 
@@ -294,6 +298,41 @@ fn baseline_system_read_paths_no_application_data() {
 
 (Adjust `expected_new` to match the actual T1 findings.)
 
+- [ ] **Step 3.5: Extend seccomp baseline with scheduling syscalls (T1 amendment)**
+
+Find the scheduling-syscall group in `crates/tau-sandbox-native/src/strict.rs` around line 163 (the `allow!` block ending with `SYS_sched_yield, SYS_nanosleep, ...`). Add `sched_getaffinity` + `sched_setaffinity` to that group:
+
+```rust
+        libc::SYS_sched_yield,
+        // T1 (2026-05-09): tokio's Builder::new_multi_thread sizes the
+        // worker pool by calling sched_getaffinity. Without this, the
+        // KillProcess mismatch action SIGSYSes the child before handshake.
+        libc::SYS_sched_getaffinity,
+        // Defensive: tokio doesn't currently call sched_setaffinity, but
+        // some runtime configurations do. Allowed alongside getaffinity.
+        libc::SYS_sched_setaffinity,
+        libc::SYS_nanosleep,
+```
+
+Then in `crates/tau-sandbox-native/src/strict.rs`'s `#[cfg(test)] mod tests` block, add:
+
+```rust
+#[test]
+fn baseline_syscall_map_includes_sched_getaffinity() {
+    let map = baseline_syscall_map();
+    assert!(
+        map.contains_key(&libc::SYS_sched_getaffinity),
+        "tokio Builder::new_multi_thread calls sched_getaffinity to size \
+         the worker pool; without it KillProcess SIGSYSes the child \
+         before handshake (T1 finding 2026-05-09)"
+    );
+    assert!(
+        map.contains_key(&libc::SYS_sched_setaffinity),
+        "sched_setaffinity is allowed defensively alongside getaffinity"
+    );
+}
+```
+
 - [ ] **Step 4: Run the new + existing tests**
 
 Run:
@@ -303,7 +342,7 @@ timeout 300 env CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=target/agent-impl \
   cargo nextest run -p tau-sandbox-native --lib 2>&1 | tail -30
 ```
 
-Expected: 3 new tests pass; all existing `light.rs` tests pass.
+Expected: 3 new `light.rs` tests + 1 new `strict.rs` test pass; all existing `tau-sandbox-native` tests pass.
 
 - [ ] **Step 5: Run the e2e tests on Linux to confirm no regression**
 
@@ -320,7 +359,7 @@ If on darwin-arm64 host: skip — the e2e tests are Linux-only and will be exerc
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/tau-sandbox-native/src/light.rs
+git add crates/tau-sandbox-native/src/light.rs crates/tau-sandbox-native/src/strict.rs
 git commit -m "feat(sandbox-native): extend landlock baseline with runtime-mechanics paths
 
 Adds /proc/self, /dev/urandom, /dev/null (and any others discovered in
@@ -476,44 +515,23 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 ---
 
-## Task 4: Un-`#[ignore]` shell + fs-read tests, wire helper
+## Task 4: Un-`#[ignore]` fs-read test, wire helper, update shell `#[ignore]` reason
+
+> **Amended after T1 (2026-05-09).** Original plan un-`#[ignore]`'d both shell + fs-read. T1 found that shell handshakes successfully under T2's baseline but fails during invoke with `spawn failed: Permission denied` — std's `Command::spawn` does PATH-search via execvp, and landlock denies exec on `/usr/local/{sbin,bin}` (not in baseline) before reaching the allowed `/usr/bin/echo`. Root cause is sub-project E (per-command exec gating), not startup-IO. **Scope amendment:** PR 1 closes only `fs_read_layer4_native_reads_data_file`. The shell `#[ignore]` stays but its message is updated to reflect the actual root cause (out of T1's scope).
 
 **Files:**
-- Modify: `crates/tau-plugin-compat/tests/layer4_native.rs:167` (shell test) — remove `#[ignore]`, wire helper
+- Modify: `crates/tau-plugin-compat/tests/layer4_native.rs:167` (shell test) — keep `#[ignore]` but update its message
 - Modify: `crates/tau-plugin-compat/tests/layer4_native.rs:264` (fs-read test) — remove `#[ignore]`, wire helper
 
-- [ ] **Step 1: Update the shell test**
+- [ ] **Step 1: Update the shell test's `#[ignore]` message**
 
-Find the block at `crates/tau-plugin-compat/tests/layer4_native.rs:166-194`:
-
-```rust
-#[tokio::test]
-#[ignore = "Plugin EOFs before handshake under strict tier — needs fs.read for plugin's runtime state (config, tmp, /proc, etc.). Each plugin's startup I/O surface needs cataloging for proper plan derivation. Defer to a sub-project D follow-up that builds plugin-specific plans, or sub-project F."]
-async fn shell_layer4_native_runs_echo_hello() {
-    // ...
-    let spawn_cap: Capability = domain_fixtures::cap_process_spawn(&["echo"]);
-    let plan = SandboxPlan::new(vec![spawn_cap.clone()], None, None);
-```
-
-Replace with:
+Find the `#[ignore]` line at `crates/tau-plugin-compat/tests/layer4_native.rs:167`. Replace it with an updated message reflecting the T1 finding:
 
 ```rust
-#[tokio::test]
-async fn shell_layer4_native_runs_echo_hello() {
-    // ...
-    let spawn_cap: Capability = domain_fixtures::cap_process_spawn(&["echo"]);
-
-    // Per-plugin startup-IO paths beyond the runtime baseline. Empty for
-    // shell — runtime baseline (BASELINE_SYSTEM_READ_PATHS) is sufficient.
-    let extras = tau_plugin_compat::startup_io::startup_io_paths_for("shell-plugin");
-    let mut caps = vec![spawn_cap.clone()];
-    if !extras.is_empty() {
-        caps.push(domain_fixtures::cap_fs_read(extras));
-    }
-    let plan = SandboxPlan::new(caps, None, None);
+#[ignore = "Handshakes successfully under T2's baseline (landlock + seccomp) but fails during invoke: std's Command::spawn does PATH-search via execvp, landlock denies exec on /usr/local/{sbin,bin} before reaching /usr/bin/echo. Root cause is sub-project E (per-command exec gating); not closeable by startup-IO work. T1 finding 2026-05-09."]
 ```
 
-(Two changes: remove the `#[ignore]` line; replace the plan construction with the new caps-vector form.)
+Do **not** change the test body. Do **not** wire the helper here — the test remains `#[ignore]`'d.
 
 - [ ] **Step 2: Update the fs-read test**
 
@@ -557,51 +575,64 @@ timeout 180 env CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=target/agent-impl \
 
 Expected: clean compile.
 
-- [ ] **Step 4: Run the un-`#[ignore]`'d tests on Linux**
+- [ ] **Step 4: Run the un-`#[ignore]`'d test on Linux (Podman gate)**
 
-If on Linux directly:
-
-```bash
-timeout 300 env CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=target/agent-impl \
-  cargo nextest run -p tau-plugin-compat --test layer4_native \
-    shell_layer4_native_runs_echo_hello \
-    fs_read_layer4_native_reads_data_file 2>&1 | tail -30
-```
-
-If on darwin-arm64 host (no native landlock), run via the lefthook Podman gate:
+Host is darwin-arm64; native landlock test gracefully SKIPs there. Run inside the lefthook Podman gate's container (`docker.io/library/rust:1.82-bookworm`):
 
 ```bash
-podman run --rm -v $PWD:/work -w /work \
+podman run --rm \
+  --cap-add SYS_ADMIN --cap-add NET_ADMIN \
+  --security-opt seccomp=unconfined \
+  --security-opt apparmor=unconfined \
+  --security-opt label=disable \
+  -v "$PWD:/workspace" \
+  -v cargo-cache:/usr/local/cargo/registry \
+  -v target-cache:/workspace/target/lefthook-podman \
+  -w /workspace \
   -e CARGO_INCREMENTAL=0 \
-  -e CARGO_TARGET_DIR=/work/target/podman \
-  ghcr.io/lebocqtitouan/tau-podman-gate:latest \
-  bash -c "cargo nextest run -p tau-plugin-compat --test layer4_native \
-    shell_layer4_native_runs_echo_hello \
-    fs_read_layer4_native_reads_data_file"
+  -e CARGO_TARGET_DIR=/workspace/target/lefthook-podman \
+  docker.io/library/rust:1.82-bookworm \
+  bash -c '
+    set -ex
+    apt-get update -qq && apt-get install -y -qq iproute2 nftables
+    if ! command -v cargo-nextest >/dev/null; then
+      curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C $CARGO_HOME/bin
+    fi
+    cargo build --release -p tau-plugins-fs-read
+    cargo build -p tau-cli --bin tau
+    cargo nextest run -p tau-plugin-compat --test layer4_native \
+      fs_read_layer4_native_reads_data_file \
+      --features integration-tests
+  '
 ```
 
-Expected: both tests PASS.
+Expected: `fs_read_layer4_native_reads_data_file` passes. Shell test stays `#[ignore]`'d (still ignored, runs but not asserted).
 
-If either FAILS: hard-stop. Re-run T1 to identify the missed path. Do NOT bypass with `#[ignore]` — that's the bug we're trying to close.
+If `fs_read` FAILS: hard-stop. Investigate (the T1 baseline should be sufficient). Do NOT bypass with `#[ignore]` — that's the bug we're trying to close.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add crates/tau-plugin-compat/tests/layer4_native.rs
-git commit -m "test(plugin-compat): un-#[ignore] shell + fs-read Layer 4 native tests
+git commit -m "test(plugin-compat): un-#[ignore] fs-read Layer 4 native test
 
-Both tests now pass on Linux thanks to:
-- T2's tau-sandbox-native::light::BASELINE_SYSTEM_READ_PATHS extension
-  (covers /proc/self, /dev/urandom, etc. — the runtime mechanics).
-- T3's startup_io_paths_for helper (empty arms for both plugins; the
-  runtime baseline is sufficient for them).
+fs-read passes on Linux thanks to:
+- T2's tau-sandbox-native baseline extensions (landlock paths +
+  seccomp sched_getaffinity).
+- T3's startup_io_paths_for helper (empty arm for fs-read; the
+  runtime baseline is sufficient).
 
-Each test now wires startup_io_paths_for in to lay the API surface
-for PR 2 — the call form is identical for the HTTP plugins; only the
-match arm content differs.
+Wires startup_io_paths_for in to lay the API surface for PR 2's
+HTTP plugins — call form is identical; only match arm content differs.
 
-Closes 2 of 5 #[ignore]'d Layer 4 native tests. Remaining 3 (HTTP
-plugins: anthropic, ollama, openai) close in PR 2.
+Closes 1 of 5 #[ignore]'d Layer 4 native tests in PR 1. Shell test
+stays #[ignore]'d with an updated comment per T1's finding: it
+handshakes but fails during invoke (PATH-search hits landlock-denied
+/usr/local/{sbin,bin} before reaching /usr/bin/echo). Sub-project E
+(per-command exec gating) territory, not startup-IO.
+
+PR 2 will close anthropic + ollama + openai (HTTP plugins). Shell
+closes when sub-project E lands.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 "
