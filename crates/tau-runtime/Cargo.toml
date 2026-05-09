@@ -58,6 +58,11 @@ jsonschema          = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 tau-sandbox-darwin = { workspace = true }
 
+# Windows-only: AppContainer adapter. Selected for RegistryKind::Native on
+# Windows hosts.
+[target.'cfg(target_os = "windows")'.dependencies]
+tau-sandbox-windows = { workspace = true }
+
 [features]
 default = []
 # Exposes test-only constructors and re-exports under

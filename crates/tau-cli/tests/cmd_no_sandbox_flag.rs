@@ -47,19 +47,15 @@ fn sandbox_passthrough_equivalent_to_no_sandbox() {
 }
 
 // ---- Test 3: --sandbox native on Windows errors clearly --------------------
-
-// macOS now satisfies `RegistryKind::Native` via `tau-sandbox-darwin`
+//
+// macOS satisfies `RegistryKind::Native` via `tau-sandbox-darwin`
 // (sandbox-exec); Linux satisfies it via `tau-sandbox-native` (landlock +
-// seccomp + namespaces). Windows has no native adapter yet — that's where
-// the forced-Native path still returns Unavailable + a clear error.
+// seccomp + namespaces). Windows has a Phase 1 scaffold (`tau-sandbox-windows`)
+// but probe returns Unavailable until Phase 2 lands the Win32 calls, so
+// the forced-Native path on Windows still errors clearly today.
 #[cfg(target_os = "windows")]
 #[test]
 fn sandbox_native_on_windows_errors_clearly() {
-    // --sandbox native forces the native adapter. On Windows there is no
-    // native adapter wired up; resolve_adapter_forced(Native) probes
-    // Unavailable and returns an error mentioning "native". We must NOT
-    // use --dry-run because the error surfaces inside load_plugins
-    // (after the dry-run early-return).
     let dir = common::setup_echo_project("echo", "canned_text = \"reply\"\n", &[]);
     let global_dir = dir.path().join("global");
     AssertCmd::cargo_bin("tau")
@@ -70,11 +66,12 @@ fn sandbox_native_on_windows_errors_clearly() {
         // Unset the mock env var so the forced-kind path is exercised and
         // not bypassed by mock-sandbox injection.
         .env_remove("TAU_TESTING_ALLOW_MOCK_SANDBOX")
-        // Pipe empty stdin so the binary doesn't block on tty input.
         .write_stdin("")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("native"));
+        // The runtime's error formatter capitalizes RegistryKind::Native
+        // as `Native`. Match that exactly to keep the assertion robust.
+        .stderr(predicate::str::contains("Native"));
 }
 
 // ---- Test 4: --no-sandbox and --sandbox conflict ---------------------------
