@@ -11,6 +11,12 @@
 > **Update (2026-05-06):** Sub-project D (e2e landlock CI integration + port-aware Layer 4 driver) shipped. See [its design doc](2026-05-05-e2e-landlock-design.md) and [ADR-0017](../../decisions/0017-e2e-landlock-and-driver.md). The 5 e2e kernel-enforcement files are re-introduced and passing on Linux CI; the port-aware driver foundation is in place. **However:** the 10 Layer 4 plugin-compat `#[ignore]`'s did NOT flip — plugins exec under strict-tier landlock but EOF before handshake (their startup-IO surface needs per-plugin cataloging). That work is deferred to a D-followup or sub-project F. Two priority-12 native-adapter bugs were caught and fixed during D (Execute access flag + binary-parent auto-add); D also delivered GitHub Actions caching infrastructure as a bonus. The 7 remaining sub-projects are E, F, G, H, I, J, K — plus the closed-inline C.
 >
 > **Update (2026-05-06):** Sub-project F (per-host network filtering via nftables-in-netns) shipped via two PRs. PR #35 (commit d4438ae) landed the `tau-sandbox-native::net_filter` machinery. PR #37 landed task 6.5 — the `Sandbox::apply_post_spawn` trait extension + sync-pipe rendezvous + `NativeSandbox` integration + `validate_plan` hard-refuse + runtime caller + `unshare_flags_for_plan` flip. The Native adapter is fully integrated. Two follow-ups carried over: Container-adapter network filtering (the 3 `layer4_container.rs` HTTP plugin tests remain `#[ignore]`'d) and a `strict_net_filter.rs` integration test hang in CI that needs a real-Linux debugging session. See [ADR-0019](../../decisions/0019-per-host-network-filter.md) and its addendum for details.
+>
+> **Update (2026-05-07):** Sub-project H (sandbox proxy) shipped via PR #39 — replaces F's veth+nft machinery with a userspace HTTP-CONNECT proxy + `tau-net-bridge`, eliminating the CAP_NET_ADMIN requirement and unhanging `strict_net_filter.rs` (replaced by `strict_proxy.rs`). See [ADR-0020](../../decisions/0020-sandbox-proxy.md). The 3 `layer4_container.rs` HTTP plugin tests remained `#[ignore]`'d after H — bridge wrapping inside the container failed before plugin handshake; root cause turned out to be Docker bind-mount socket perms.
+>
+> **Update (2026-05-08):** Per-plugin Docker images shipped via PR #41 (commit ae8c21c) + PR #43 (commit 1d03075) — see [ADR-0021](../../decisions/0021-per-plugin-images.md). Replaces the Container adapter's bind-mount-the-plugin-binary approach with per-plugin Docker images built on a shared `tau-plugin-base`; `xtask build-plugin-images` and CI buildx cache integration; plain-HTTP forwarding added to `tau-sandbox-proxy`; container runs as `--user 0` for HTTP plans with cap-drop=ALL preserving security envelope. Closes all 5 originally-`#[ignore]`'d `layer4_container.rs` tests. Dev environment + lefthook pre-push gate also shipped via PR #42 (commit 9080bbb) and expanded in PR #44 (commit f341366) to cover all 10 Linux CI jobs sequentially in a single Podman container — pre-push gate (~3–4 min warm) catches cross-platform breakage before CI.
+>
+> **Update (2026-05-09):** Sub-project J (macOS sandbox-exec adapter) shipped via PR #45 (commit 597db89) — see [spec](2026-05-09-sandbox-darwin-design.md) and [ADR-0022](../../decisions/0022-sandbox-darwin.md). New `tau-sandbox-darwin` crate; strict tier via SBPL profile + `sandbox-exec` + the same `tau-sandbox-proxy` defense-in-depth as Linux. Runtime registry: `instantiate(RegistryKind::Native)` returns `DarwinSandbox` on macOS. Sub-project K (Windows AppContainer adapter) shipped Phase 1 (scaffold only) via PR #46 (commit 6a58c53) — see [spec](2026-05-09-sandbox-windows-design.md) and [ADR-0023](../../decisions/0023-sandbox-windows-scaffold.md). Pure-logic profile generation + Win32 stubs + `WindowsSandbox` whose probe returns `Unavailable` honestly. Phase 2 deferred (real Win32 calls + UDS→TCP proxy + `CreateProcessAsUserW` spawn integration — needs a Windows dev environment to iterate on).
 
 ## Test coverage assessment
 
@@ -311,33 +317,33 @@ Option 1 is cleanest. Option 3 is most aligned with security posture (no Mock in
 
 ---
 
-### Sub-project J — macOS sandbox-exec adapter
+### ~~Sub-project J — macOS sandbox-exec adapter~~ ✅ DONE 2026-05-09
 
-**One-line:** First-class macOS sandbox via `sandbox_init_with_parameters` (libsandbox FFI).
+**Status:** Shipped 2026-05-09 — see [spec](2026-05-09-sandbox-darwin-design.md) and [ADR-0022](../../decisions/0022-sandbox-darwin.md). PR #45 (commit 597db89).
 
-**Scope:**
-1. New crate `tau-sandbox-macos`.
-2. FFI bindings for `sandbox_init_with_parameters` (scarce documentation; reverse-engineer from open-source sandbox-exec users).
-3. Translate `CapabilityShape` to sandbox-exec profile syntax.
-4. Probe + wrap_spawn implementation.
-5. Default chain on macOS becomes `[macos, container]`.
+**What landed (and what diverged from the original scope above):**
 
-**Estimated scope:** 4-6 weeks (the libsandbox FFI is poorly documented).
+1. **Crate name** is `tau-sandbox-darwin`, not `tau-sandbox-macos` (matches `target_os = "macos"` cfg gate convention).
+2. **Strict tier via `/usr/bin/sandbox-exec` + SBPL** — not `sandbox_init_with_parameters` FFI. SBPL is the profile dialect `sandbox-exec` accepts; using the binary avoids reverse-engineering libsandbox's FFI surface. Apple deprecated but still ships `sandbox-exec`; if/when that changes the migration path is App Sandbox + entitlements (separate sub-project).
+3. **No Light tier** — SBPL has no equivalent of landlock's per-path read/write granularity short of strict mode. Light deliberately omitted.
+4. **Defense-in-depth via `tau-sandbox-proxy`** — same architecture as Linux strict (ADR-0020). SBPL profile permits outbound network only to `127.0.0.1:8443`; plugin's reqwest routes via `HTTPS_PROXY=http://127.0.0.1:8443`.
+5. **Runtime registry resolves `RegistryKind::Native` to `DarwinSandbox` on macOS** — no separate `[macos, container]` chain. The Bazel-style registry from sub-project A handles platform routing via cfg-gated registrations.
 
 ---
 
-### Sub-project K — Windows AppContainer adapter
+### ~~Sub-project K — Windows AppContainer adapter~~ ✅ DONE 2026-05-09 (Phase 1 scaffold; Phase 2 deferred)
 
-**One-line:** First-class Windows sandbox via WinAPI AppContainer.
+**Status:** Phase 1 (scaffold) shipped 2026-05-09 — see [spec](2026-05-09-sandbox-windows-design.md) and [ADR-0023](../../decisions/0023-sandbox-windows-scaffold.md). PR #46 (commit 6a58c53). Phase 2 (real Win32 calls + UDS→TCP proxy + `CreateProcessAsUserW` spawn integration) deferred — see ADR-0023 for the three coupled changes.
 
-**Scope:**
-1. New crate `tau-sandbox-windows`.
-2. `windows-rs` bindings for AppContainer creation.
-3. Translate `CapabilityShape` to WinRT capability strings.
-4. Probe + wrap_spawn implementation.
-5. Default chain on Windows becomes `[windows, container]`.
+**What landed (Phase 1):**
 
-**Estimated scope:** 4-6 weeks.
+1. **`tau-sandbox-windows` crate** — pure-logic `profile.rs::build_appcontainer_caps(plan) -> AppContainerCaps` (7 unit tests, runs anywhere), Win32-shape API stubs in `acl.rs` returning `Ok(())` without calling Win32, and `WindowsSandbox` impl `Sandbox` whose probe returns `Unavailable` on Windows honestly. Resolver still falls back to `Passthrough` because the probe declines, so behaviour is unchanged from today.
+2. **Runtime registry wired** — `SandboxAdapter::Windows` cfg-gated to Windows; `instantiate(RegistryKind::Native)` returns `Windows` on Windows.
+3. **Architecture decision** — Phase 1 is honest about not actually sandboxing anything. The probe declining means `tau sandbox status` reports `Unavailable`, not a misleading `Available { tier: Strict }`.
+
+**Why scaffold-first:** Two structural blockers prevent landing the full adapter in one PR — `tau-sandbox-proxy` is `cfg(unix)`-gated (uses `tokio::net::UnixListener`), and `std::process::Command` on Windows can't be intercepted at spawn time without bypassing `Command::spawn` and calling `CreateProcessAsUserW` directly. Phase 1 ships the workspace structure, cfg-gating, and runtime registry routing ahead of Phase 2's platform work.
+
+**Dev-environment constraint:** AppContainer is a Windows kernel primitive that Wine doesn't reproduce; iteration on Phase 2 is push-to-CI only (~5–7 min per `windows-latest` cycle) until a UTM Windows 11 ARM VM lands as a separate sub-project.
 
 ---
 
@@ -375,8 +381,8 @@ J (macOS), K (Windows) — Phase 2; cross-platform parity
 | Per-host network filtering | v0.1 over-permissive fallback | F |
 | `tau check` standalone command | Phase 2 sub-project A | (separate roadmap) |
 | `#[capabilities(...)]` proc macro | Not implemented; manifest is authority | (deferred) |
-| macOS sandbox-exec adapter | Not implemented | J |
-| Windows AppContainer adapter | Not implemented | K |
+| macOS sandbox-exec adapter | ✅ Shipped 2026-05-09 (PR #45, ADR-0022) | J |
+| Windows AppContainer adapter | ✅ Phase 1 scaffold shipped 2026-05-09 (PR #46, ADR-0023); Phase 2 deferred | K |
 | Remote sandbox backends | Not implemented | (Phase 2 F) |
 | WASM target | Not implemented | (Phase 2 G) |
 
