@@ -22,6 +22,7 @@ members = [
     "crates/tau-plugins/fs-read",
     "crates/tau-plugins/shell",
     "crates/tau-sandbox-container",
+    "crates/tau-sandbox-darwin",
     "crates/tau-sandbox-native",
     "crates/tau-sandbox-proxy",
     "xtask",
@@ -49,6 +50,7 @@ tau-plugin-test-support = { path = "crates/tau-plugin-test-support", version = "
 tau-plugin-conformance  = { path = "crates/tau-plugin-conformance",  version = "0.0.0" }
 tau-sandbox-native      = { path = "crates/tau-sandbox-native",      version = "0.0.0" }
 tau-sandbox-container   = { path = "crates/tau-sandbox-container",   version = "0.0.0" }
+tau-sandbox-darwin      = { path = "crates/tau-sandbox-darwin",      version = "0.0.0" }
 tau-sandbox-proxy       = { path = "crates/tau-sandbox-proxy",       version = "0.0.0" }
 thiserror       = "2"
 semver          = { version = "1" }

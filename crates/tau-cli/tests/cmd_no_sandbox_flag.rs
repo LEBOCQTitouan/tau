@@ -46,15 +46,20 @@ fn sandbox_passthrough_equivalent_to_no_sandbox() {
         .success();
 }
 
-// ---- Test 3: --sandbox native on non-Linux errors clearly ------------------
+// ---- Test 3: --sandbox native on Windows errors clearly --------------------
 
-#[cfg(not(target_os = "linux"))]
+// macOS now satisfies `RegistryKind::Native` via `tau-sandbox-darwin`
+// (sandbox-exec); Linux satisfies it via `tau-sandbox-native` (landlock +
+// seccomp + namespaces). Windows has no native adapter yet — that's where
+// the forced-Native path still returns Unavailable + a clear error.
+#[cfg(target_os = "windows")]
 #[test]
-fn sandbox_native_on_non_linux_errors_clearly() {
-    // --sandbox native forces the native (Linux-only) adapter.
-    // On macOS/Windows, resolve_adapter_forced(Native) probes Unavailable and
-    // returns an error mentioning "native". We must NOT use --dry-run because
-    // the error surfaces inside load_plugins (after the dry-run early-return).
+fn sandbox_native_on_windows_errors_clearly() {
+    // --sandbox native forces the native adapter. On Windows there is no
+    // native adapter wired up; resolve_adapter_forced(Native) probes
+    // Unavailable and returns an error mentioning "native". We must NOT
+    // use --dry-run because the error surfaces inside load_plugins
+    // (after the dry-run early-return).
     let dir = common::setup_echo_project("echo", "canned_text = \"reply\"\n", &[]);
     let global_dir = dir.path().join("global");
     AssertCmd::cargo_bin("tau")
