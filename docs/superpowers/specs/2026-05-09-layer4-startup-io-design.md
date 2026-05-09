@@ -502,3 +502,53 @@ Verified by re-running the same Podman invocation with `TAU_NET_BRIDGE_PATH=/wor
 - ⚠️ The 3 HTTP tests now fail later in `PluginProcess::spawn_and_handshake` (panic on `child.stdin.take().expect(...)` at `process.rs:283-287` — bridge child seemingly exits before its pipes are read). This is a *different* failure mode from spawn-ENOENT and is in handshake-startup-IO territory. Whether T0b should land just the test-env fix and update the 3 `#[ignore]` reasons to reflect this new mode (deferring real fix to T7-followup), or chase the bridge-startup issue too, is a scoping call for the spawn-fix task.
 - ✅ fs-read test (`fs_read_layer4_native_reads_data_file`) continues to pass — confirming the fix is non-regressive.
 - ✅ No `tau-runtime` source changes were made; existing tau-runtime lib tests are untouched.
+
+### T7 — HTTP plugin startup-IO investigation (2026-05-10, post-Phase-0)
+
+**Investigator:** main agent (after T7 subagent partial work).
+
+**Environment:** lefthook Podman gate (`docker.io/library/rust:1.82-bookworm`) on darwin-arm64 host.
+
+**Pre-state (post-Phase-0 PR #49):** All 3 HTTP tests reach handshake stage cleanly. Failure is `PluginHandshakeFailed: EOF before handshake response` — original PR 2 startup-IO blocker, not the spawn-ENOENT or stdin-take-panic Phase 0 fixed.
+
+**Discovery 1: seccomp gap for tau-net-bridge server-side syscalls**
+
+Per ADR-0020, the strict-tier sandbox wraps the plugin spawn with `tau-net-bridge`, which listens on `127.0.0.1:8443` *inside* the empty netns. The bridge is `execve`'d from the plugin's seccomp context, so it inherits the same filter. The current `extend_with_network_rules` (`crates/tau-sandbox-native/src/net.rs:77-102`) allows only **client-side** syscalls (`socket`, `connect`, `getpeername`, `getsockname`). The bridge calls `bind`, `listen`, `accept`/`accept4` to set up its TCP listener, and the seccomp `KillProcess` action SIGSYSes the bridge process before it can plumb stdio. Plugin parent reads EOF on stdin → "EOF before handshake response".
+
+The "intentionally omitted" comment dates to priority-12 when plugins were HTTP clients only. ADR-0020's bridge/proxy architecture changed that assumption but didn't update the seccomp baseline.
+
+**Discovery 2: even with the seccomp fix, more is missing**
+
+Verified locally by adding `SYS_bind`, `SYS_listen`, `SYS_accept`, `SYS_accept4` to `net_syscalls`. Re-ran all 3 HTTP tests inside the Podman gate: still `EOF before handshake response`. Reverted the local edit.
+
+The remaining failure indicates additional bridge-strict-tier integration gaps. Likely candidates (not verified yet):
+
+- **Netlink syscalls** for `ip link set lo up`. The bridge likely brings loopback up inside the empty netns to bind `127.0.0.1:8443`. The seccomp baseline doesn't include `socket(AF_NETLINK, ...)` or related netlink-specific calls.
+- **Other network-config syscalls** specific to operating in an empty netns (creating/configuring routes, etc.).
+- **Possibly more landlock paths** the bridge needs (e.g., `/proc/sys/net/...` for runtime probes).
+
+**Verification status:**
+
+- Seccomp gap (`bind/listen/accept/accept4`) — VERIFIED via local edit + Podman test (necessary but not sufficient).
+- Netlink hypothesis — UNVERIFIED. Would require strace inside netns capturing the bridge's actual syscall sequence.
+- Additional landlock paths — UNVERIFIED.
+
+**Re-scoping recommendation:**
+
+The original T7 scope ("investigate plugin startup-IO surface, populate `startup_io_paths_for` per-plugin extras") is **falsified for HTTP plugins**. The remaining failure is in the bridge ↔ strict-tier integration, not in the plugin's TLS init paths. The plugin never reaches TLS init; the bridge dies before it can do anything.
+
+Per ADR-0020, sub-project H (sandbox-proxy) shipped the proxy + bridge architecture. Its strict-tier-integration was tested via `strict_proxy.rs` integration tests in `tau-sandbox-native`, but those tests don't actually run a real bridge end-to-end under the full strict-tier filter — they validate the proxy + seccomp denial path only.
+
+The 3 HTTP layer4 tests (`anthropic`/`ollama`/`openai`_layer4_native_completes_via_cassette) are the first comprehensive end-to-end test of the bridge under real strict-tier landlock+seccomp+netns isolation. They're surfacing genuine gaps that nobody has hit before.
+
+**Recommendation:** spin out a separate sub-project — "Bridge ↔ strict-tier integration completion" — that:
+
+1. straces the bridge inside an empty netns to enumerate every syscall needed
+2. extends `extend_with_network_rules` with the full set (server-side + netlink)
+3. extends `BASELINE_SYSTEM_READ_PATHS` with any additional paths the bridge needs
+4. adds an end-to-end integration test in `tau-sandbox-native` that runs a real bridge under strict-tier and asserts it can listen + accept
+5. only THEN un-`#[ignore]`s the 3 layer4 HTTP tests (since they depend on the integration working)
+
+The `startup_io_paths_for` helper from PR 1 may still be needed for plugin-specific TLS bootstrap paths once the bridge gap is closed — but that work is orthogonal and can wait.
+
+**T7 outcome:** scope falsified; PR 2 (originally "populate startup_io HTTP arms + un-`#[ignore]` 3 tests") cannot ship as scoped. The 3 HTTP tests stay `#[ignore]`'d. Phase 0 (PR #49) remains valid and useful (closed real bugs in `wrap_spawn` stdio handling + test infra). Recommendation: bridge/strict-tier sub-project is the next blocker.
