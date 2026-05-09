@@ -94,6 +94,85 @@ fn locate_plugin_bin(bin_name: &str) -> PathBuf {
     workspace_root.join("target").join("release").join(bin_name)
 }
 
+/// Locate the pre-built `tau-net-bridge` binary.
+///
+/// `tau_sandbox_native::strict::wrap_spawn` rewrites
+/// `Command::new(plugin_bin)` to `Command::new(<bridge>)` whenever the
+/// `SandboxPlan` contains `Network(Http)`, where `<bridge>` is read from
+/// the `TAU_NET_BRIDGE_PATH` env var (with a bare `tau-net-bridge` PATH
+/// fallback). Cargo only auto-populates `CARGO_BIN_EXE_tau-net-bridge`
+/// for tests in the crate that owns the bin target
+/// (`tau-sandbox-native`); the `tau-plugin-compat` HTTP tests therefore
+/// need to locate the binary themselves and export the env var.
+///
+/// Resolution order mirrors `locate_plugin_bin` so the same workspace
+/// `target/release/` placement used by the lefthook pre-push gate works
+/// for both helpers.
+fn locate_bridge_bin() -> Option<PathBuf> {
+    // 1. CARGO_TARGET_DIR override.
+    if let Ok(target_dir) = std::env::var("CARGO_TARGET_DIR") {
+        let candidate = Path::new(&target_dir)
+            .join("release")
+            .join("tau-net-bridge");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        let abs = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(&target_dir)
+            .join("release")
+            .join("tau-net-bridge");
+        if abs.exists() {
+            return Some(abs);
+        }
+    }
+
+    // 2. Workspace-root default target dir.
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let default = workspace_root
+        .join("target")
+        .join("release")
+        .join("tau-net-bridge");
+    if default.exists() {
+        return Some(default);
+    }
+
+    None
+}
+
+/// Ensure `TAU_NET_BRIDGE_PATH` is set, locating the binary on disk.
+/// Returns `false` (and logs a SKIP message) if the bridge binary is
+/// not present — the caller should `return` to skip the test.
+fn ensure_bridge_path_or_skip() -> bool {
+    if std::env::var_os("TAU_NET_BRIDGE_PATH").is_some() {
+        return true;
+    }
+    match locate_bridge_bin() {
+        Some(path) => {
+            // SAFETY: `std::env::set_var` is sound on Rust 2021;
+            // nextest's per-test process isolation (and our serialized
+            // resolve-adapter cell) means racing env writes are not a
+            // concern here.
+            std::env::set_var("TAU_NET_BRIDGE_PATH", path);
+            true
+        }
+        None => {
+            eprintln!(
+                "SKIP: tau-net-bridge binary not found; \
+                 run `cargo build -p tau-sandbox-native --bin tau-net-bridge --release` first"
+            );
+            false
+        }
+    }
+}
+
 /// Construct a `LockedPlugin` pointing at the given binary path.
 fn make_locked_plugin(bin_name: &str, binary_path: PathBuf) -> LockedPlugin {
     let manifest = PluginManifest::new(PortKind::Tool, PluginKind::RustCargo, bin_name.to_string());
@@ -456,7 +535,7 @@ fn make_net_http_localhost_cap() -> Capability {
 /// Skips if: (a) landlock/native adapter unavailable, (b) anthropic-plugin
 /// binary not yet built.
 #[tokio::test]
-#[ignore = "Plugin EOFs before handshake under strict tier — anthropic-plugin's HTTP client init touches state outside plan's read paths. Defer to a sub-project D follow-up that builds plugin-specific plans, or sub-project F."]
+#[ignore = "Phase 0 unblocked spawn (TAU_NET_BRIDGE_PATH wired in tests + bridge built in CI + strict::wrap_spawn now restores stdio piping after Command rebuild). Plugin now reaches handshake but EOFs there because reqwest TLS init touches paths beyond BASELINE_SYSTEM_READ_PATHS. Awaits T7' (renumbered T7) HTTP startup-IO investigation per docs/superpowers/specs/2026-05-09-layer4-startup-io-design.md."]
 async fn anthropic_layer4_native_completes_via_cassette() {
     // 1. Locate the pre-built anthropic plugin binary.
     let bin_path = locate_plugin_bin("anthropic-plugin");
@@ -466,6 +545,13 @@ async fn anthropic_layer4_native_completes_via_cassette() {
              run `cargo build -p tau-plugins-anthropic --release` first",
             bin_path.display()
         );
+        return;
+    }
+
+    // 1b. Locate tau-net-bridge and export TAU_NET_BRIDGE_PATH (read by
+    //     tau_sandbox_native::strict::wrap_spawn when the plan has
+    //     Network(Http)).
+    if !ensure_bridge_path_or_skip() {
         return;
     }
 
@@ -553,7 +639,7 @@ async fn anthropic_layer4_native_completes_via_cassette() {
 /// Skips if: (a) landlock/native adapter unavailable, (b) ollama-plugin
 /// binary not yet built.
 #[tokio::test]
-#[ignore = "Plugin EOFs before handshake under strict tier — ollama-plugin's HTTP client init touches state outside plan's read paths. Defer to a sub-project D follow-up that builds plugin-specific plans, or sub-project F."]
+#[ignore = "Phase 0 unblocked spawn (TAU_NET_BRIDGE_PATH wired in tests + bridge built in CI + strict::wrap_spawn now restores stdio piping after Command rebuild). Plugin now reaches handshake but EOFs there because reqwest TLS init touches paths beyond BASELINE_SYSTEM_READ_PATHS. Awaits T7' (renumbered T7) HTTP startup-IO investigation per docs/superpowers/specs/2026-05-09-layer4-startup-io-design.md."]
 async fn ollama_layer4_native_completes_via_cassette() {
     // 1. Locate the pre-built ollama plugin binary.
     let bin_path = locate_plugin_bin("ollama-plugin");
@@ -563,6 +649,13 @@ async fn ollama_layer4_native_completes_via_cassette() {
              run `cargo build -p tau-plugins-ollama --release` first",
             bin_path.display()
         );
+        return;
+    }
+
+    // 1b. Locate tau-net-bridge and export TAU_NET_BRIDGE_PATH (read by
+    //     tau_sandbox_native::strict::wrap_spawn when the plan has
+    //     Network(Http)).
+    if !ensure_bridge_path_or_skip() {
         return;
     }
 
@@ -643,7 +736,7 @@ async fn ollama_layer4_native_completes_via_cassette() {
 /// Skips if: (a) landlock/native adapter unavailable, (b) openai-plugin
 /// binary not yet built.
 #[tokio::test]
-#[ignore = "Plugin EOFs before handshake under strict tier — openai-plugin's HTTP client init touches state outside plan's read paths. Defer to a sub-project D follow-up that builds plugin-specific plans, or sub-project F."]
+#[ignore = "Phase 0 unblocked spawn (TAU_NET_BRIDGE_PATH wired in tests + bridge built in CI + strict::wrap_spawn now restores stdio piping after Command rebuild). Plugin now reaches handshake but EOFs there because reqwest TLS init touches paths beyond BASELINE_SYSTEM_READ_PATHS. Awaits T7' (renumbered T7) HTTP startup-IO investigation per docs/superpowers/specs/2026-05-09-layer4-startup-io-design.md."]
 async fn openai_layer4_native_completes_via_cassette() {
     // 1. Locate the pre-built openai plugin binary.
     let bin_path = locate_plugin_bin("openai-plugin");
@@ -653,6 +746,13 @@ async fn openai_layer4_native_completes_via_cassette() {
              run `cargo build -p tau-plugins-openai --release` first",
             bin_path.display()
         );
+        return;
+    }
+
+    // 1b. Locate tau-net-bridge and export TAU_NET_BRIDGE_PATH (read by
+    //     tau_sandbox_native::strict::wrap_spawn when the plan has
+    //     Network(Http)).
+    if !ensure_bridge_path_or_skip() {
         return;
     }
 

@@ -157,6 +157,7 @@ pre-push:
               -p fs-read -p shell \
               -p echo-llm -p echo-tool \
               -p tau-cli \
+              -p tau-sandbox-native --bin tau-net-bridge \
               --target-dir $TARGET
             cargo build --release \
               --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml
@@ -166,7 +167,7 @@ pre-push:
             # target/release/. Copy them so tests find them via
             # locate_plugin_bin'"'"'s default search path.
             mkdir -p target/release
-            for bin in anthropic-plugin ollama-plugin openai-plugin fs-read-plugin shell-plugin echo-llm echo-tool tau; do
+            for bin in anthropic-plugin ollama-plugin openai-plugin fs-read-plugin shell-plugin echo-llm echo-tool tau tau-net-bridge; do
               cp -f "$TARGET/release/$bin" "target/release/$bin" 2>/dev/null || true
             done
 

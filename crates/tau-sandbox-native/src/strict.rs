@@ -421,6 +421,24 @@ pub(crate) fn apply_strict(
             .arg("--")
             .arg(&original_program)
             .args(&original_args);
+        // Restore stdio piping. `std::process::Command` has no getter for
+        // stdin/stdout/stderr so we cannot snapshot the caller's choice the
+        // way we do for envs. Pipe all three unconditionally — this matches
+        // tau-runtime's `plugin_host::process::spawn_and_handshake` (which
+        // always sets `.stdin(piped()).stdout(piped()).stderr(piped())`)
+        // and the controlled-env tests that route stdout/stderr through
+        // `Command::output()`. The bridge process inherits these pipes
+        // across its fork+exec to the plugin (see bin/tau-net-bridge.rs),
+        // so the host-side Child handles produced after `spawn()` are the
+        // pipes the plugin actually reads/writes through.
+        //
+        // Without this, the rebuild above silently drops the caller's
+        // stdio settings and the spawn returns a Child whose
+        // `stdin`/`stdout`/`stderr` are all `None`, panicking the
+        // host-side handshake driver at `child.stdin.take().expect(...)`.
+        cmd.stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
         // Restore the original environment, then append HTTPS_PROXY.
         for (k, v) in original_envs {
             match v {

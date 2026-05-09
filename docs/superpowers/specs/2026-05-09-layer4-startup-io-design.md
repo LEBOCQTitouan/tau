@@ -265,3 +265,240 @@ fs-read passes end-to-end.
   *in-process* seccomp filter installed by `apply_strict` still applies,
   which is what surfaced the SIGSYS. This means CI on bare Linux runners
   would have hit the same gap.
+
+---
+
+# Phase 0 — LLM-backend spawn fix (added 2026-05-09 evening)
+
+> **Status:** spec amendment, post-T7 brainstorm. Cut from main at `f9c2822` (PR #48 merge). Phase 0 ships before original T7 (renumbered to T7' below) can run.
+
+## Why this section exists
+
+T7 (HTTP plugin startup-IO investigation) was supposed to be a clean parallel of T1 (shell + fs-read investigation): run the test, capture EOF symptom at handshake, identify missing paths, populate the helper. Reality:
+
+**All 3 LlmBackend HTTP plugins fail at SPAWN, not at handshake.**
+
+```
+thread 'anthropic_layer4_native_completes_via_cassette' panicked at
+crates/tau-plugin-compat/tests/layer4_native.rs:514:13:
+  spawn anthropic-plugin under native adapter failed:
+  LoadFailed("PluginSpawnFailed { plugin: \"anthropic-plugin\",
+              source: Os { code: 2, kind: NotFound,
+                           message: \"No such file or directory\" } }")
+```
+
+Failure shape: `Os { code: 2 }` (ENOENT) within 4 ms. All 3 HTTP plugins reproduce identically inside the lefthook Podman gate. By contrast, the analogous Tool-port plugins (shell + fs-read) **succeed** in `spawn_tool_under_sandbox` — same Podman environment, same baseline, same driver crate, same plugin binary on disk.
+
+Hypothesis (to be verified in T0a investigation): there is a divergence between `tau_runtime::plugin_host::load_tool` and `tau_runtime::plugin_host::load_llm_backend` — a stricter binary check, an extra pre_exec step, or a path normalization difference — that produces ENOENT only on the LlmBackend port path. The bug is **not** plugin-specific (all 3 LlmBackend plugins fail uniformly) and **not** sandbox-baseline-related (Tool plugins work with the same baseline).
+
+This blocks T7 entirely: we can't investigate startup-IO surface for plugins that never reach handshake. Phase 0 is therefore a prerequisite, not part of T7.
+
+## Locked decisions (Phase 0)
+
+| # | Decision |
+|---|---|
+| 6 | Phase 0 lands as its own PR (`feat/layer4-llm-spawn-fix`), cut from main at `f9c2822`. Merges before original T7 runs. |
+| 7 | Phase 0's investigation step (renumbered T0a) emits findings as a spec amendment commit only — no code commit. Mirrors T1 / T7 pattern. |
+| 8 | Phase 0's fix step (T0b) ships the minimal change to make `load_llm_backend` reach the spawn-and-handshake stage. Verification: 3 HTTP tests now fail at handshake EOF (the original PR 2 startup-IO blocker), not at spawn ENOENT. |
+| 9 | Phase 0 does **not** un-`#[ignore]` the 3 HTTP tests. They stay ignored after Phase 0 with updated messages: "EOFs at handshake under strict tier; awaits startup-IO investigation per T7'." |
+| 10 | The `scripts/agent-push.sh` helper + `CLAUDE.md` "AGENT PUSH RULES" section (drafted in stash during the silent-kill diagnostic that enabled this Phase 0) folds into the same Phase 0 PR. The narrative connection: silent-kill diagnostic enabled Phase 0 investigation; future agents need the helper to repeat that path safely. |
+
+## Components (Phase 0)
+
+**MODIFIED**
+
+- `crates/tau-runtime/src/plugin_host/...` — minimal fix to make `load_llm_backend` reach spawn-and-handshake (specific files determined by T0a investigation; expected scope: 1–2 files).
+- `crates/tau-plugin-compat/tests/layer4_native.rs` — update the `#[ignore]` messages on the 3 HTTP tests to reflect the post-fix failure shape (handshake EOF, not spawn ENOENT). Tests stay `#[ignore]`'d.
+- `CLAUDE.md` — append "AGENT PUSH RULES" section documenting the silent-kill workaround (drafted in stash from the 2026-05-09 evening session).
+- `docs/superpowers/specs/2026-05-09-layer4-startup-io-design.md` — this Phase 0 section + populated investigation findings (T0a output).
+
+**NEW**
+
+- `scripts/agent-push.sh` — runs `lefthook run pre-push` as a standalone command (which does NOT die from runtime signal-propagation), then `git push --no-verify`. Drafted in stash.
+
+## Renumbered phasing
+
+The original 11-task plan stays — only T7 gets a "T7'" alias to mark it as post-Phase-0:
+
+| Original task | New label | Status |
+|---|---|---|
+| (none — new) | **T0a** Investigation: diff `load_tool` vs `load_llm_backend`, identify ENOENT root cause | new, blocking |
+| (none — new) | **T0b** Apply spawn fix; verify 3 HTTP tests reach handshake-EOF stage | new, blocking |
+| (none — new) | **T0c** Add `scripts/agent-push.sh` + CLAUDE.md AGENT PUSH RULES section | new, in same PR |
+| (none — new) | **T0d** USER GATE — open Phase 0 PR, monitor CI | new |
+| (none — new) | **T0e** USER GATE — squash-merge Phase 0 PR | new |
+| T7 | **T7'** HTTP startup-IO investigation (unchanged scope; unblocked after T0e) | unchanged |
+| T8 | T8 (unchanged) | unchanged |
+| T9 | T9 (unchanged) | unchanged |
+| T10 | T10 (unchanged) | unchanged |
+| T11 | T11 (unchanged) | unchanged |
+
+## Architecture (Phase 0)
+
+```
+Phase 0 PR: feat/layer4-llm-spawn-fix (cut from main @ f9c2822)
+─ T0a: investigation (spec edit only, no code commit)
+   ├─ read load_tool side-by-side with load_llm_backend
+   ├─ reproduce in lefthook Podman gate
+   └─ append findings to this spec
+─ T0b: fix (single commit)
+   ├─ apply minimal change to plugin_host
+   ├─ verify: 3 HTTP tests fail at handshake-EOF, not spawn-ENOENT
+   └─ update layer4_native.rs #[ignore] messages
+─ T0c: agent infra (single commit)
+   ├─ scripts/agent-push.sh (executable)
+   └─ CLAUDE.md AGENT PUSH RULES section
+─ T0d: USER GATE — push, monitor CI
+─ T0e: USER GATE — squash-merge
+
+Then PR 2 work (re-cut from post-Phase-0 main):
+─ T7' through T11 (original scope; rescoped only by Phase 0's outcome)
+```
+
+## Verification (Phase 0)
+
+**T0a (investigation):**
+- Findings section in this spec populated with: exact diff observed between `load_tool` and `load_llm_backend`, hypothesis for the ENOENT, reproduction recipe.
+- No code committed.
+
+**T0b (fix):**
+- `cargo nextest run -p tau-runtime --lib` continues to pass (no regression in existing runtime unit tests).
+- Inside the lefthook Podman gate: the 3 HTTP tests run with `--include-ignored`, fail at the handshake-EOF stage (not at spawn-ENOENT). Failure shape now matches what PR 1's pre-baseline state looked like for fs-read.
+- `cargo nextest run -p tau-plugin-compat --test layer4_native fs_read_layer4_native_reads_data_file` continues to pass (PR 1's win not regressed).
+
+**T0c (agent infra):**
+- `scripts/agent-push.sh` is executable (`chmod +x`).
+- A no-op commit successfully pushed via `scripts/agent-push.sh` (validates the helper end-to-end).
+- `CLAUDE.md` AGENT PUSH RULES section renders correctly.
+
+**Branch protection:** No new CI jobs. Existing matrix validates the Phase 0 fix automatically.
+
+## Risks & mitigations (Phase 0)
+
+| Risk | Mitigation |
+|---|---|
+| Spawn fix is invasive (e.g., requires a `tau-runtime` API change that breaks plugin_host callers). | T0a investigation writes findings BEFORE T0b's fix. If scope balloons, pause and reassess (escalate to user). |
+| T0b fix lands but T7' reveals more issues beyond startup-IO baseline. | Out of scope; tracked as follow-up to T7'. |
+| Folding agent-push.sh into Phase 0 muddies the diff. | Acceptable: the connection (silent-kill diagnostic enabled Phase 0 investigation) is documented in the spec. Reviewer reads this section first. |
+| `feat/layer4-startup-io-http` branch (currently empty) needs re-cut from post-Phase-0 main. | Cheap: the branch has no commits yet. After Phase 0 merges, `git branch -D feat/layer4-startup-io-http && git checkout main && git pull && git checkout -b feat/layer4-startup-io-http`. |
+
+## Out of scope (Phase 0)
+
+- The actual startup-IO investigation (that's T7' — unblocked by Phase 0).
+- Populating `startup_io_paths_for` HTTP plugin arms (T8).
+- Un-`#[ignore]`'ing the 3 HTTP tests (T9 — they stay ignored after Phase 0; just with updated messages).
+- macOS sandbox-darwin equivalent gap (separate sub-project if symptoms surface).
+- Sub-project E (per-command exec gating; closes shell test). Independent.
+
+## Investigation findings (Phase 0)
+
+### T0a — load_tool vs load_llm_backend diff (2026-05-09)
+
+**Investigator:** subagent (T0a implementer, Claude Opus 4.7 1M context).
+
+**Environment:** lefthook Podman gate (`docker.io/library/rust:1.82-bookworm`, aarch64) on darwin-arm64 host (Apple Silicon). Tests run with `CARGO_TARGET_DIR=/workspace/target/lefthook-podman` and `CARGO_INCREMENTAL=0`.
+
+**Reproduction:**
+
+```bash
+podman run --rm \
+  --cap-add SYS_ADMIN --cap-add NET_ADMIN \
+  --security-opt seccomp=unconfined \
+  --security-opt apparmor=unconfined \
+  --security-opt label=disable \
+  -v "$PWD:/workspace" \
+  -v cargo-cache:/usr/local/cargo/registry \
+  -v target-cache:/workspace/target/lefthook-podman \
+  -w /workspace \
+  -e CARGO_INCREMENTAL=0 \
+  -e CARGO_TARGET_DIR=/workspace/target/lefthook-podman \
+  docker.io/library/rust:1.82-bookworm \
+  bash -c '
+ARCH=$(uname -m)
+case "$ARCH" in
+  aarch64) NEXTEST_URL="https://get.nexte.st/latest/linux-arm" ;;
+  *)       NEXTEST_URL="https://get.nexte.st/latest/linux" ;;
+esac
+rm -f /usr/local/cargo/bin/cargo-nextest
+curl -LsSf "$NEXTEST_URL" | tar zxf - -C /usr/local/cargo/bin
+mkdir -p target/release
+cp -f target/lefthook-podman/release/anthropic-plugin target/release/
+timeout 120 cargo nextest run -p tau-plugin-compat --test layer4_native \
+  anthropic_layer4_native_completes_via_cassette \
+  --features integration-tests --no-capture -- --include-ignored
+'
+```
+
+Failure (within 4 ms, before handshake):
+
+```
+spawn anthropic-plugin under native adapter failed:
+  LoadFailed("PluginSpawnFailed { plugin: \"anthropic-plugin\", source:
+  Os { code: 2, kind: NotFound, message: \"No such file or directory\" } }")
+```
+
+The control test (`fs_read_layer4_native_reads_data_file`) passes under the same Podman invocation. Both binaries exist on disk at the same `target/release/<bin>` location.
+
+**Diff observed:**
+
+The two `load_*` functions in `crates/tau-runtime/src/plugin_host/mod.rs` are structurally identical at the spawn site — the only differences are:
+
+- `PortKind::Tool` vs `PortKind::LlmBackend` (handshake assertion only — runs *after* spawn).
+- Required-methods array (`["tool.call"]` vs `["llm.complete"]` — handshake-time only).
+- `load_tool` performs an extra `IpcTool::fetch_schema` RPC after handshake (post-spawn, irrelevant to ENOENT).
+
+`PluginProcess::spawn_and_handshake` (`crates/tau-runtime/src/plugin_host/process.rs:168-258`) does **not** branch on `PortKind`. The spawn path is byte-for-byte identical for both ports — same `Command::new(binary_path)`, same `env_clear`/PATH inheritance, same `validate_plan_against_adapter` → `adapter.wrap_spawn` → `command.spawn()` sequence. Test helpers `make_locked_plugin` and `make_llm_locked_plugin` (`crates/tau-plugin-compat/tests/layer4_native.rs:98-121`) differ only in `PortKind`; `binary_path` is constructed identically.
+
+The actual divergence is **not in `tau-runtime`** — it's in the SandboxPlan capabilities the tests pass:
+
+- fs-read test → `SandboxPlan` with `Filesystem(Read)` only.
+- Anthropic / ollama / openai tests → `SandboxPlan` with `Network(Http)` (via `make_net_http_localhost_cap`).
+
+When the plan contains `Network(Http)`, `tau_sandbox_native::strict::wrap_spawn` (`crates/tau-sandbox-native/src/strict.rs:410-423`) **rewrites the `Command`** to spawn `tau-net-bridge` instead of the plugin binary directly:
+
+```rust
+let bridge_path = std::env::var_os("TAU_NET_BRIDGE_PATH")
+    .unwrap_or_else(|| std::ffi::OsString::from("tau-net-bridge"));
+*cmd = std::process::Command::new(bridge_path);
+cmd.arg(format!("--proxy-sock={}", proxy_sock_path.display()))
+    .arg("--listen=127.0.0.1:8443")
+    .arg("--")
+    .arg(&original_program)
+    .args(&original_args);
+```
+
+When `TAU_NET_BRIDGE_PATH` is unset, the bridge name falls back to a bare `"tau-net-bridge"`, which `Command::spawn` resolves via `execvp`/PATH. Diagnostic `eprintln` output confirms this exactly:
+
+```
+PHASE0_DEBUG[3] after adapter.wrap_spawn — plugin=anthropic-plugin program="tau-net-bridge"
+PHASE0_DEBUG[4] before command.spawn — program="tau-net-bridge" args=[
+  "--proxy-sock=/tmp/tau-proxy-157-0.sock", "--listen=127.0.0.1:8443",
+  "--", "/workspace/target/lefthook-podman/release/anthropic-plugin"]
+```
+
+For fs-read (no `Network` capability), `wrap_spawn` does *not* rewrite the program; the diagnostic shows `program="/workspace/target/lefthook-podman/release/fs-read-plugin"` (absolute path) and the test passes.
+
+**Root cause:**
+
+The ENOENT is from `tokio::process::Command::spawn()` / `execvp("tau-net-bridge", ...)` — `tau-net-bridge` is not on `PATH` inside the Podman gate (or the production runtime), and `tau-plugin-compat::tests::layer4_native` does not export `TAU_NET_BRIDGE_PATH`. The `tau-runtime` and `tau-sandbox-native` unit tests work because they live in the `tau-sandbox-native` crate and Cargo automatically populates `CARGO_BIN_EXE_tau-net-bridge` for them (see `crates/tau-sandbox-native/tests/strict_proxy.rs:69`), but that env var is **not** auto-populated for downstream test crates like `tau-plugin-compat` that don't own the bin target.
+
+The ignore-message hypothesis ("HTTP client init touches state outside plan's read paths" → handshake EOF) was **wrong**. The plugins never actually start — the spawn fails before the handshake even begins. After applying the fix locally (export `TAU_NET_BRIDGE_PATH` to a built bridge binary), spawn succeeds and the failure mode shifts to a downstream `expect("stdin piped via stdin(Stdio::piped())")` panic at `process.rs:283-287`, which is consistent with the bridge process exiting before stdin/stdout could be plumbed (likely because `tau-net-bridge` itself wants `iproute2`/`nftables`/proxy-socket setup that isn't running in the bare integration test). That downstream failure is T0b/T7 territory — the spawn-ENOENT root cause is fully isolated.
+
+**Fix scope:**
+
+Test-infrastructure-only. No `tau-runtime` or `tau-sandbox-native` source changes needed. Two correct options for T0b (pick one):
+
+1. **(Preferred — minimal, ~5 LOC.)** In `crates/tau-plugin-compat/tests/layer4_native.rs`, add a helper that locates the built `tau-net-bridge` binary (mirroring `locate_plugin_bin`) and unconditionally exports `TAU_NET_BRIDGE_PATH` early in each LlmBackend test (or via a `ctor`/`once_cell`). Update CI / pre-push gate to also build `-p tau-sandbox-native --bin tau-net-bridge --release` alongside the plugin builds.
+
+2. **(Alternative.)** Make `wrap_spawn` panic-with-clear-message when the bridge is unresolvable — keep behavior the same on the test caller, but produce a better error than `Os { code: 2 }`. Strictly worse than option 1 because it doesn't actually unblock the 3 ignored tests.
+
+T0b should also build `tau-net-bridge --release` in the lefthook-pre-push container (or accept that the 3 HTTP tests skip when the bridge isn't built, gated like `resolve_native_or_skip`).
+
+**Outcome (with proposed fix applied locally — NOT committed; T0b's job):**
+
+Verified by re-running the same Podman invocation with `TAU_NET_BRIDGE_PATH=/workspace/target/lefthook-podman/release/tau-net-bridge` exported and `cargo build --release -p tau-sandbox-native --bin tau-net-bridge` first:
+
+- ✅ Spawn-ENOENT eliminated. `Command::spawn` now resolves to the absolute bridge path.
+- ⚠️ The 3 HTTP tests now fail later in `PluginProcess::spawn_and_handshake` (panic on `child.stdin.take().expect(...)` at `process.rs:283-287` — bridge child seemingly exits before its pipes are read). This is a *different* failure mode from spawn-ENOENT and is in handshake-startup-IO territory. Whether T0b should land just the test-env fix and update the 3 `#[ignore]` reasons to reflect this new mode (deferring real fix to T7-followup), or chase the bridge-startup issue too, is a scoping call for the spawn-fix task.
+- ✅ fs-read test (`fs_read_layer4_native_reads_data_file`) continues to pass — confirming the fix is non-regressive.
+- ✅ No `tau-runtime` source changes were made; existing tau-runtime lib tests are untouched.

@@ -99,3 +99,52 @@ contention without sacrificing speed.
 Copy-paste template, fill in `<role>`, `<crate>`, and the actual cargo args:
 
     timeout 300 env CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=target/agent-<role> cargo test -p <crate>
+
+# AGENT PUSH RULES — read before running `git push`
+
+When invoking `git push` from an agent runtime (Claude Code's Bash tool,
+similar), `git push` is silently terminated mid-hook if the lefthook
+pre-push hook spawns a long-running container (the deep gate runs all
+10 Linux CI jobs in Podman, ~3-4 min warm / ~15-20 min cold). The
+container survives orphaned because Podman owns it; the push itself
+never completes. Diagnosed 2026-05-09.
+
+Empirical:
+
+- Plain `run_in_background` bash + sleep loops survive 60s+
+- Plain `run_in_background` podman containers survive 60s+
+- `git push` triggering the deep gate dies mid-hook every time
+
+The kill is specific to the git-push-invokes-long-running-hook path,
+not background commands generally. Likely cause: signal propagation
+when the hook's stdout/stderr are wired through git push's pipe.
+
+## Rule: never `git push` directly from agent runtime when the gate is on
+
+Three options, ordered by preference:
+
+1. **`scripts/agent-push.sh`** — runs `lefthook run pre-push` as a
+   standalone command (which does NOT die), then `git push --no-verify`
+   (fast network-only step). Forwards args. Use this by default.
+
+2. **`git push --no-verify`** — bypass the gate entirely. Acceptable
+   for docs-only / yaml-only changes where the gate adds nothing.
+   Document the bypass in the commit message; CI is the safety net.
+
+3. **`lefthook run pre-push && git push --no-verify`** — inline form
+   of option 1 if the script isn't available. Same effect.
+
+NEVER:
+
+- Run `git push` (no flags) and expect it to complete with the gate
+  active. It will silently die.
+- Bypass with `--no-verify` for Rust code changes when the agent
+  runtime is the only Linux validation surface, unless you've run
+  the gate separately first.
+
+If you observe a `git push` that produced 0 bytes of output and no
+error message, the silent-kill happened. Recover by:
+
+    podman ps   # zombie gate container probably still running
+    podman rm -f <container-id>   # clean it up
+    scripts/agent-push.sh         # try again the right way
