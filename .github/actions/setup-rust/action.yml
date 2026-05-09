@@ -56,24 +56,30 @@ runs:
       if: inputs.with-mold == 'true' && runner.os == 'Linux'
       uses: rui314/setup-mold@v1
 
-    # sccache disabled on Windows: mozilla-actions/sccache-action@v0.0.10's
-    # post-step has a state-handling bug that intermittently fails on
-    # `windows-latest` with `Unable to locate executable file: undefined`
-    # (the post step can't find the path the install step recorded). Same
-    # config works fine on Linux + macOS. Skipping sccache on Windows
-    # makes CI deterministic; the cost is small because Windows runs
-    # only msrv-check (cargo check, fast) + test-stable, with no
-    # cross-job rustc-cache reuse benefit to give up.
+    # sccache install via taiki-e/install-action instead of
+    # mozilla-actions/sccache-action@v0.0.10. The mozilla action has a
+    # pre/main/post-step state bug that intermittently fails on Windows
+    # with `Unable to locate executable file: undefined` — the post-step
+    # can't find the executable path the install step recorded. taiki-e
+    # just downloads the binary and adds it to PATH (deterministic; same
+    # mechanism we use for cargo-nextest). We lose the mozilla action's
+    # post-step stats annotations, but the cache still works — the
+    # SCCACHE_GHA_ENABLED env var below is what activates the GitHub
+    # Actions Cache backend, regardless of installer.
     - name: Install sccache
-      if: inputs.with-sccache == 'true' && runner.os != 'Windows'
-      uses: mozilla-actions/sccache-action@v0.0.10
+      if: inputs.with-sccache == 'true'
+      uses: taiki-e/install-action@v2
+      with:
+        tool: sccache
 
     - name: Configure sccache env
-      if: inputs.with-sccache == 'true' && runner.os != 'Windows'
+      if: inputs.with-sccache == 'true'
       shell: bash
       run: |
         echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
         echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+        # ACTIONS_RESULTS_URL + ACTIONS_RUNTIME_TOKEN are already set by
+        # the runner; sccache reads them via SCCACHE_GHA_ENABLED.
 
     - name: Install cargo-nextest
       if: inputs.with-nextest == 'true'
