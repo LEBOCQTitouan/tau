@@ -14,6 +14,31 @@ use tau_ports::{SandboxError, SandboxHandle, SandboxPlan};
 // Re-export so strict.rs can call collect_exec_paths without reaching into exec.rs directly.
 pub(crate) use crate::exec::collect_exec_paths;
 
+/// Baseline filesystem paths that EVERY plugin needs read access to under
+/// landlock. These are runtime mechanics (binary load, dyld, libc, kernel
+/// introspection, scheduler-affinity probes) — not application data. The
+/// user's plan-derived `read_paths` still narrow application access; these
+/// system paths exist purely so the runtime mechanics work.
+///
+/// Each entry must be justified — Constitution G12 wants narrow defaults.
+/// Add a one-line comment explaining why a path is in the baseline before
+/// extending this list.
+pub(crate) const BASELINE_SYSTEM_READ_PATHS: &[&str] = &[
+    // Binary load + dyld + libc (priority-12 baseline)
+    "/bin",       // shell + fs-read locate echo, basic utilities
+    "/sbin",      // distro-dependent /bin/sbin split
+    "/usr/bin",   // post-merge layout (Debian-merged-/usr)
+    "/usr/sbin",  // post-merge layout
+    "/lib",       // distro-dependent /lib /usr/lib split (libc, libm, libdl)
+    "/lib64",     // 64-bit dyld on glibc systems
+    "/usr/lib",   // post-merge layout
+    "/usr/lib64", // post-merge layout
+    "/etc",       // /etc/resolv.conf for DNS, /etc/ssl/certs for TLS roots, locale config
+    // Sub-project layer4-startup-io baseline additions (2026-05-09):
+    "/proc/self", // tokio reads /proc/self/cgroup + /proc/self/maps during multi-thread runtime init
+    "/sys/fs/cgroup", // tokio reads /sys/fs/cgroup/cpu.max for CPU quota / worker pool sizing
+];
+
 /// Collect and resolve landlock path lists from a plan + command CWD.
 ///
 /// Returns `(read_paths, write_paths)` as resolved `PathBuf` vectors.
@@ -223,17 +248,7 @@ fn install_landlock(
     // landlock blocks the binary's own load and exec returns EACCES.
     // The user's plan-derived read_paths still narrow application access;
     // these system paths exist purely so the runtime mechanics work.
-    let system_read_paths: &[&str] = &[
-        "/bin",
-        "/sbin",
-        "/usr/bin",
-        "/usr/sbin",
-        "/lib",
-        "/lib64",
-        "/usr/lib",
-        "/usr/lib64",
-        "/etc",
-    ];
+    let system_read_paths: &[&str] = BASELINE_SYSTEM_READ_PATHS;
     // Note: we grant `Execute` alongside `ReadFile | ReadDir` so the
     // kernel can both READ the binary file (to load it into memory) AND
     // EXEC it. The Ruleset handles ALL `AccessFs` flags via `from_all`
@@ -586,5 +601,60 @@ mod tests {
         assert!(read_paths
             .iter()
             .any(|p| p.canonicalize().ok() == Some(target.canonicalize().unwrap())));
+    }
+
+    // ---------- BASELINE_SYSTEM_READ_PATHS ----------
+
+    #[test]
+    fn baseline_system_read_paths_includes_legacy_entries() {
+        // Priority-12 baseline must remain (regression protection).
+        let expected_legacy = [
+            "/bin",
+            "/sbin",
+            "/usr/bin",
+            "/usr/sbin",
+            "/lib",
+            "/lib64",
+            "/usr/lib",
+            "/usr/lib64",
+            "/etc",
+        ];
+        for p in expected_legacy {
+            assert!(
+                BASELINE_SYSTEM_READ_PATHS.contains(&p),
+                "legacy baseline path {p} must remain in BASELINE_SYSTEM_READ_PATHS"
+            );
+        }
+    }
+
+    #[test]
+    fn baseline_system_read_paths_includes_runtime_mechanics() {
+        // Sub-project layer4-startup-io baseline additions (regression protection).
+        // Per T1 findings 2026-05-09: tokio reads /proc/self/cgroup +
+        // /proc/self/maps during multi-thread runtime init, and
+        // /sys/fs/cgroup/cpu.max for CPU quota / worker pool sizing.
+        let expected_new = ["/proc/self", "/sys/fs/cgroup"];
+        for p in expected_new {
+            assert!(
+                BASELINE_SYSTEM_READ_PATHS.contains(&p),
+                "runtime-mechanics baseline path {p} must be in BASELINE_SYSTEM_READ_PATHS"
+            );
+        }
+    }
+
+    #[test]
+    fn baseline_system_read_paths_no_application_data() {
+        // Constitution G12: baseline is for runtime mechanics, not app data.
+        // Reject paths that would let plugins read user data without an
+        // explicit FsCapability::Read grant.
+        let forbidden = [
+            "/home", "/root", "/var/lib", "/srv", "/opt", "/tmp", "/mnt", "/media",
+        ];
+        for p in forbidden {
+            assert!(
+                !BASELINE_SYSTEM_READ_PATHS.contains(&p),
+                "{p} must NOT be in baseline (would expand sandbox beyond runtime mechanics)"
+            );
+        }
     }
 }
