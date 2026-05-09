@@ -114,3 +114,154 @@ This catches conditional paths the analytical pass misses (locale files, distrib
 - Sub-project E (per-command exec gating) — independent.
 - A general "what does each Rust crate need at runtime" catalog — this work catalogs only what these 5 plugins need.
 - Driver-level changes beyond the per-plugin fixture helper.
+
+## Investigation findings
+
+### PR 1 — shell + fs-read (2026-05-09)
+
+**Investigator:** subagent (T1 implementer).
+
+**Environment:** lefthook Podman gate (`docker.io/library/rust:1.82-bookworm`,
+explicit `--arch arm64` on darwin-arm64 host so the multiarch image picks
+the matching architecture). Test invocation:
+`cargo test -p tau-plugin-compat --test layer4_native --features
+integration-tests -- --ignored --nocapture
+shell_layer4_native_runs_echo_hello fs_read_layer4_native_reads_data_file`.
+
+**EOF symptom (shell), baseline (no edits):**
+
+```
+spawn shell-plugin under native adapter failed:
+LoadFailed("PluginHandshakeFailed { plugin: \"shell-plugin\",
+reason: Malformed { detail: \"EOF before handshake response\" } }")
+```
+
+**EOF symptom (fs-read), baseline (no edits):**
+
+```
+spawn fs-read-plugin under native adapter failed:
+LoadFailed("PluginHandshakeFailed { plugin: \"fs-read-plugin\",
+reason: Malformed { detail: \"EOF before handshake response\" } }")
+```
+
+#### Discovery: the EOF has TWO independent root causes, not one
+
+The spec assumed startup-IO (landlock fs.read) was the sole cause. The
+investigation surfaced a second, independent cause: the seccomp baseline
+is missing `sched_getaffinity` (and `sched_setaffinity`), which Tokio's
+multi-thread runtime calls during `Builder::new_multi_thread().build()`
+to size the worker pool. With `KillProcess` as the seccomp mismatch
+action, this kills the child with SIGSYS *before* it can write its
+handshake response — producing exactly the same "EOF before handshake"
+symptom as a landlock denial.
+
+A diagnostic test (one-shot harness wrapping `shell-plugin` with
+`NativeSandbox::new(_, Strict).wrap_spawn` and capturing exit status +
+signal) revealed:
+
+```
+status: ExitStatus(unix_wait_status(159))
+signal: 31 (SIGSYS (seccomp KillProcess))
+stdout (0 bytes):
+stderr (0 bytes):
+```
+
+`unix_wait_status(159) = 128 | 31` — SIGSYS, with no stderr because the
+plugin never reached its first eprintln. strace under `seccomp=unconfined`
+showed the last syscall before the kill was `sched_getaffinity(143, 32,
+[...])` — confirming the gap.
+
+**Discovered baseline paths (universal — go into
+`BASELINE_SYSTEM_READ_PATHS` in T2):**
+
+| Path | Why | Evidence |
+|---|---|---|
+| `/proc/self` | tokio runtime introspection — opens `/proc/self/cgroup` and `/proc/self/maps` during init (cgroup v2 quota detection, libstd backtrace setup) | strace: `openat(... "/proc/self/cgroup" ...)`, `openat(... "/proc/self/maps" ...)` |
+| `/sys/fs/cgroup` | tokio reads `/sys/fs/cgroup/cpu.max` to compute available CPU quota for worker count (cgroup v2 path; on cgroup v1 the equivalent file lives elsewhere under `/sys/fs/cgroup`) | strace: `openat(... "/sys/fs/cgroup/cpu.max" ...)` |
+
+Other candidates suggested in the prompt (`/proc/sys/kernel`,
+`/sys/devices/system/cpu`, `/dev/urandom`, `/dev/null`) were NOT observed
+in the strace and NOT needed for the two plugins to handshake. They are
+omitted to keep the baseline minimal.
+
+**Plugin-specific paths (go into `startup_io_paths_for` in T3):**
+
+- shell-plugin: none — runtime baseline sufficient.
+- fs-read-plugin: none — runtime baseline sufficient.
+
+Both plugins exhibited identical strace output during startup IO. They
+share the `tau-plugin-sdk` startup machinery (tokio multi-thread runtime
++ stdio handshake loop) and have no plugin-specific files of their own.
+
+**Out-of-scope finding (seccomp gap — flag for spec authors):**
+
+The seccomp baseline in `crates/tau-sandbox-native/src/strict.rs`'s
+`baseline_syscall_map()` is missing two syscalls that Tokio's
+multi-thread runtime requires unconditionally:
+
+- `libc::SYS_sched_getaffinity` — to query CPU mask for worker sizing.
+- `libc::SYS_sched_setaffinity` — used by the runtime when pinning a
+  thread to a CPU subset (added defensively; observed needed only for
+  `sched_getaffinity` in this investigation, but `setaffinity` is the
+  natural pair and avoids a future SIGSYS for unrelated callers).
+
+Adding these to the baseline is **outside T1 (investigation only)** and
+strictly speaking outside the spec's stated scope ("startup IO catalog"
+≈ landlock paths). However, **the un-`#[ignore]` step (T4) cannot
+succeed without this seccomp change** — adding the two paths from the
+table above is necessary but not sufficient. Recommend either:
+
+1. Folding the seccomp baseline extension into T2 (rename the section
+   to "baseline filesystem + syscall extensions") and adding a
+   regression test alongside the path tests, OR
+2. Splitting it into a tiny independent task that lands before T4.
+
+**Outcome:**
+
+After applying both fixes locally (NOT committed, reverted before this
+findings commit):
+
+- `fs_read_layer4_native_reads_data_file`: **PASS**.
+- `shell_layer4_native_runs_echo_hello`: **handshake succeeds**, but
+  test fails *later* during invoke with
+  `Internal { message: "plugin error code -32603 message tool.invoke
+  failed: internal: shell: spawn failed: Permission denied (os error
+  13)" }`. This is shell-plugin's own `Command::new("echo").spawn()`
+  hitting EACCES under landlock — i.e. an exec-gating issue (sub-project
+  E territory: per-command exec landlock paths), NOT a startup-IO issue.
+  Likely cause: PATH-search inside the sandboxed plugin walks
+  `/usr/local/sbin`, `/usr/local/bin` (which landlock has not granted
+  Execute) before reaching the exec-allow-listed `/usr/bin/echo`, and
+  the first EACCES aborts the search in `Command::spawn`. This is
+  outside the T1 charter and outside the startup-IO scope.
+
+So: the documented startup-IO baseline is **sufficient and verified**
+for both plugins to complete the plugin-handshake handshake. Whether
+`shell_layer4_native_runs_echo_hello` ends up green at the end of PR 1
+depends on whether T4's "un-`#[ignore]`" step also addresses the
+exec-gating PATH-search issue, which the spec does not currently cover.
+fs-read passes end-to-end.
+
+**Notes / caveats:**
+
+- strace was performed on the plugin binary running unsandboxed
+  (stdin closed) to enumerate startup-time openat targets; this is a
+  superset of what would be observed during a real handshake (which
+  drives further IO post-handshake). For startup-IO purposes (everything
+  before the plugin writes its handshake response on stdout) the trace
+  is complete: the plugin reads its libs, initializes tokio (touching
+  `/proc/self/cgroup`, `/proc/self/maps`, `/sys/fs/cgroup/cpu.max`),
+  then blocks on stdin reading the request frame. No further IO occurs
+  before the response.
+- `/etc/ld.so.cache` is read at startup but is already covered by the
+  existing `/etc` entry in `BASELINE_SYSTEM_READ_PATHS`. Likewise the
+  shared libraries (`/lib/aarch64-linux-gnu/libc.so.6` etc) are covered
+  by `/lib`.
+- The investigation arch is aarch64 (Apple Silicon host via Podman).
+  The path set is arch-independent (`/proc/self`, `/sys/fs/cgroup`)
+  but worth a sanity-check on x86_64 CI.
+- The seccomp gap was masked by Podman's `--security-opt
+  seccomp=unconfined` at the *outer* container level — but the
+  *in-process* seccomp filter installed by `apply_strict` still applies,
+  which is what surfaced the SIGSYS. This means CI on bare Linux runners
+  would have hit the same gap.
