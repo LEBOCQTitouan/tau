@@ -3093,6 +3093,7 @@ dependencies = [
  "tau-sandbox-container",
  "tau-sandbox-darwin",
  "tau-sandbox-native",
+ "tau-sandbox-windows",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -3155,6 +3156,19 @@ dependencies = [
 name = "tau-sandbox-proxy"
 version = "0.0.0"
 dependencies = [
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "tau-sandbox-windows"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "tau-domain",
+ "tau-ports",
+ "tau-sandbox-proxy",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

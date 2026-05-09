@@ -1,0 +1,31 @@
+[package]
+name = "tau-sandbox-windows"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Windows AppContainer sandbox adapter for tau"
+
+[dependencies]
+tau-domain          = { workspace = true, features = ["serde"] }
+tau-ports           = { workspace = true, features = ["serde"] }
+tau-sandbox-proxy   = { workspace = true }
+tracing             = { workspace = true }
+tokio               = { workspace = true }
+thiserror           = { workspace = true }
+
+# Phase 2 will pull in Microsoft's `windows` crate for the real Win32
+# AppContainer + ACL calls. Phase 1 (this PR) ships stubs so the crate
+# builds without Win32 deps; the stubs document the API shape that
+# Phase 2 will fill in.
+
+[dev-dependencies]
+serde_json = "1"
+tau-domain = { workspace = true, features = ["serde"] }
+tau-ports  = { workspace = true, features = ["serde"] }
+
+[features]
+default = []
+integration-tests = []
