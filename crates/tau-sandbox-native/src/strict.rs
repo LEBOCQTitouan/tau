@@ -161,6 +161,13 @@ pub(crate) fn baseline_syscall_map() -> std::collections::BTreeMap<i64, Vec<Secc
         libc::SYS_getgroups,
         libc::SYS_prctl,
         libc::SYS_sched_yield,
+        // T1 (2026-05-09): tokio's Builder::new_multi_thread sizes the
+        // worker pool by calling sched_getaffinity. Without this, the
+        // KillProcess mismatch action SIGSYSes the child before handshake.
+        libc::SYS_sched_getaffinity,
+        // Defensive: tokio doesn't currently call sched_setaffinity, but
+        // some runtime configurations do. Allowed alongside getaffinity.
+        libc::SYS_sched_setaffinity,
         libc::SYS_nanosleep,
         libc::SYS_clock_nanosleep,
         libc::SYS_clock_gettime,
@@ -522,6 +529,21 @@ mod tests {
     ///
     /// This does NOT spawn the command; it exercises BPF compilation + closure
     /// capture in the parent process only.
+    #[test]
+    fn baseline_syscall_map_includes_sched_getaffinity() {
+        let map = baseline_syscall_map();
+        assert!(
+            map.contains_key(&libc::SYS_sched_getaffinity),
+            "tokio Builder::new_multi_thread calls sched_getaffinity to size \
+             the worker pool; without it the KillProcess mismatch action \
+             SIGSYSes the child before handshake (T1 finding 2026-05-09)"
+        );
+        assert!(
+            map.contains_key(&libc::SYS_sched_setaffinity),
+            "sched_setaffinity is allowed defensively alongside getaffinity"
+        );
+    }
+
     #[test]
     fn apply_strict_routes_through_pre_exec() {
         let plan_json = serde_json::json!({

@@ -56,12 +56,20 @@ runs:
       if: inputs.with-mold == 'true' && runner.os == 'Linux'
       uses: rui314/setup-mold@v1
 
+    # sccache disabled on Windows: mozilla-actions/sccache-action@v0.0.10's
+    # post-step has a state-handling bug that intermittently fails on
+    # `windows-latest` with `Unable to locate executable file: undefined`
+    # (the post step can't find the path the install step recorded). Same
+    # config works fine on Linux + macOS. Skipping sccache on Windows
+    # makes CI deterministic; the cost is small because Windows runs
+    # only msrv-check (cargo check, fast) + test-stable, with no
+    # cross-job rustc-cache reuse benefit to give up.
     - name: Install sccache
-      if: inputs.with-sccache == 'true'
+      if: inputs.with-sccache == 'true' && runner.os != 'Windows'
       uses: mozilla-actions/sccache-action@v0.0.10
 
     - name: Configure sccache env
-      if: inputs.with-sccache == 'true'
+      if: inputs.with-sccache == 'true' && runner.os != 'Windows'
       shell: bash
       run: |
         echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
