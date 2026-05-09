@@ -23,6 +23,8 @@ use std::process::Command;
 use tau_domain::CapabilityShapeSet;
 use tau_ports::{Sandbox, SandboxError, SandboxHandle, SandboxPlan, SandboxProbe, SandboxTier};
 use tau_sandbox_container::{ContainerRuntime, ContainerSandbox};
+#[cfg(target_os = "macos")]
+use tau_sandbox_darwin::DarwinSandbox;
 use tau_sandbox_native::NativeSandbox;
 
 use crate::sandbox::passthrough::PassthroughSandbox;
@@ -42,6 +44,10 @@ use crate::sandbox::resolution_error::{ResolutionError, ResolutionRejection};
 pub enum SandboxAdapter {
     /// `tau-sandbox-native` Linux adapter.
     Native(NativeSandbox),
+    /// `tau-sandbox-darwin` macOS adapter (sandbox-exec + tau-sandbox-proxy).
+    /// Selected for `RegistryKind::Native` on macOS hosts.
+    #[cfg(target_os = "macos")]
+    Darwin(DarwinSandbox),
     /// `tau-sandbox-container` docker/podman adapter.
     Container(ContainerSandbox),
     /// `tau_ports::fixtures::MockSandbox` — available in all builds but only
@@ -56,6 +62,8 @@ impl std::fmt::Debug for SandboxAdapter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SandboxAdapter::Native(_) => f.debug_tuple("SandboxAdapter::Native").finish(),
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(_) => f.debug_tuple("SandboxAdapter::Darwin").finish(),
             SandboxAdapter::Container(_) => f.debug_tuple("SandboxAdapter::Container").finish(),
             SandboxAdapter::Mock(_) => f.debug_tuple("SandboxAdapter::Mock").finish(),
             SandboxAdapter::Passthrough(_) => f.debug_tuple("SandboxAdapter::Passthrough").finish(),
@@ -68,6 +76,8 @@ impl SandboxAdapter {
     pub fn name(&self) -> &str {
         match self {
             SandboxAdapter::Native(a) => a.name(),
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(a) => a.name(),
             SandboxAdapter::Container(a) => a.name(),
             SandboxAdapter::Mock(a) => a.name(),
             SandboxAdapter::Passthrough(a) => a.name(),
@@ -78,6 +88,8 @@ impl SandboxAdapter {
     pub async fn probe(&self) -> SandboxProbe {
         match self {
             SandboxAdapter::Native(a) => a.probe().await,
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(a) => a.probe().await,
             SandboxAdapter::Container(a) => a.probe().await,
             SandboxAdapter::Mock(a) => a.probe().await,
             SandboxAdapter::Passthrough(a) => a.probe().await,
@@ -88,6 +100,8 @@ impl SandboxAdapter {
     pub fn supported_shapes(&self) -> CapabilityShapeSet {
         match self {
             SandboxAdapter::Native(a) => a.supported_shapes(),
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(a) => a.supported_shapes(),
             SandboxAdapter::Container(a) => a.supported_shapes(),
             SandboxAdapter::Mock(a) => a.supported_shapes(),
             SandboxAdapter::Passthrough(a) => a.supported_shapes(),
@@ -98,6 +112,8 @@ impl SandboxAdapter {
     pub fn validate_plan(&self, plan: &SandboxPlan) -> Result<(), SandboxError> {
         match self {
             SandboxAdapter::Native(a) => a.validate_plan(plan),
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(a) => a.validate_plan(plan),
             SandboxAdapter::Container(a) => a.validate_plan(plan),
             SandboxAdapter::Mock(a) => a.validate_plan(plan),
             SandboxAdapter::Passthrough(a) => a.validate_plan(plan),
@@ -112,6 +128,8 @@ impl SandboxAdapter {
     ) -> Result<SandboxHandle, SandboxError> {
         match self {
             SandboxAdapter::Native(a) => a.wrap_spawn(plan, cmd).await,
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(a) => a.wrap_spawn(plan, cmd).await,
             SandboxAdapter::Container(a) => a.wrap_spawn(plan, cmd).await,
             SandboxAdapter::Mock(a) => a.wrap_spawn(plan, cmd).await,
             SandboxAdapter::Passthrough(a) => a.wrap_spawn(plan, cmd).await,
@@ -129,6 +147,8 @@ impl SandboxAdapter {
     ) -> Result<(), SandboxError> {
         match self {
             SandboxAdapter::Native(a) => a.apply_post_spawn(plan, child_pid, handle).await,
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(a) => a.apply_post_spawn(plan, child_pid, handle).await,
             SandboxAdapter::Container(a) => a.apply_post_spawn(plan, child_pid, handle).await,
             SandboxAdapter::Mock(a) => a.apply_post_spawn(plan, child_pid, handle).await,
             SandboxAdapter::Passthrough(a) => a.apply_post_spawn(plan, child_pid, handle).await,
@@ -140,6 +160,8 @@ impl Sandbox for SandboxAdapter {
     fn name(&self) -> &str {
         match self {
             SandboxAdapter::Native(s) => s.name(),
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(s) => s.name(),
             SandboxAdapter::Container(s) => s.name(),
             SandboxAdapter::Mock(s) => s.name(),
             SandboxAdapter::Passthrough(s) => s.name(),
@@ -149,6 +171,8 @@ impl Sandbox for SandboxAdapter {
     async fn probe(&self) -> SandboxProbe {
         match self {
             SandboxAdapter::Native(s) => s.probe().await,
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(s) => s.probe().await,
             SandboxAdapter::Container(s) => s.probe().await,
             SandboxAdapter::Mock(s) => s.probe().await,
             SandboxAdapter::Passthrough(s) => s.probe().await,
@@ -158,6 +182,8 @@ impl Sandbox for SandboxAdapter {
     fn supported_shapes(&self) -> CapabilityShapeSet {
         match self {
             SandboxAdapter::Native(s) => s.supported_shapes(),
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(s) => s.supported_shapes(),
             SandboxAdapter::Container(s) => s.supported_shapes(),
             SandboxAdapter::Mock(s) => s.supported_shapes(),
             SandboxAdapter::Passthrough(s) => s.supported_shapes(),
@@ -167,6 +193,8 @@ impl Sandbox for SandboxAdapter {
     fn validate_plan(&self, plan: &SandboxPlan) -> Result<(), SandboxError> {
         match self {
             SandboxAdapter::Native(s) => s.validate_plan(plan),
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(s) => s.validate_plan(plan),
             SandboxAdapter::Container(s) => s.validate_plan(plan),
             SandboxAdapter::Mock(s) => s.validate_plan(plan),
             SandboxAdapter::Passthrough(s) => s.validate_plan(plan),
@@ -180,6 +208,8 @@ impl Sandbox for SandboxAdapter {
     ) -> Result<SandboxHandle, SandboxError> {
         match self {
             SandboxAdapter::Native(s) => s.wrap_spawn(plan, cmd).await,
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(s) => s.wrap_spawn(plan, cmd).await,
             SandboxAdapter::Container(s) => s.wrap_spawn(plan, cmd).await,
             SandboxAdapter::Mock(s) => s.wrap_spawn(plan, cmd).await,
             SandboxAdapter::Passthrough(s) => s.wrap_spawn(plan, cmd).await,
@@ -194,6 +224,8 @@ impl Sandbox for SandboxAdapter {
     ) -> Result<(), SandboxError> {
         match self {
             SandboxAdapter::Native(s) => s.apply_post_spawn(plan, child_pid, handle).await,
+            #[cfg(target_os = "macos")]
+            SandboxAdapter::Darwin(s) => s.apply_post_spawn(plan, child_pid, handle).await,
             SandboxAdapter::Container(s) => s.apply_post_spawn(plan, child_pid, handle).await,
             SandboxAdapter::Mock(s) => s.apply_post_spawn(plan, child_pid, handle).await,
             SandboxAdapter::Passthrough(s) => s.apply_post_spawn(plan, child_pid, handle).await,
@@ -218,6 +250,9 @@ fn instantiate(kind: RegistryKind) -> Result<SandboxAdapter, String> {
     // Within the same crate the pattern is currently unreachable, hence the allow.
     #[allow(unreachable_patterns)]
     match kind {
+        #[cfg(target_os = "macos")]
+        RegistryKind::Native => Ok(SandboxAdapter::Darwin(DarwinSandbox::new("native"))),
+        #[cfg(not(target_os = "macos"))]
         RegistryKind::Native => Ok(SandboxAdapter::Native(NativeSandbox::new(
             "native",
             SandboxTier::Strict,

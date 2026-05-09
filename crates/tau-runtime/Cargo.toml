@@ -53,6 +53,11 @@ globset             = { workspace = true }
 # Realizes ADR-0010 (Tier 2 priority 6).
 jsonschema          = { workspace = true }
 
+# macOS-only: sandbox-exec adapter. Selected for RegistryKind::Native on
+# macOS hosts; the Linux NativeSandbox is selected on Linux.
+[target.'cfg(target_os = "macos")'.dependencies]
+tau-sandbox-darwin = { workspace = true }
+
 [features]
 default = []
 # Exposes test-only constructors and re-exports under
