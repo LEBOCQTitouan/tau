@@ -392,27 +392,113 @@ Then PR 2 work (re-cut from post-Phase-0 main):
 
 ## Investigation findings (Phase 0)
 
-To be populated by T0a. Template:
+### T0a — load_tool vs load_llm_backend diff (2026-05-09)
 
-```markdown
-### T0a — load_tool vs load_llm_backend diff (DATE)
+**Investigator:** subagent (T0a implementer, Claude Opus 4.7 1M context).
 
-**Investigator:** [agent-id or human].
-
-**Environment:** lefthook Podman gate (`docker.io/library/rust:1.82-bookworm`) on darwin-arm64 host.
+**Environment:** lefthook Podman gate (`docker.io/library/rust:1.82-bookworm`, aarch64) on darwin-arm64 host (Apple Silicon). Tests run with `CARGO_TARGET_DIR=/workspace/target/lefthook-podman` and `CARGO_INCREMENTAL=0`.
 
 **Reproduction:**
-[exact command + flags that produce the ENOENT]
+
+```bash
+podman run --rm \
+  --cap-add SYS_ADMIN --cap-add NET_ADMIN \
+  --security-opt seccomp=unconfined \
+  --security-opt apparmor=unconfined \
+  --security-opt label=disable \
+  -v "$PWD:/workspace" \
+  -v cargo-cache:/usr/local/cargo/registry \
+  -v target-cache:/workspace/target/lefthook-podman \
+  -w /workspace \
+  -e CARGO_INCREMENTAL=0 \
+  -e CARGO_TARGET_DIR=/workspace/target/lefthook-podman \
+  docker.io/library/rust:1.82-bookworm \
+  bash -c '
+ARCH=$(uname -m)
+case "$ARCH" in
+  aarch64) NEXTEST_URL="https://get.nexte.st/latest/linux-arm" ;;
+  *)       NEXTEST_URL="https://get.nexte.st/latest/linux" ;;
+esac
+rm -f /usr/local/cargo/bin/cargo-nextest
+curl -LsSf "$NEXTEST_URL" | tar zxf - -C /usr/local/cargo/bin
+mkdir -p target/release
+cp -f target/lefthook-podman/release/anthropic-plugin target/release/
+timeout 120 cargo nextest run -p tau-plugin-compat --test layer4_native \
+  anthropic_layer4_native_completes_via_cassette \
+  --features integration-tests --no-capture -- --include-ignored
+'
+```
+
+Failure (within 4 ms, before handshake):
+
+```
+spawn anthropic-plugin under native adapter failed:
+  LoadFailed("PluginSpawnFailed { plugin: \"anthropic-plugin\", source:
+  Os { code: 2, kind: NotFound, message: \"No such file or directory\" } }")
+```
+
+The control test (`fs_read_layer4_native_reads_data_file`) passes under the same Podman invocation. Both binaries exist on disk at the same `target/release/<bin>` location.
 
 **Diff observed:**
-[side-by-side bullet list of what load_llm_backend does that load_tool doesn't]
+
+The two `load_*` functions in `crates/tau-runtime/src/plugin_host/mod.rs` are structurally identical at the spawn site — the only differences are:
+
+- `PortKind::Tool` vs `PortKind::LlmBackend` (handshake assertion only — runs *after* spawn).
+- Required-methods array (`["tool.call"]` vs `["llm.complete"]` — handshake-time only).
+- `load_tool` performs an extra `IpcTool::fetch_schema` RPC after handshake (post-spawn, irrelevant to ENOENT).
+
+`PluginProcess::spawn_and_handshake` (`crates/tau-runtime/src/plugin_host/process.rs:168-258`) does **not** branch on `PortKind`. The spawn path is byte-for-byte identical for both ports — same `Command::new(binary_path)`, same `env_clear`/PATH inheritance, same `validate_plan_against_adapter` → `adapter.wrap_spawn` → `command.spawn()` sequence. Test helpers `make_locked_plugin` and `make_llm_locked_plugin` (`crates/tau-plugin-compat/tests/layer4_native.rs:98-121`) differ only in `PortKind`; `binary_path` is constructed identically.
+
+The actual divergence is **not in `tau-runtime`** — it's in the SandboxPlan capabilities the tests pass:
+
+- fs-read test → `SandboxPlan` with `Filesystem(Read)` only.
+- Anthropic / ollama / openai tests → `SandboxPlan` with `Network(Http)` (via `make_net_http_localhost_cap`).
+
+When the plan contains `Network(Http)`, `tau_sandbox_native::strict::wrap_spawn` (`crates/tau-sandbox-native/src/strict.rs:410-423`) **rewrites the `Command`** to spawn `tau-net-bridge` instead of the plugin binary directly:
+
+```rust
+let bridge_path = std::env::var_os("TAU_NET_BRIDGE_PATH")
+    .unwrap_or_else(|| std::ffi::OsString::from("tau-net-bridge"));
+*cmd = std::process::Command::new(bridge_path);
+cmd.arg(format!("--proxy-sock={}", proxy_sock_path.display()))
+    .arg("--listen=127.0.0.1:8443")
+    .arg("--")
+    .arg(&original_program)
+    .args(&original_args);
+```
+
+When `TAU_NET_BRIDGE_PATH` is unset, the bridge name falls back to a bare `"tau-net-bridge"`, which `Command::spawn` resolves via `execvp`/PATH. Diagnostic `eprintln` output confirms this exactly:
+
+```
+PHASE0_DEBUG[3] after adapter.wrap_spawn — plugin=anthropic-plugin program="tau-net-bridge"
+PHASE0_DEBUG[4] before command.spawn — program="tau-net-bridge" args=[
+  "--proxy-sock=/tmp/tau-proxy-157-0.sock", "--listen=127.0.0.1:8443",
+  "--", "/workspace/target/lefthook-podman/release/anthropic-plugin"]
+```
+
+For fs-read (no `Network` capability), `wrap_spawn` does *not* rewrite the program; the diagnostic shows `program="/workspace/target/lefthook-podman/release/fs-read-plugin"` (absolute path) and the test passes.
 
 **Root cause:**
-[the specific code path producing ENOENT]
+
+The ENOENT is from `tokio::process::Command::spawn()` / `execvp("tau-net-bridge", ...)` — `tau-net-bridge` is not on `PATH` inside the Podman gate (or the production runtime), and `tau-plugin-compat::tests::layer4_native` does not export `TAU_NET_BRIDGE_PATH`. The `tau-runtime` and `tau-sandbox-native` unit tests work because they live in the `tau-sandbox-native` crate and Cargo automatically populates `CARGO_BIN_EXE_tau-net-bridge` for them (see `crates/tau-sandbox-native/tests/strict_proxy.rs:69`), but that env var is **not** auto-populated for downstream test crates like `tau-plugin-compat` that don't own the bin target.
+
+The ignore-message hypothesis ("HTTP client init touches state outside plan's read paths" → handshake EOF) was **wrong**. The plugins never actually start — the spawn fails before the handshake even begins. After applying the fix locally (export `TAU_NET_BRIDGE_PATH` to a built bridge binary), spawn succeeds and the failure mode shifts to a downstream `expect("stdin piped via stdin(Stdio::piped())")` panic at `process.rs:283-287`, which is consistent with the bridge process exiting before stdin/stdout could be plumbed (likely because `tau-net-bridge` itself wants `iproute2`/`nftables`/proxy-socket setup that isn't running in the bare integration test). That downstream failure is T0b/T7 territory — the spawn-ENOENT root cause is fully isolated.
 
 **Fix scope:**
-[which file(s) and what change is the minimal correctness fix]
 
-**Outcome:**
-[after applying the fix locally: 3 HTTP tests fail at handshake-EOF; PR 1's fs-read still passes; existing tau-runtime tests still pass]
-```
+Test-infrastructure-only. No `tau-runtime` or `tau-sandbox-native` source changes needed. Two correct options for T0b (pick one):
+
+1. **(Preferred — minimal, ~5 LOC.)** In `crates/tau-plugin-compat/tests/layer4_native.rs`, add a helper that locates the built `tau-net-bridge` binary (mirroring `locate_plugin_bin`) and unconditionally exports `TAU_NET_BRIDGE_PATH` early in each LlmBackend test (or via a `ctor`/`once_cell`). Update CI / pre-push gate to also build `-p tau-sandbox-native --bin tau-net-bridge --release` alongside the plugin builds.
+
+2. **(Alternative.)** Make `wrap_spawn` panic-with-clear-message when the bridge is unresolvable — keep behavior the same on the test caller, but produce a better error than `Os { code: 2 }`. Strictly worse than option 1 because it doesn't actually unblock the 3 ignored tests.
+
+T0b should also build `tau-net-bridge --release` in the lefthook-pre-push container (or accept that the 3 HTTP tests skip when the bridge isn't built, gated like `resolve_native_or_skip`).
+
+**Outcome (with proposed fix applied locally — NOT committed; T0b's job):**
+
+Verified by re-running the same Podman invocation with `TAU_NET_BRIDGE_PATH=/workspace/target/lefthook-podman/release/tau-net-bridge` exported and `cargo build --release -p tau-sandbox-native --bin tau-net-bridge` first:
+
+- ✅ Spawn-ENOENT eliminated. `Command::spawn` now resolves to the absolute bridge path.
+- ⚠️ The 3 HTTP tests now fail later in `PluginProcess::spawn_and_handshake` (panic on `child.stdin.take().expect(...)` at `process.rs:283-287` — bridge child seemingly exits before its pipes are read). This is a *different* failure mode from spawn-ENOENT and is in handshake-startup-IO territory. Whether T0b should land just the test-env fix and update the 3 `#[ignore]` reasons to reflect this new mode (deferring real fix to T7-followup), or chase the bridge-startup issue too, is a scoping call for the spawn-fix task.
+- ✅ fs-read test (`fs_read_layer4_native_reads_data_file`) continues to pass — confirming the fix is non-regressive.
+- ✅ No `tau-runtime` source changes were made; existing tau-runtime lib tests are untouched.
