@@ -16,10 +16,15 @@
 //!    - No `Capability::Network(Http)` → `SYS_socket`, `SYS_connect`,
 //!      `SYS_getpeername`, `SYS_getsockname` are **absent** from the baseline
 //!      allow-list, so seccomp `KillProcess` fires on any socket attempt.
-//!    - `Capability::Network(Http)` present → those 4 client-side syscalls are
-//!      added to the allow-list so HTTP clients can open TCP connections.
-//!      Server-side syscalls (`SYS_bind`, `SYS_listen`, `SYS_accept`,
-//!      `SYS_accept4`) are intentionally omitted.
+//!    - `Capability::Network(Http)` present → adds the 4 client-side syscalls
+//!      so HTTP plugins can open TCP connections, plus the 4 server-side
+//!      syscalls (`SYS_bind`, `SYS_listen`, `SYS_accept`, `SYS_accept4`)
+//!      that `tau-net-bridge` needs. Per ADR-0020, the strict-tier
+//!      `wrap_spawn` rebuilds the plugin Command to `execve` the bridge,
+//!      which listens on `127.0.0.1:8443` inside the netns and proxies
+//!      CONNECT/HTTP traffic via a host-side Unix socket. The bridge
+//!      inherits the seccomp filter via `execve`, so its server-side
+//!      syscalls must be allowed.
 
 use std::collections::BTreeMap;
 
@@ -56,11 +61,17 @@ pub(crate) fn unshare_flags_for_plan(plan: &SandboxPlan) -> CloneFlags {
 /// following syscalls are added to the allow-list:
 /// - `SYS_socket`, `SYS_connect` — open TCP/UDP sockets and connect to peers.
 /// - `SYS_getpeername`, `SYS_getsockname` — query socket addresses.
+/// - `SYS_bind`, `SYS_listen`, `SYS_accept`, `SYS_accept4` — server-side syscalls
+///   for the bridge.
 ///
-/// `SYS_bind`, `SYS_listen`, `SYS_accept`, and `SYS_accept4` are intentionally
-/// **absent**: `Network(Http)` is a CLIENT capability; server-side syscalls are
-/// not needed. If a future plugin requires server behaviour, add a new capability
-/// variant (e.g. `NetCapability::HttpServer`) with its own extension function.
+/// Per ADR-0020, the strict-tier `wrap_spawn` rebuilds the plugin Command
+/// to `execve` `tau-net-bridge`, which listens on `127.0.0.1:8443` inside
+/// the empty netns and proxies CONNECT/HTTP traffic through a host-side
+/// Unix socket. The bridge inherits the seccomp filter via `execve`, so
+/// its server-side syscalls need to be allowed when `Network(Http)` is
+/// in the plan. Plugins themselves remain HTTP clients; the server-side
+/// syscalls are dead code from the plugin's perspective unless the plugin
+/// invokes them directly (which no current real plugin does).
 ///
 /// If the plan has no network capability, these syscalls are **not** added; the
 /// baseline already excludes them, so any socket attempt triggers seccomp
@@ -87,13 +98,23 @@ pub(crate) fn extend_with_network_rules(
         return;
     }
 
-    // Allow socket-family syscalls needed by HTTP clients.
-    // Server-side syscalls (bind, listen, accept, accept4) are intentionally omitted.
+    // Allow socket-family syscalls needed by HTTP clients, plus server-side
+    // syscalls for the bridge.
     let net_syscalls: &[i64] = &[
+        // Client-side (HTTP plugin egress + bridge proxy dial)
         libc::SYS_socket,
         libc::SYS_connect,
         libc::SYS_getpeername,
         libc::SYS_getsockname,
+        // Bridge server-side: per ADR-0020, the strict-tier wrap_spawn
+        // rebuilds the plugin Command to execve tau-net-bridge, which
+        // listens on 127.0.0.1:8443 inside the netns. Bridge inherits
+        // the seccomp filter via execve, so its TcpListener::bind +
+        // accept loop needs these syscalls.
+        libc::SYS_bind,
+        libc::SYS_listen,
+        libc::SYS_accept,
+        libc::SYS_accept4,
     ];
 
     for &nr in net_syscalls {
@@ -182,7 +203,8 @@ mod tests {
     // ---- extend_with_network_rules tests ----
 
     /// When the plan has a Network(Http) capability, socket-family syscalls
-    /// must be added to the rules map.
+    /// must be added to the rules map (both client-side and server-side for
+    /// the bridge).
     #[test]
     fn extend_adds_socket_when_http_capability_present() {
         let plan_json = serde_json::json!({
@@ -205,6 +227,7 @@ mod tests {
 
         extend_with_network_rules(&mut rules, &plan);
 
+        // Client-side syscalls
         assert!(
             rules.contains_key(&libc::SYS_socket),
             "SYS_socket must be present after extension"
@@ -222,22 +245,22 @@ mod tests {
             "SYS_getsockname must be present after extension"
         );
 
-        // Server-side syscalls must NOT be added by extend_with_network_rules.
+        // Server-side syscalls must also be present (per T0a findings; tau-net-bridge needs them).
         assert!(
-            !rules.contains_key(&libc::SYS_bind),
-            "SYS_bind must NOT be present (server-side; not needed for HTTP client)"
+            rules.contains_key(&libc::SYS_bind),
+            "SYS_bind must be present (bridge server-side per ADR-0020)"
         );
         assert!(
-            !rules.contains_key(&libc::SYS_listen),
-            "SYS_listen must NOT be present (server-side; not needed for HTTP client)"
+            rules.contains_key(&libc::SYS_listen),
+            "SYS_listen must be present (bridge server-side per ADR-0020)"
         );
         assert!(
-            !rules.contains_key(&libc::SYS_accept),
-            "SYS_accept must NOT be present (server-side; not needed for HTTP client)"
+            rules.contains_key(&libc::SYS_accept),
+            "SYS_accept must be present (bridge server-side per ADR-0020)"
         );
         assert!(
-            !rules.contains_key(&libc::SYS_accept4),
-            "SYS_accept4 must NOT be present (server-side; not needed for HTTP client)"
+            rules.contains_key(&libc::SYS_accept4),
+            "SYS_accept4 must be present (bridge server-side per ADR-0020)"
         );
     }
 
@@ -266,5 +289,86 @@ mod tests {
             !rules.contains_key(&libc::SYS_socket),
             "SYS_socket must remain absent when no network capability"
         );
+    }
+
+    /// Bridge server-side syscalls must be added when Network(Http) is in plan.
+    /// Per ADR-0020 + T0a findings: tau-net-bridge inherits the seccomp filter
+    /// via execve and needs to bind+listen+accept on 127.0.0.1:8443.
+    #[test]
+    fn extend_adds_bridge_server_syscalls_when_http() {
+        let plan_json = serde_json::json!({
+            "capabilities": [{
+                "kind": "net.http",
+                "hosts": ["api.example.com"],
+                "methods": ["GET"],
+            }],
+            "context": null,
+            "limits": null,
+        });
+        let plan: SandboxPlan = serde_json::from_value(plan_json).expect("valid plan");
+        let mut rules = baseline_syscall_map();
+        super::extend_with_network_rules(&mut rules, &plan);
+        for nr in [
+            libc::SYS_bind,
+            libc::SYS_listen,
+            libc::SYS_accept,
+            libc::SYS_accept4,
+        ] {
+            assert!(
+                rules.contains_key(&nr),
+                "Network(Http) plan must allow bridge server-side syscall {nr} (T0a 2026-05-10)"
+            );
+        }
+    }
+
+    /// Server-side syscalls must NOT be added when Network(Http) is absent.
+    #[test]
+    fn extend_does_not_add_bridge_syscalls_without_http() {
+        let plan_json = serde_json::json!({
+            "capabilities": [{ "kind": "fs.read", "paths": ["/tmp"] }],
+            "context": null,
+            "limits": null,
+        });
+        let plan: SandboxPlan = serde_json::from_value(plan_json).expect("valid plan");
+        let mut rules = baseline_syscall_map();
+        super::extend_with_network_rules(&mut rules, &plan);
+        for nr in [
+            libc::SYS_bind,
+            libc::SYS_listen,
+            libc::SYS_accept,
+            libc::SYS_accept4,
+        ] {
+            assert!(
+                !rules.contains_key(&nr),
+                "Without Network(Http), syscall {nr} must remain absent"
+            );
+        }
+    }
+
+    /// Bridge syscalls coexist with client-side syscalls (regression: don't
+    /// accidentally remove client-side when adding server-side).
+    #[test]
+    fn extend_adds_both_client_and_server_syscalls_when_http() {
+        let plan_json = serde_json::json!({
+            "capabilities": [{
+                "kind": "net.http",
+                "hosts": ["api.example.com"],
+                "methods": ["GET"],
+            }],
+            "context": null,
+            "limits": null,
+        });
+        let plan: SandboxPlan = serde_json::from_value(plan_json).expect("valid plan");
+        let mut rules = baseline_syscall_map();
+        super::extend_with_network_rules(&mut rules, &plan);
+        // Client-side
+        assert!(rules.contains_key(&libc::SYS_socket), "SYS_socket missing");
+        assert!(
+            rules.contains_key(&libc::SYS_connect),
+            "SYS_connect missing"
+        );
+        // Server-side
+        assert!(rules.contains_key(&libc::SYS_bind), "SYS_bind missing");
+        assert!(rules.contains_key(&libc::SYS_listen), "SYS_listen missing");
     }
 }
