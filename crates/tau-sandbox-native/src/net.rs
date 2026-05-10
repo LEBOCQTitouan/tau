@@ -115,6 +115,19 @@ pub(crate) fn extend_with_network_rules(
         libc::SYS_listen,
         libc::SYS_accept,
         libc::SYS_accept4,
+        // Bridge runtime syscalls discovered via strace under T0c e2e
+        // testing. The bridge's tokio current-thread runtime (used by
+        // bring_lo_up's rtnetlink request) installs a POSIX-timer based
+        // sleep wheel and uses ioctl on its accept loop's socket; on
+        // child-process teardown rt_sigsuspend is called to wait for
+        // SIGCHLD. None of these are in the baseline syscall map (which
+        // is tuned for plugin clients, not for the bridge process), so
+        // we extend them under the same Network(Http) gate that already
+        // pulls in bind/listen/accept.
+        libc::SYS_timer_create,
+        libc::SYS_timer_settime,
+        libc::SYS_ioctl,
+        libc::SYS_rt_sigsuspend,
     ];
 
     for &nr in net_syscalls {
@@ -341,6 +354,38 @@ mod tests {
             assert!(
                 !rules.contains_key(&nr),
                 "Without Network(Http), syscall {nr} must remain absent"
+            );
+        }
+    }
+
+    /// Bridge runtime syscalls (timer_create, timer_settime, ioctl,
+    /// rt_sigsuspend) must be added when Network(Http) is in plan.
+    /// Discovered via T0c e2e strict_bridge.rs strace investigation:
+    /// without these the bridge process SIGSYS-dies during tokio
+    /// runtime init / waitpid teardown.
+    #[test]
+    fn extend_adds_bridge_runtime_syscalls_when_http() {
+        let plan_json = serde_json::json!({
+            "capabilities": [{
+                "kind": "net.http",
+                "hosts": ["api.example.com"],
+                "methods": ["GET"],
+            }],
+            "context": null,
+            "limits": null,
+        });
+        let plan: SandboxPlan = serde_json::from_value(plan_json).expect("valid plan");
+        let mut rules = baseline_syscall_map();
+        super::extend_with_network_rules(&mut rules, &plan);
+        for nr in [
+            libc::SYS_timer_create,
+            libc::SYS_timer_settime,
+            libc::SYS_ioctl,
+            libc::SYS_rt_sigsuspend,
+        ] {
+            assert!(
+                rules.contains_key(&nr),
+                "Network(Http) plan must allow bridge runtime syscall {nr} (T0c 2026-05-10)"
             );
         }
     }
