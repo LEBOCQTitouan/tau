@@ -107,30 +107,193 @@ Then a tiny follow-up (NOT this PR):
 
 ## Investigation findings
 
-To be populated by T0a. Template:
+### T0a — bridge syscall + path enumeration (2026-05-10)
 
-```markdown
-### T0a — bridge syscall + path enumeration (DATE)
+**Investigator:** subagent (Claude Opus 4.7, T0a implementer).
 
-**Investigator:** [agent-id or human].
+**Environment:** lefthook Podman gate (`docker.io/library/rust:1.82-bookworm`)
+on darwin-arm64 host. Container launched with `--cap-add SYS_ADMIN
+--cap-add NET_ADMIN --security-opt seccomp=unconfined --security-opt
+apparmor=unconfined --security-opt label=disable`, mounting
+`cargo-cache` + `target-cache` named volumes, with
+`CARGO_INCREMENTAL=0` and
+`CARGO_TARGET_DIR=/workspace/target/lefthook-podman`. nextest
+installed via the arch-detected `https://get.nexte.st/latest/linux-arm`
+binary (lefthook.yml pattern).
 
-**Environment:** lefthook Podman gate (`docker.io/library/rust:1.82-bookworm`) on darwin-arm64 host.
+**Analytical candidate set (from reading
+`crates/tau-sandbox-native/src/bin/tau-net-bridge.rs`, 245 LOC):**
 
-**Analytical candidate set (from reading tau-net-bridge source):**
-[bullet list of syscalls + paths derived from reading the bridge code]
+The bridge does:
+1. `bring_lo_up()` — opens an AF_NETLINK socket via `rtnetlink::new_connection`
+   to bring `lo` up. Tokio runtime spawns a tiny event loop.
+2. `TcpListener::bind 127.0.0.1:8443` then `set_nonblocking(false)`.
+3. `unsafe { libc::fork() }`; child execve's the plugin; parent runs
+   the proxy loop.
+4. Parent thread accepts TCP connections, dials the proxy via
+   `UnixStream::connect`, and `std::io::copy` splices bytes
+   bidirectionally between the two endpoints across two threads.
+5. Parent waits on the plugin pid via `libc::waitpid` and propagates
+   the exit code.
 
-**Strace-confirmed denials (from running bridge under candidate strict-tier filter):**
-[bullet list of EACCES + EPERM + SIGSYS denials observed]
+Mapping operations to syscalls and cross-referencing against
+`baseline_syscall_map` (`crates/tau-sandbox-native/src/strict.rs`) +
+`extend_with_network_rules` (`net.rs`):
 
-**Final additional syscall set (goes into `extend_with_network_rules`):**
-[final list, with justification per syscall]
+- Already in baseline: `read`, `write`, `openat`, `close`, `fstat`,
+  `fcntl`, `mmap`, `munmap`, `mprotect`, `madvise`, `brk`,
+  `arch_prctl`, `prctl`, `getpid`, `gettid`, `set_tid_address`,
+  `set_robust_list`, `rt_sigaction`, `futex`, `epoll_*`, `eventfd2`,
+  `nanosleep`, `clock_gettime`, `sched_yield`, `rseq`, `clone`,
+  `wait4`, `waitid`, `execve`, `exit`, `exit_group`, `dup`, `dup3`,
+  `pipe2`, `socketpair`, `sendmsg`, `recvmsg`, `sendto`, `recvfrom`,
+  `setsockopt`, `getsockopt`, `getrandom`.
+- Already in `extend_with_network_rules` when `Network(Http)`:
+  `socket`, `connect`, `getpeername`, `getsockname`.
+- **Candidate additions** (server-side, not yet in any rule set):
+  `bind` (TCP listener + netlink bind),
+  `listen` (TCP listener),
+  `accept` (legacy; not actually used by Rust 1.82 std but cheap to
+   include for ABI compat),
+  `accept4` (Rust std `TcpListener::incoming`).
 
-**Final additional path set (goes into `BASELINE_SYSTEM_READ_PATHS` or per-plan):**
-[final list, with justification per path; note universal vs bridge-specific]
+No filesystem path additions appeared analytically: the bridge only
+opens dynamic libraries (`/etc/ld.so.cache`, `libc.so.6`, etc.) and
+`/proc/self/maps`, all of which are inside `BASELINE_SYSTEM_READ_PATHS`
+already.
+
+**Strace-confirmed denials (running the bridge bare with
+`-e trace=network,openat`):**
+
+The bridge bare (no sandbox) issues exactly the following
+network-family syscalls, deduplicated:
+
+```
+accept4
+bind
+listen
+recvfrom
+sendto
+setsockopt
+socket
+socketpair
+```
+
+Of these, `accept4`, `bind`, `listen` are absent from both baseline
+and `extend_with_network_rules` and would be killed by seccomp
+`KillProcess` under the current filter. `socket`, `setsockopt`,
+`sendto`, `recvfrom`, `socketpair` are already covered. `accept`
+(legacy) does not appear in the strace because Rust std uses
+`accept4`, but it is still added defensively.
+
+The strace also confirmed expected non-denial behaviour:
+- The netlink socket is opened with `AF_NETLINK, NETLINK_ROUTE` and
+  immediately uses `sendto`/`recvfrom` (not `bind`!). Surprise: the
+  rtnetlink crate does NOT bind the netlink socket; it uses
+  unconnected datagram I/O. So `bind` is needed only for the TCP
+  listener, not for netlink.
+- Inside the Container test environment (Podman with CAP_NET_ADMIN
+  available), `bring_lo_up()` succeeds. Per the bridge's own comment
+  (lines 118-124), it gracefully falls back to "lo already up" if
+  CAP_NET_ADMIN is unavailable — so this code path tolerates
+  EPERM-on-netlink without failing.
+- No filesystem-path EACCES denials surfaced — bridge openat targets
+  are all in BASELINE_SYSTEM_READ_PATHS.
+
+**Final additional syscall set (goes into
+`extend_with_network_rules`):**
+
+```rust
+libc::SYS_bind,     // TCP listener bind to 127.0.0.1:8443
+libc::SYS_listen,   // TcpListener after bind
+libc::SYS_accept,   // legacy accept; defensive (not used by Rust 1.82
+                    // std but small ABI-compat cushion)
+libc::SYS_accept4,  // Rust std TcpListener::incoming
+```
+
+These are added unconditionally when `Capability::Network(Http)` is
+present, because:
+- The bridge is the load-bearing path for ALL `Network(Http)` plans
+  under the strict tier (`strict::wrap_spawn` always wraps the plugin
+  in `tau-net-bridge` once `TAU_NET_BRIDGE_PATH` is set).
+- The four syscalls are exclusively used by the bridge process, NOT
+  by the plugin process — but seccomp filters apply per-thread and
+  the bridge inherits the filter via `execve`. There's no
+  cross-process distinction to make.
+- Adding them to a non-bridge-using HTTP plan is harmless because
+  the netns is empty (no upstream peer to listen for) and the
+  per-host nftables filter blocks egress to non-allowlisted IPs;
+  `bind`/`listen` on 127.0.0.1 inside an empty netns is not a
+  meaningful capability uplift.
+
+The module-level `//!` doc block on `net.rs` (lines 14-22) and the
+docstring above `extend_with_network_rules` (lines 53-71) BOTH
+currently assert that server-side syscalls are "intentionally
+omitted". T0b must update both to reflect the bridge architecture.
+
+**Final additional path set (goes into `BASELINE_SYSTEM_READ_PATHS`
+or per-plan):**
+
+Empty. The bridge's openat targets are all already in baseline:
+- `/etc/ld.so.cache`
+- `/lib/aarch64-linux-gnu/libgcc_s.so.1`
+- `/lib/aarch64-linux-gnu/libm.so.6`
+- `/lib/aarch64-linux-gnu/libc.so.6`
+- `/proc/self/maps`
+
+No bridge-specific path additions are required.
 
 **Outcome:**
-[with the proposed extensions applied locally: bridge launches under strict tier, listens on 127.0.0.1:8443, accepts a connection, exits cleanly when child closes. fs-read still passes; existing tau-sandbox-native lib + integration tests still pass.]
+
+With the proposed 4-syscall extension applied locally to
+`extend_with_network_rules`, the 3 HTTP layer4 cassette tests in
+`crates/tau-plugin-compat/tests/layer4_native.rs` (anthropic, ollama,
+openai) progress past the bridge's `bind`/`listen`/`accept4` SIGSYS
+and now fail with a strictly downstream error:
+
+```
+spawn anthropic-plugin under native adapter failed:
+  LoadFailed("PluginHandshakeFailed { plugin: \"anthropic-plugin\",
+             reason: Malformed { detail: \"EOF before handshake response\" } }")
+```
+
+The `EOF before handshake response` failure mode matches the
+`#[ignore]` annotation on the 3 tests at HEAD: "Plugin now reaches
+handshake but EOFs there because reqwest TLS init touches paths
+beyond BASELINE_SYSTEM_READ_PATHS. Awaits T7' HTTP startup-IO
+investigation per docs/superpowers/specs/2026-05-09-layer4-startup-io-design.md."
+
+This confirms scenario 2 from the implementer prompt: bridge is
+unblocked, downstream plugin TLS/reqwest startup-IO remains the
+gating factor for the 3 HTTP tests. The bridge sub-project T0b
+delivers the fix; the test un-ignore is the explicit non-goal of
+this sub-project (per spec §0 row 4 and the 5-minute Phase 0
+follow-up chore).
 
 **Surprises / caveats:**
-[anything noteworthy — e.g. netlink turned out to be unnecessary because tokio doesn't bring loopback up; or a path showed up in strace but the bridge worked without it]
-```
+
+1. **Netlink does NOT need `bind`.** The rtnetlink crate uses an
+   unconnected AF_NETLINK datagram socket via `sendto`/`recvfrom`.
+   This makes the additional syscall set strictly TCP-listener-driven.
+   If a future rtnetlink version were to adopt `bind` for netlink,
+   it would already be covered by the same `SYS_bind` allow-list.
+2. **Rust std uses `accept4`, not `accept`.** Linux's glibc accept
+   wrapper invokes `accept4` directly. `SYS_accept` is added
+   defensively for older toolchains/ABI compat, but it cannot fire
+   in current Rust. Keeping it in the allow-list is zero-cost
+   (single i64 entry in a BTreeMap) and reduces fragility.
+3. **`bring_lo_up()` is best-effort and that's fine.** Inside the
+   Container adapter the netns has lo already up; inside the Native
+   adapter we have CAP_NET_ADMIN and the call succeeds. The bind on
+   127.0.0.1:8443 is the load-bearing check either way — the bridge
+   fails loud-and-clear if loopback isn't usable.
+4. **The `//!` module doc and `extend_with_network_rules` docstring
+   in `net.rs` both currently say server-side syscalls are
+   "intentionally omitted".** T0b must rewrite them — the bridge
+   architecture inverts this premise; the bridge is server-side AND
+   inherits the seccomp filter.
+5. **No path-set additions needed.** Earlier T7 work already brought
+   the necessary system libraries into `BASELINE_SYSTEM_READ_PATHS`.
+   The bridge is a pure-Rust binary linking against the same glibc
+   the plugin uses, so its dynamic linker openats are already
+   covered.
