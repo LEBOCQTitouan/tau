@@ -202,18 +202,15 @@ Likely root cause hypothesis (un-verified — for follow-up investigation): reqw
 
 ---
 
-### T0a' — Renewed test (option C: NO_PROXY="" env) — TEMPLATE
+### T0a' — Renewed test (option C: NO_PROXY="")
 
-To be populated by the renewed T0a' investigation.
-
-```markdown
-**Investigator:** [agent-id or human].
+**Investigator:** subagent (T0a' implementer).
 
 **Environment:** lefthook Podman gate (`docker.io/library/rust:1.82-bookworm`) on darwin-arm64 host.
 
 **Hypothesis tested:** Setting `NO_PROXY=""` (explicit empty string) alongside the existing `HTTPS_PROXY` + `HTTP_PROXY` in `wrap_spawn`'s child env will override reqwest's default loopback bypass and route the cassette-server requests through the bridge → proxy chain.
 
-**Local edit applied (NOT committed):** 1-line addition at `crates/tau-sandbox-native/src/strict.rs:453` area (after the T0a-added `HTTP_PROXY` line):
+**Local edit applied (NOT committed):** Addition at `crates/tau-sandbox-native/src/strict.rs:453` area (after the T0a-added `HTTP_PROXY` line):
 
 ```rust
         cmd.env("HTTPS_PROXY", "http://127.0.0.1:8443");
@@ -228,9 +225,14 @@ To be populated by the renewed T0a' investigation.
 
 **Test command:** Same Podman invocation as T0a (verbatim — see above).
 
-**Outcome:** [verbatim nextest summary; per-test result if any fail]
+**Outcome:** `Summary [   0.021s] 3 tests run: 0 passed, 3 failed, 2 skipped`. All 3 HTTP layer4 tests failed with identical-shape transport errors against the cassette's loopback URL:
 
-**Confidence assessment:** [Hypothesis CONFIRMED — option C works; OR FALSIFIED — proceed to option D investigation]
+- `ollama_layer4_native_completes_via_cassette` → `plugin error code -32603 message complete failed: transport: ollama transport: error sending request for url (http://127.0.0.1:43359/api/chat)`
+- `openai_layer4_native_completes_via_cassette` → `plugin error code -32603 message complete failed: transport: openai transport: error sending request for url (http://127.0.0.1:43753/v1/chat/completions)`
+- `anthropic_layer4_native_completes_via_cassette` → `plugin error code -32603 message complete failed: transport: anthropic transport: error sending request for url (http://127.0.0.1:37669/v1/messages)`
 
-**Decision:** [Proceed to T0b applying NO_PROXY="" fix + HTTP_PROXY fix + un-#[ignore]; OR escalate to user for option D]
-```
+All three tests reproduce the same "error sending request for url" shape pointing at the cassette's `127.0.0.1:<random-port>` URL — identical to the T0a baseline. NO_PROXY="" did not change behavior.
+
+**Confidence assessment:** Hypothesis FALSIFIED. Setting `NO_PROXY=""` alongside `HTTPS_PROXY` + `HTTP_PROXY` in the child env did NOT override reqwest's loopback bypass. The cassette requests still short-circuit the proxy and attempt direct TCP inside the empty netns. reqwest's loopback exemption is not driven by (or is not overrideable via) the `NO_PROXY` env var — it appears hardcoded or governed by an internal `no_proxy()` builder path that the env-var read does not override.
+
+**Decision:** Escalate to user for option D investigation (cassette-side non-loopback base_url, or plugin-side `reqwest::Proxy::custom`/`no_proxy(None)` builder change). Do NOT proceed to T0b with the env-only fix — it is provably insufficient.
