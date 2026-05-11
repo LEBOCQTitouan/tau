@@ -16,6 +16,11 @@
 use std::ffi::CString;
 use std::path::PathBuf;
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const ARCH_SPECIFIC_SYSCALLS: &[i64] = &[libc::SYS_arch_prctl];
+#[cfg(all(target_os = "linux", not(target_arch = "x86_64")))]
+const ARCH_SPECIFIC_SYSCALLS: &[i64] = &[];
+
 #[derive(Debug, Default, PartialEq, Eq)]
 enum LandlockMode {
     #[default]
@@ -85,7 +90,7 @@ fn parse_args(args: &[String]) -> Config {
 
 #[cfg(target_os = "linux")]
 fn parse_grants(grants: &[String]) -> landlock::BitFlags<landlock::AccessFs> {
-    use landlock::{AccessFs, BitFlags};
+    use landlock::{Access, AccessFs, BitFlags};
     let mut flags = BitFlags::<AccessFs>::empty();
     for g in grants {
         match g.as_str() {
@@ -192,11 +197,13 @@ fn setup_unshare(cfg: &Config) -> Result<(), i32> {
 fn setup_seccomp() -> Result<(), i32> {
     use seccompiler::{BpfProgram, SeccompAction, SeccompFilter};
     use std::collections::BTreeMap;
-    // Minimal allow-list: execve + everything libc needs to get to it after
-    // landlock + unshare. We don't need a full production filter; the goal
-    // is just to install A seccomp filter to mirror the strict-tier shape.
+    // Allow-list: everything the harness + /usr/bin/echo need.
+    // seccompiler 0.5: match_action != mismatch_action is required, so we use
+    // Errno(EPERM) for unmatched syscalls. The list below covers all syscalls
+    // observed via strace on the target (/usr/bin/echo) plus the ones needed
+    // by the harness itself before execve.
     let mut rules: BTreeMap<i64, Vec<seccompiler::SeccompRule>> = BTreeMap::new();
-    for nr in [
+    let base_syscalls: &[i64] = &[
         libc::SYS_execve,
         libc::SYS_exit,
         libc::SYS_exit_group,
@@ -212,21 +219,31 @@ fn setup_seccomp() -> Result<(), i32> {
         libc::SYS_prctl,
         libc::SYS_set_tid_address,
         libc::SYS_set_robust_list,
-        libc::SYS_arch_prctl,
         libc::SYS_getpid,
         libc::SYS_gettid,
         libc::SYS_openat,
         libc::SYS_read,
         libc::SYS_readlinkat,
         libc::SYS_fstat,
-    ] {
-        rules.insert(nr, vec![]);
+        // Additional syscalls used by /usr/bin/echo and the dynamic linker:
+        libc::SYS_faccessat,   // ld.so.preload check
+        libc::SYS_newfstatat,  // ld.so.cache stat
+        libc::SYS_prlimit64,   // glibc startup
+        libc::SYS_getrandom,   // glibc stack canary
+        libc::SYS_rseq,        // glibc restartable sequences
+        libc::SYS_futex,       // used by glibc threading init
+    ];
+    for nr in base_syscalls.iter().chain(ARCH_SPECIFIC_SYSCALLS.iter()) {
+        rules.insert(*nr, vec![]);
     }
     let arch = std::env::consts::ARCH.try_into().map_err(|_| 6)?;
+    // seccompiler 0.5 parameter order: new(rules, mismatch_action, match_action, arch).
+    // Listed syscalls (in rules map) → Allow (match_action).
+    // Everything else → Errno(EPERM) (mismatch_action).
     let filter = SeccompFilter::new(
         rules,
-        SeccompAction::Allow, // permissive — execve always allowed
-        SeccompAction::Allow,
+        SeccompAction::Errno(libc::EPERM as u32), // mismatch: unlisted syscalls → EPERM
+        SeccompAction::Allow,                      // match: listed syscalls → Allow
         arch,
     )
     .map_err(|_| 6)?;

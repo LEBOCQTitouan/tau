@@ -145,6 +145,48 @@ The lowest "exec ok" row reveals the minimal sufficient config.
 5. Inside Podman gate: `cargo nextest run -p tau-plugin-compat --features integration-tests --tests -E "test(/layer4_native/)"` — 5/5 green (4 from PR #53 + the newly un-ignored shell test).
 6. CI green on all 18 required checks.
 
+## Diagnostic matrix — observed results
+
+Run on 2026-05-11 inside the standard Podman gate
+(`docker.io/library/rust:1.82-bookworm`, kernel: `6.19.7-200.fc43.aarch64`).
+
+Note: three harness bugs were fixed during T4 before the clean run was captured —
+(a) `AccessFs::from_all` required importing `landlock::Access` trait;
+(b) `libc::SYS_arch_prctl` does not exist on aarch64 (x86-only constant) — fixed with
+`#[cfg(target_arch = "x86_64")]` guard;
+(c) the `SeccompFilter::new` argument order is `(rules, mismatch_action, match_action, arch)` —
+the harness had `Allow` and `Errno(EPERM)` swapped, causing ALL listed syscalls to get EPERM.
+After all three fixes the harness compiles and runs cleanly.
+
+```
+# config                                            exit  meaning
+---
+0 unsandboxed                                         0  exec ok
+1 lock(base)                                          0  exec ok
+2 lock(base+exec=Exe)                                 0  exec ok
+3 lock(base+exec=Rd+Exe)                              0  exec ok
+4 lock(base+exec=AllV1)                               0  exec ok
+5 lock(base+exec=Rd+Exe)+ns                           0  exec ok
+6 lock(base+exec=Rd+Exe)+ns+sc                        0  exec ok
+7 lock(base)+ns+sc                                    0  exec ok
+8 lock(dir-only=Rd+RdDir+Exe)+ns+sc                  77  execve EACCES (errno=13)
+```
+
+Lowest "exec ok" row: **#2**
+
+Conclusion: landlock with just `Execute` grant on the exec-path file (no `ReadFile`, no
+namespace, no seccomp) is sufficient for execve to succeed; the **full strict tier**
+(rows 6–7) also succeeds. Row 8 shows that a _directory-only_ rule without a
+file-level rule triggers EACCES — confirming that the file-level `exec_paths` rule
+is load-bearing and must not be dropped.
+
+The production code (`light.rs::install_landlock`) already grants `Execute` on each
+exec path; the standalone harness succeeds in configuration 2 which mirrors that
+exactly. **The EACCES seen in the shell layer4 test is NOT caused by a missing or
+insufficient landlock grant — the bug is elsewhere in tau** (most likely in how
+exec_paths are collected or how the plan routes through `apply_strict` vs
+`install_landlock`).
+
 ## Out-of-band followups doc update
 
 Edit `docs/superpowers/specs/2026-05-03-sandboxing-followups.md`:
