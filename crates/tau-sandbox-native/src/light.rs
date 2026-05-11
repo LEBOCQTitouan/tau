@@ -37,6 +37,27 @@ pub(crate) const BASELINE_SYSTEM_READ_PATHS: &[&str] = &[
     // Sub-project layer4-startup-io baseline additions (2026-05-09):
     "/proc/self", // tokio reads /proc/self/cgroup + /proc/self/maps during multi-thread runtime init
     "/sys/fs/cgroup", // tokio reads /sys/fs/cgroup/cpu.max for CPU quota / worker pool sizing
+    // Sub-project E exec-gating fix (2026-05-11): two distinct issues resolved together:
+    //
+    // Issue 1 — glibc PATH search EACCES before /usr/bin:
+    // On Debian bookworm, the container PATH is /usr/local/cargo/bin:/usr/local/sbin:
+    // /usr/local/bin:/usr/sbin:/usr/bin:... Rust's Command::new() opens each PATH directory
+    // with O_DIRECTORY to search for the binary. Directories not in the landlock baseline
+    // (lacking ReadFile|ReadDir) cause EACCES, which Rust treats as a hard failure (not
+    // ENOENT-and-continue). Adding /usr/local/* to the baseline makes those directories
+    // readable, so Rust gets ENOENT (no "echo" there) and continues to /usr/bin/echo.
+    //
+    // Issue 2 — /dev/null EACCES for stdin redirection:
+    // Plugins that spawn subprocesses with stdin(Stdio::null()) open /dev/null. Without
+    // /dev in the baseline, landlock denies this open() with EACCES, and Command::spawn()
+    // fails before even calling execve(). /dev is needed for null device access.
+    //
+    // Neither addition weakens exec gating: per-file Execute rules (from Process(Spawn) +
+    // Filesystem(Exec) capabilities) still gate exactly which binaries are executable.
+    "/usr/local/bin", // PATH search: readable but no "echo" there → ENOENT → continue
+    "/usr/local/sbin", // PATH search: same
+    "/usr/local/lib", // shared library loader may search /usr/local/lib at startup
+    "/dev",           // /dev/null access for stdin(Stdio::null()) in spawned subprocesses
 ];
 
 /// Collect and resolve landlock path lists from a plan + command CWD.
@@ -638,6 +659,34 @@ mod tests {
             assert!(
                 BASELINE_SYSTEM_READ_PATHS.contains(&p),
                 "runtime-mechanics baseline path {p} must be in BASELINE_SYSTEM_READ_PATHS"
+            );
+        }
+    }
+
+    #[test]
+    fn baseline_system_read_paths_includes_usr_local_and_dev() {
+        // Sub-project E exec-gating fix (2026-05-11):
+        //
+        // /usr/local/bin, /usr/local/sbin: Rust's Command::new(bare-name) opens each
+        // PATH directory with O_DIRECTORY to search for the binary. Directories not in
+        // the baseline cause EACCES (not ENOENT), which Rust treats as a hard spawn
+        // failure. Adding these directories makes them readable so Rust gets ENOENT
+        // (binary not found there) and continues searching to /usr/bin/echo.
+        //
+        // /dev: plugins that spawn subprocesses with stdin(Stdio::null()) open /dev/null.
+        // Without /dev in the baseline, landlock denies this open() with EACCES and the
+        // grandchild spawn fails before execve() is ever called.
+        let expected = [
+            "/usr/local/bin",
+            "/usr/local/sbin",
+            "/usr/local/lib",
+            "/dev",
+        ];
+        for p in expected {
+            assert!(
+                BASELINE_SYSTEM_READ_PATHS.contains(&p),
+                "sub-project-E fix: {p} must be in BASELINE_SYSTEM_READ_PATHS \
+                 (see baseline comment for full rationale)"
             );
         }
     }

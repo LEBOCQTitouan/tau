@@ -243,7 +243,6 @@ async fn resolve_native_or_skip() -> Option<tau_runtime::sandbox::SandboxAdapter
 /// - The shell plugin's `SessionContext.granted_capabilities` path
 ///   admission check (process.spawn allow-list)
 #[tokio::test]
-#[ignore = "Handshakes successfully under T2's baseline (landlock + seccomp) but fails during invoke: std's Command::spawn does PATH-search via execvp, landlock denies exec on /usr/local/{sbin,bin} before reaching /usr/bin/echo. Root cause is sub-project E (per-command exec gating); not closeable by startup-IO work. T1 finding 2026-05-09."]
 async fn shell_layer4_native_runs_echo_hello() {
     // 1. Locate the pre-built shell plugin binary.  The CI workflow must
     //    have compiled it beforehand.

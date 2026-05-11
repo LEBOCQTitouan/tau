@@ -186,6 +186,12 @@ pub(crate) fn baseline_syscall_map() -> std::collections::BTreeMap<i64, Vec<Secc
     // clone3: raw number 435 on both x86_64 and aarch64 (added in Linux 5.3).
     allow!(435_i64);
 
+    // pidfd_open: raw number 434 on both x86_64 and aarch64 (added in Linux 5.3).
+    // tokio's process implementation uses pidfd_open() on kernels >= 5.3 to monitor
+    // child processes via file descriptors (more reliable than waitpid). Without this,
+    // spawning subprocesses inside a sandboxed tokio process gets SIGSYS (KillProcess).
+    allow!(434_i64);
+
     // ---- Signals ----
     allow!(
         libc::SYS_rt_sigaction,
@@ -756,6 +762,28 @@ mod tests {
         assert!(
             !env_names.contains(std::ffi::OsStr::new("HTTP_PROXY")),
             "HTTP_PROXY must NOT be set for plans without Network(Http)"
+        );
+    }
+
+    /// Asserts that `pidfd_open` (syscall 434) is in the baseline allow-list.
+    ///
+    /// tokio's `process::Command` on Linux kernels >= 5.3 calls `pidfd_open(child_pid, 0)`
+    /// immediately after forking a child subprocess, so it can monitor the child via an
+    /// fd instead of waitpid. Without this syscall in the allow-list, `KillProcess`
+    /// triggers and the plugin process dies mid-call when it first spawns a grandchild
+    /// (e.g., the shell plugin spawning `echo`).
+    ///
+    /// Sub-project E fix (2026-05-11): confirmed by running
+    /// `shell_layer4_native_runs_echo_hello` under the gate and observing
+    /// "plugin process exited mid-call" → adding 434 → test passes.
+    #[test]
+    fn baseline_includes_pidfd_open_for_tokio_subprocess() {
+        let map = baseline_syscall_map();
+        assert!(
+            map.contains_key(&434_i64),
+            "pidfd_open (syscall 434) must be in baseline allow-list — tokio \
+             uses it on Linux >= 5.3 to monitor child processes; without it \
+             KillProcess SIGSYSes the plugin mid-call when spawning subprocesses"
         );
     }
 }

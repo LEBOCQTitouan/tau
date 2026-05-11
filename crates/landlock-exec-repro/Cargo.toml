@@ -1,0 +1,25 @@
+[package]
+name = "landlock-exec-repro"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "landlock-exec-repro"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 0
+
+[dependencies]
+libc        = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock    = "0.4"
+nix         = { version = "0.29", default-features = false, features = ["sched", "user", "process"] }
+seccompiler = "0.5"
+
+# Standalone Cargo project — opt out of the parent workspace at
+# /Users/titouanlebocq/code/tau/Cargo.toml so a kernel/landlock regression
+# that breaks our setup does not block the workspace from compiling.
+[workspace]

@@ -191,24 +191,32 @@ The original scope assumed the priority-12 chain model (`select_adapter` against
 
 ---
 
-### Sub-project E — Per-command exec argument-filter
+### Sub-project E — Per-command exec gating ✅ DONE 2026-05-11
 
-**One-line:** Implement true per-command exec gating using landlock V2 `AccessFs::Execute`.
+**One-line:** Implement per-command exec gating that survives the strict-tier stack (landlock + user_ns + net_ns + seccomp).
 
-**Status:** Currently a v0.1 no-op stub in `exec.rs::extend_with_exec_rules`. Documented TODO.
+**Shipped:** Three independent bugs were uncovered by a diagnose-then-fix cycle using a standalone repro binary (`crates/landlock-exec-repro/`, non-workspace-member) + a driver script (`scripts/diagnose-exec-eacces.sh`). The repro runs a 9-row matrix of landlock + namespace + seccomp configurations inside the Podman gate; the matrix revealed that the landlock grant shape (`AccessFs::Execute`) was correct in isolation, and the actual bugs were elsewhere in the strict-tier baseline:
 
-**Scope:**
-1. Detect landlock V2 support in the probe (kernel ≥ 5.19).
-2. When `Capability::Process(Spawn { commands })` or `Capability::Filesystem(Exec { paths })` is in the plan, add the listed paths to the landlock ruleset with `AccessFs::Execute` access.
-3. Keep `execve` in the seccomp baseline (plugin startup must work).
-4. Refuse plans with these capabilities on kernels < 5.19 with a clear message: "per-command exec gating requires landlock V2 (kernel ≥ 5.19); falling back to seccomp-only allow-all-execve".
-5. Update unit tests in `exec.rs` to actually exercise the V2 path.
+1. **PATH directories EACCES** — Rust's `Command::new(bare-name)` opens each `PATH` directory with `O_DIRECTORY` to search for the binary. Directories not in the landlock read baseline (`/usr/local/sbin`, `/usr/local/bin`, `/usr/local/lib`) returned EACCES, which Rust treats as a hard spawn failure instead of "skip and continue." Fix: add `/usr/local/{sbin,bin,lib}` to `BASELINE_SYSTEM_READ_PATHS` in `tau-sandbox-native/src/light.rs`.
 
-**Test coverage to add:** ~5 tests + e2e verification (depends on D).
+2. **`/dev/null` EACCES** — Plugins that spawn subprocesses with `stdin(Stdio::null())` open `/dev/null`. Without `/dev` in the landlock baseline, the open failed before `execve` was reached. Fix: add `/dev` to `BASELINE_SYSTEM_READ_PATHS`.
 
-**Estimated scope:** 1 week.
+3. **`pidfd_open` SIGSYS** — On Linux ≥ 5.3, tokio's `process::Command` calls `pidfd_open(child_pid, 0)` (syscall 434) to monitor child processes. This syscall was absent from the seccomp baseline, so the kernel sent SIGSYS (KillProcess) to the shell plugin mid-call. Fix: add syscall 434 to `baseline_syscall_map()` in `tau-sandbox-native/src/strict.rs`.
 
-**Dependencies:** Sub-project D for e2e infrastructure.
+Neither baseline addition weakens exec gating: per-file `Execute` rules (from `Capability::Process(Spawn)` + `Capability::Filesystem(Exec)`) still gate exactly which binaries are executable.
+
+**Test coverage:**
+- `crates/tau-plugin-compat/tests/layer4_native.rs::shell_layer4_native_runs_echo_hello` — un-`#[ignore]`'d, passes under the Podman gate.
+- 2 regression unit tests in `tau-sandbox-native::{light,strict}` (the actual fix sites) guard the baseline additions.
+- `scripts/diagnose-exec-eacces.sh` + `crates/landlock-exec-repro/` remain in-tree as the canonical regression repro for future kernel/landlock-crate/tokio-version bumps.
+
+**Correction to original framing:** the original §Sub-project E text in this doc described landlock V2 (kernel ≥ 5.19) as a prerequisite. That was wrong — landlock V1 already contains `AccessFs::Execute`. The actual blocker was a multi-cause baseline gap that the diagnostic matrix surfaced layer-by-layer.
+
+**Linked artifacts:**
+- Spec: `docs/superpowers/specs/2026-05-11-sub-project-e-exec-gating-design.md`
+- Plan: `docs/superpowers/plans/2026-05-11-sub-project-e-exec-gating.md`
+- Repro: `crates/landlock-exec-repro/` + `scripts/diagnose-exec-eacces.sh`
+- Production fix commit: `7978c0a` on `feat/sub-project-e-exec-gating`.
 
 ---
 
