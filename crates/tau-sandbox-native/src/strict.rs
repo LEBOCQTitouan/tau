@@ -362,17 +362,6 @@ pub(crate) fn apply_strict(
     // net_filter/INTEGRATION.md for the post-spawn hook plan (F task 6.5).
     let unshare_flags = crate::net::unshare_flags_for_plan(plan);
 
-    // Capture host uid/gid in the parent. After CLONE_NEWUSER unshare, the
-    // child must write /proc/self/uid_map and /proc/self/gid_map to gain
-    // real capabilities inside the new user namespace; until those are
-    // written the process is mapped to nobody (kernel uid 65534) with no
-    // effective caps. That breaks `tau-net-bridge`'s rtnetlink call to
-    // bring `lo` up inside the netns (CAP_NET_ADMIN required → EPERM),
-    // which in turn prevents the plugin's reqwest from connecting to the
-    // bridge's 127.0.0.1:8443 listener (no loopback route).
-    let host_uid = nix::unistd::getuid().as_raw();
-    let host_gid = nix::unistd::getgid().as_raw();
-
     // Determine if the plan requests outbound HTTP.
     let has_network_http = plan.capabilities.iter().any(|c| {
         matches!(
@@ -380,6 +369,16 @@ pub(crate) fn apply_strict(
             tau_domain::Capability::Network(tau_domain::NetCapability::Http { .. })
         )
     });
+
+    // Capture host uid/gid in the parent so the child can write
+    // /proc/self/uid_map / gid_map after unshare(CLONE_NEWUSER). The
+    // writes gate CAP_NET_ADMIN inside the new user_ns, which the bridge
+    // needs to bring `lo` up via rtnetlink (so the plugin's reqwest can
+    // dial 127.0.0.1:8443). Only relevant for HTTP plugins — non-HTTP
+    // plugins don't use the bridge and don't need loopback up.
+    let host_uid = nix::unistd::getuid().as_raw();
+    let host_gid = nix::unistd::getgid().as_raw();
+    let write_id_maps = has_network_http;
 
     // For Network(Http): spawn the userspace proxy, extend landlock paths,
     // and wrap cmd with tau-net-bridge so the child dials through the proxy.
@@ -499,21 +498,32 @@ pub(crate) fn apply_strict(
             // which silently fails — manifests as the plugin's reqwest
             // failing to connect to the bridge proxy listener.
             //
+            // Only gated by HTTP capability: non-HTTP plugins don't run the
+            // bridge and don't need lo up, so they don't need uid_map.
+            // (Skipping for non-HTTP also preserves pre-existing behavior
+            // for those plugins on kernels/runners where the writes fail.)
+            //
             // Order: setgroups "deny" must be written BEFORE gid_map for
-            // unprivileged user_ns (kernel ≥ 3.19). Tolerate EPERM/EACCES
-            // on setgroups — the parent user_ns may have already locked us
-            // into deny (e.g. nested under Podman).
-            let sg_res = std::fs::write("/proc/self/setgroups", "deny\n");
-            if let Err(e) = &sg_res {
-                let raw = e.raw_os_error().unwrap_or(0);
-                if raw != 1 && raw != 13 {
-                    return Err(std::io::Error::other(format!("setgroups: {e}")));
+            // unprivileged user_ns (kernel ≥ 3.19). Tolerate any setgroups
+            // error — the parent user_ns may have already locked us into
+            // deny (e.g. nested under Podman), or the kernel may refuse the
+            // write for state-specific reasons. If setgroups isn't actually
+            // deny, gid_map will fail with EPERM and we'll surface that.
+            if write_id_maps {
+                let _ = std::fs::write("/proc/self/setgroups", "deny\n");
+                // Pass the raw errno through (don't wrap in io::Error::other,
+                // which std::process serializes as a useless EINVAL).
+                if let Err(e) = std::fs::write("/proc/self/uid_map", format!("0 {host_uid} 1\n"))
+                {
+                    let raw = e.raw_os_error().unwrap_or(libc::EIO);
+                    return Err(std::io::Error::from_raw_os_error(raw));
+                }
+                if let Err(e) = std::fs::write("/proc/self/gid_map", format!("0 {host_gid} 1\n"))
+                {
+                    let raw = e.raw_os_error().unwrap_or(libc::EIO);
+                    return Err(std::io::Error::from_raw_os_error(raw));
                 }
             }
-            std::fs::write("/proc/self/uid_map", format!("0 {host_uid} 1\n"))
-                .map_err(|e| std::io::Error::other(format!("uid_map: {e}")))?;
-            std::fs::write("/proc/self/gid_map", format!("0 {host_gid} 1\n"))
-                .map_err(|e| std::io::Error::other(format!("gid_map: {e}")))?;
 
             // Step 2: landlock filesystem isolation (read/write) + exec gating.
             // Must come AFTER the uid_map writes above (which need /proc/self
