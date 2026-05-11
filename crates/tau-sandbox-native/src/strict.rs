@@ -513,13 +513,11 @@ pub(crate) fn apply_strict(
                 let _ = std::fs::write("/proc/self/setgroups", "deny\n");
                 // Pass the raw errno through (don't wrap in io::Error::other,
                 // which std::process serializes as a useless EINVAL).
-                if let Err(e) = std::fs::write("/proc/self/uid_map", format!("0 {host_uid} 1\n"))
-                {
+                if let Err(e) = std::fs::write("/proc/self/uid_map", format!("0 {host_uid} 1\n")) {
                     let raw = e.raw_os_error().unwrap_or(libc::EIO);
                     return Err(std::io::Error::from_raw_os_error(raw));
                 }
-                if let Err(e) = std::fs::write("/proc/self/gid_map", format!("0 {host_gid} 1\n"))
-                {
+                if let Err(e) = std::fs::write("/proc/self/gid_map", format!("0 {host_gid} 1\n")) {
                     let raw = e.raw_os_error().unwrap_or(libc::EIO);
                     return Err(std::io::Error::from_raw_os_error(raw));
                 }
