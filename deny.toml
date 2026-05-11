@@ -23,18 +23,25 @@ confidence-threshold = 0.93
 # with tau's distribution model.
 allow = [
     "MIT",
+    "MIT-0",                    # MIT without attribution (e.g. ring's spec)
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "BSL-1.0",                  # boost.org Software License (used by some crates)
     "CC0-1.0",                  # public-domain dedication (used by tiny_keccak etc.)
+    "CDLA-Permissive-2.0",      # Linux Foundation Community Data License (permissive)
     "ISC",                      # libloading and friends
     "MPL-2.0",                  # webpki-roots, openssl-ffi (file-scoped copyleft, OK to use)
     "Unicode-3.0",              # icu / unicode-ident (post-2024 renaming)
     "Unicode-DFS-2016",         # icu / unicode-ident (pre-2024)
     "Zlib",                     # tinyvec etc.
 ]
+# Skip our own `publish = false` workspace crates (xtask, etc.) — they
+# inherit the workspace's MIT-OR-Apache-2.0 license but don't carry a
+# per-crate `license` field, and cargo-deny doesn't follow the workspace
+# inheritance.
+private = { ignore = true }
 
 [bans]
 # Detect duplicate versions of the same dep — warn, don't block. Some
