@@ -535,7 +535,7 @@ fn make_net_http_localhost_cap() -> Capability {
 /// Skips if: (a) landlock/native adapter unavailable, (b) anthropic-plugin
 /// binary not yet built.
 #[tokio::test]
-#[ignore = "Phase 0 unblocked spawn (TAU_NET_BRIDGE_PATH wired in tests + bridge built in CI + strict::wrap_spawn now restores stdio piping after Command rebuild). Plugin now reaches handshake but EOFs there because reqwest TLS init touches paths beyond BASELINE_SYSTEM_READ_PATHS. Awaits T7' (renumbered T7) HTTP startup-IO investigation per docs/superpowers/specs/2026-05-09-layer4-startup-io-design.md."]
+#[ignore = "Plugin now spawns, handshakes, and dispatches via the strict-tier sandbox cleanly: Phase 0 (PR #49) fixed spawn + stdio; bridge ↔ strict-tier integration (PR #51) fixed seccomp gaps so the bridge survives bind/listen/fork/waitpid. Remaining failure is at HTTP transport: reqwest reports `error sending request for url` when dispatching to the cassette server through the bridge → proxy → host chain. Awaits HTTP-transport-proxy-chain investigation (separate sub-project)."]
 async fn anthropic_layer4_native_completes_via_cassette() {
     // 1. Locate the pre-built anthropic plugin binary.
     let bin_path = locate_plugin_bin("anthropic-plugin");
@@ -639,7 +639,7 @@ async fn anthropic_layer4_native_completes_via_cassette() {
 /// Skips if: (a) landlock/native adapter unavailable, (b) ollama-plugin
 /// binary not yet built.
 #[tokio::test]
-#[ignore = "Phase 0 unblocked spawn (TAU_NET_BRIDGE_PATH wired in tests + bridge built in CI + strict::wrap_spawn now restores stdio piping after Command rebuild). Plugin now reaches handshake but EOFs there because reqwest TLS init touches paths beyond BASELINE_SYSTEM_READ_PATHS. Awaits T7' (renumbered T7) HTTP startup-IO investigation per docs/superpowers/specs/2026-05-09-layer4-startup-io-design.md."]
+#[ignore = "Plugin now spawns, handshakes, and dispatches via the strict-tier sandbox cleanly: Phase 0 (PR #49) fixed spawn + stdio; bridge ↔ strict-tier integration (PR #51) fixed seccomp gaps so the bridge survives bind/listen/fork/waitpid. Remaining failure is at HTTP transport: reqwest reports `error sending request for url` when dispatching to the cassette server through the bridge → proxy → host chain. Awaits HTTP-transport-proxy-chain investigation (separate sub-project)."]
 async fn ollama_layer4_native_completes_via_cassette() {
     // 1. Locate the pre-built ollama plugin binary.
     let bin_path = locate_plugin_bin("ollama-plugin");
@@ -736,7 +736,7 @@ async fn ollama_layer4_native_completes_via_cassette() {
 /// Skips if: (a) landlock/native adapter unavailable, (b) openai-plugin
 /// binary not yet built.
 #[tokio::test]
-#[ignore = "Phase 0 unblocked spawn (TAU_NET_BRIDGE_PATH wired in tests + bridge built in CI + strict::wrap_spawn now restores stdio piping after Command rebuild). Plugin now reaches handshake but EOFs there because reqwest TLS init touches paths beyond BASELINE_SYSTEM_READ_PATHS. Awaits T7' (renumbered T7) HTTP startup-IO investigation per docs/superpowers/specs/2026-05-09-layer4-startup-io-design.md."]
+#[ignore = "Plugin now spawns, handshakes, and dispatches via the strict-tier sandbox cleanly: Phase 0 (PR #49) fixed spawn + stdio; bridge ↔ strict-tier integration (PR #51) fixed seccomp gaps so the bridge survives bind/listen/fork/waitpid. Remaining failure is at HTTP transport: reqwest reports `error sending request for url` when dispatching to the cassette server through the bridge → proxy → host chain. Awaits HTTP-transport-proxy-chain investigation (separate sub-project)."]
 async fn openai_layer4_native_completes_via_cassette() {
     // 1. Locate the pre-built openai plugin binary.
     let bin_path = locate_plugin_bin("openai-plugin");

@@ -119,42 +119,61 @@ async fn proxy_handle_drop_cleans_up_temp_socket() {
     let mut cmd = Command::new(locate_controlled_env_bin());
     cmd.env("TAU_FIXTURE_MODE", "default");
 
+    // Snapshot the temp dir BEFORE wrap_spawn so we can identify which
+    // tau-proxy-*.sock files this test introduces (vs ones owned by other
+    // tests running in parallel under nextest — e.g. strict_bridge.rs).
+    let temp_dir = std::env::temp_dir();
+    let baseline_files: std::collections::HashSet<_> = std::fs::read_dir(&temp_dir)
+        .expect("read temp dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("tau-proxy-"))
+        .map(|e| e.file_name())
+        .collect();
+
     let sandbox = NativeSandbox::new("test-strict", SandboxTier::Strict);
     let handle = sandbox
         .wrap_spawn(&plan, &mut cmd)
         .await
         .expect("wrap_spawn must succeed for Network(Http) plan");
 
-    // After wrap_spawn, the proxy socket file should exist in the temp dir.
-    // The naming pattern is tau-proxy-{pid}-{n}.sock (see tau-sandbox-proxy).
-    let temp_dir = std::env::temp_dir();
-    let proxy_files_before: Vec<_> = std::fs::read_dir(&temp_dir)
+    // After wrap_spawn, find OUR proxy socket(s): files that weren't in
+    // the baseline snapshot. Naming pattern: tau-proxy-{pid}-{n}.sock
+    // (see tau-sandbox-proxy).
+    let after_spawn_files: std::collections::HashSet<_> = std::fs::read_dir(&temp_dir)
         .expect("read temp dir")
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name().to_string_lossy().starts_with("tau-proxy-"))
+        .map(|e| e.file_name())
+        .collect();
+    let new_files: Vec<_> = after_spawn_files
+        .difference(&baseline_files)
+        .cloned()
         .collect();
     assert!(
-        !proxy_files_before.is_empty(),
-        "expected at least one tau-proxy-*.sock in {} after wrap_spawn",
-        temp_dir.display()
+        !new_files.is_empty(),
+        "expected at least one new tau-proxy-*.sock in {} after wrap_spawn \
+         (baseline had {} matching files)",
+        temp_dir.display(),
+        baseline_files.len(),
     );
 
     drop(handle);
     // Give the OS a beat to unlink.
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    let proxy_files_after: Vec<_> = std::fs::read_dir(&temp_dir)
+    let final_files: std::collections::HashSet<_> = std::fs::read_dir(&temp_dir)
         .expect("read temp dir")
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name().to_string_lossy().starts_with("tau-proxy-"))
+        .map(|e| e.file_name())
         .collect();
 
-    // Every socket that existed before must be gone.
-    let names_before: Vec<_> = proxy_files_before.iter().map(|e| e.file_name()).collect();
-    let names_after: Vec<_> = proxy_files_after.iter().map(|e| e.file_name()).collect();
-    for name in &names_before {
+    // Each socket this test introduced must be gone after handle drop.
+    // We don't assert about OTHER tests' sockets (they have their own
+    // lifetime); that's why we diff against the baseline.
+    for name in &new_files {
         assert!(
-            !names_after.contains(name),
+            !final_files.contains(name),
             "expected proxy socket {} to be unlinked on handle drop",
             name.to_string_lossy()
         );
