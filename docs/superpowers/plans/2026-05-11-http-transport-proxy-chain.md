@@ -1,25 +1,27 @@
-# HTTP Transport ↔ Proxy Chain Implementation Plan
+# HTTP Transport ↔ Proxy Chain Implementation Plan (Amended post-T0a)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **Amended 2026-05-11 (post-T0a):** The original plan tested a falsified hypothesis (HTTPS_PROXY-vs-HTTP_PROXY scheme gating). T0a's findings revealed that **reqwest bypasses proxy env vars for loopback targets by default** — adding HTTP_PROXY is necessary but not sufficient. This amendment switches T0a → T0a' (renewed test: option C `NO_PROXY=""` env addition), with explicit HARD GATE escalation to option D (cassette infra change) if C falsifies. Spec amended at commit `d711d38`.
 
-**Goal:** Close the 3 HTTP layer4 tests (anthropic/ollama/openai) by adding `HTTP_PROXY` env alongside the existing `HTTPS_PROXY` in `tau-sandbox-native::strict::wrap_spawn`. reqwest scheme-gates these env vars; the cassette server is plain HTTP, so HTTPS_PROXY-only configuration causes reqwest to bypass the bridge.
+**Goal:** Close the 3 HTTP layer4 tests (anthropic/ollama/openai) by overriding reqwest's default loopback bypass so the cassette server's `127.0.0.1:<random-port>` URL routes through the bridge → proxy → host chain.
 
-**Architecture:** Single PR (`feat/http-transport-proxy-chain`). T0a verifies the hypothesis by editing locally + re-running the 3 HTTP tests in the lefthook Podman gate. If confirmed (high-confidence hypothesis), T0b applies the one-line fix + un-`#[ignore]`'s the 3 tests. T0c/T0d are USER GATEs (push, monitor CI, merge).
+**Architecture:** Single PR (`feat/http-transport-proxy-chain`). T0a' tests option C (NO_PROXY="" env) in Podman. If C passes (renewed hypothesis confirmed) → T0b applies the env fix + un-`#[ignore]`'s 3 tests. If C falsifies → HARD GATE escalates to user (option D investigation tracked separately).
 
-**Tech Stack:** Rust 2021, `tau-sandbox-native::strict::wrap_spawn`, lefthook + Podman gate for verification, nextest.
+**Tech Stack:** Rust 2021, `tau-sandbox-native::strict::wrap_spawn`, reqwest's NO_PROXY env-var behavior, lefthook + Podman gate for verification, nextest.
 
-**Spec:** `docs/superpowers/specs/2026-05-11-http-transport-proxy-chain-design.md` (committed at `ba71bc5`).
+**Spec:** `docs/superpowers/specs/2026-05-11-http-transport-proxy-chain-design.md` (amended at `d711d38`).
 
 ---
 
 ## Pre-flight checks (apply to every task)
 
-- BASE_SHA = `ba71bc5`. Verify against this if claiming "pre-existing failure".
+- BASE_SHA = `d711d38`. Verify against this if claiming "pre-existing failure".
 - All cargo invocations: `timeout 300 env CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=target/agent-impl cargo nextest run -p <crate>` per CLAUDE.md.
 - `RUSTC_WRAPPER=` to clear sccache if EPERM.
-- Investigation tasks (T0a) emit findings to the spec's "Investigation findings" template. NO code commit on T0a.
-- T0c push uses `scripts/agent-push.sh` (helper from PR #49) — NOT plain `git push`.
-- For Podman repro inside T0a / T0b, the lefthook gate config:
+- Investigation tasks (T0a') emit findings to the spec's "T0a' — Renewed test" template (currently below the historical T0a findings). NO code commit on T0a'.
+- T0c push uses `scripts/agent-push.sh` — NOT plain `git push`.
+- Podman gate config (standard):
   ```
   docker.io/library/rust:1.82-bookworm
   --cap-add SYS_ADMIN --cap-add NET_ADMIN
@@ -32,7 +34,7 @@
   -e CARGO_TARGET_DIR=/workspace/target/lefthook-podman
   -w /workspace
   ```
-- For nextest install inside Podman, **detect arch** (lefthook.yml pattern):
+- For nextest install inside Podman, **detect arch**:
   ```bash
   ARCH=$(uname -m)
   case "$ARCH" in
@@ -47,40 +49,43 @@
 
 | File | Responsibility | Task |
 |---|---|---|
-| `crates/tau-sandbox-native/src/strict.rs:453` (`cmd.env("HTTPS_PROXY", ...)`) | The exact site where the strict-tier `wrap_spawn` sets the child's proxy env. T0b adds one line setting `HTTP_PROXY` to the same destination. | T0a (local edit + revert), T0b (real commit) |
+| `crates/tau-sandbox-native/src/strict.rs:453` (existing `cmd.env("HTTPS_PROXY", ...)`) | The exact site where wrap_spawn sets the child's proxy env. T0a' adds 2 lines locally for test; T0b commits the same 2 lines. | T0a' (local edit + revert), T0b (real commit) |
 | `crates/tau-plugin-compat/tests/layer4_native.rs:538, 642, 739` | The 3 `#[ignore]` attributes on the HTTP layer4 tests. T0b removes them. | T0b (modify) |
-| `docs/superpowers/specs/2026-05-11-http-transport-proxy-chain-design.md` (Investigation findings template at the bottom) | Spec amendment populated by T0a. | T0a (populate + commit) |
+| `docs/superpowers/specs/2026-05-11-http-transport-proxy-chain-design.md` (T0a' template at bottom) | Spec amendment populated by T0a' with hypothesis-C outcome. | T0a' (populate + commit) |
 
 ---
 
-## Task 0a: Hypothesis verification — HTTP_PROXY env addition unblocks 3 tests
+## Task 0a': Renewed hypothesis test — option C (NO_PROXY="")
 
-**HARD GATE.** Spec edit only on this task. NO code commit. Main agent reviews findings before T0b.
+**HARD GATE.** Spec edit only. NO code commit. Main agent reviews findings before T0b.
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-05-11-http-transport-proxy-chain-design.md` (populate "Investigation findings" template)
+- Modify: `docs/superpowers/specs/2026-05-11-http-transport-proxy-chain-design.md` (populate "T0a' — Renewed test" template at the bottom)
 
-- [ ] **Step 1: Apply the candidate fix LOCALLY (do NOT commit)**
+- [ ] **Step 1: Apply candidate fix LOCALLY**
 
-Edit `crates/tau-sandbox-native/src/strict.rs` line 453. Current line:
+Edit `crates/tau-sandbox-native/src/strict.rs` around line 453. Current state:
 
 ```rust
         cmd.env("HTTPS_PROXY", "http://127.0.0.1:8443");
 ```
 
-Replace with:
+Replace with (2 additional lines, neither committed):
 
 ```rust
         cmd.env("HTTPS_PROXY", "http://127.0.0.1:8443");
         // T0a (2026-05-11): reqwest scheme-gates HTTPS_PROXY (HTTPS-only)
         // vs HTTP_PROXY (HTTP-only). Cassette tests use plain-HTTP URLs.
-        // Both env vars route to the same bridge inside the netns.
         cmd.env("HTTP_PROXY", "http://127.0.0.1:8443");
+        // T0a' (2026-05-11): explicit-empty NO_PROXY disables reqwest's
+        // default loopback bypass. Without this, reqwest sees the
+        // cassette's 127.0.0.1:<port> URL and short-circuits the proxy.
+        cmd.env("NO_PROXY", "");
 ```
 
-- [ ] **Step 2: Run the 3 HTTP layer4 tests in Podman gate**
+Both HTTP_PROXY (from T0a) and NO_PROXY (T0a' new) are added together — T0a confirmed HTTP_PROXY is necessary; T0a' tests whether HTTP_PROXY + NO_PROXY="" together are sufficient.
 
-Single Podman invocation that builds + runs. Cold cache will take ~10-15 min; warm (from earlier today) is ~2-3 min.
+- [ ] **Step 2: Run the 3 HTTP layer4 tests in Podman gate**
 
 ```bash
 podman run --rm \
@@ -125,77 +130,76 @@ timeout 180 cargo nextest run -p tau-plugin-compat --test layer4_native \
 '
 ```
 
-Capture the FULL output. Look for:
-- 3 PASS → hypothesis CONFIRMED. Proceed to Step 3.
-- 1-3 FAIL → hypothesis falsified. Skip to Step 6 (escalation).
+Capture verbatim nextest summary.
 
-- [ ] **Step 3 (if confirmed): Revert local edit**
+- [ ] **Step 3: Revert local edit**
 
 ```bash
 cd /Users/titouanlebocq/code/tau
 git checkout -- crates/tau-sandbox-native/src/strict.rs
-git status  # confirm only docs/ changes remain
+git status  # clean working tree
 ```
 
-T0b will reintroduce the same edit as the real commit.
+- [ ] **Step 4 (if 3 tests PASS): Populate T0a' template + commit spec edit**
 
-- [ ] **Step 4 (if confirmed): Populate spec template**
+Open `docs/superpowers/specs/2026-05-11-http-transport-proxy-chain-design.md`. Find the "### T0a' — Renewed test (option C: NO_PROXY="") — TEMPLATE" section near the bottom. Replace `[bracketed placeholders]`:
 
-Open `docs/superpowers/specs/2026-05-11-http-transport-proxy-chain-design.md`. Find the "## Investigation findings" section near the end (template starts `### T0a — HTTP_PROXY hypothesis verification (DATE)`). Replace `[bracketed placeholders]` with concrete data:
+- **Investigator:** subagent (T0a' implementer)
+- **Outcome:** verbatim "3 tests run: 3 passed, 0 failed" + the 3 individual PASS lines
+- **Confidence assessment:** Hypothesis CONFIRMED — option C works.
+- **Decision:** Proceed to T0b. Apply HTTP_PROXY + NO_PROXY="" env additions + un-`#[ignore]` 3 tests.
 
-- **Date:** today (2026-05-11)
-- **Investigator:** subagent or human
-- **Environment:** lefthook Podman gate (`docker.io/library/rust:1.82-bookworm`) on darwin-arm64 host
-- **Hypothesis tested:** Setting `HTTP_PROXY=http://127.0.0.1:8443` alongside `HTTPS_PROXY` in wrap_spawn's child env will unblock the 3 HTTP layer4 tests
-- **Local edit applied:** the exact two-line addition (`cmd.env("HTTP_PROXY", ...)` + comment) at `strict.rs:453`
-- **Test command:** the Podman command from Step 2 (paste verbatim)
-- **Outcome:** "3 passed, 0 failed, 2 skipped" (or the exact verbatim summary from nextest)
-- **Confidence assessment:** hypothesis CONFIRMED — 3 HTTP tests pass with the single-line addition
-- **Decision:** proceed to T0b with the proposed fix
-
-- [ ] **Step 5 (if confirmed): Commit spec edit**
+Commit:
 
 ```bash
-git status  # confirm ONLY the spec file is staged
+git status  # confirm only the spec file is staged
 git add docs/superpowers/specs/2026-05-11-http-transport-proxy-chain-design.md
-git commit --no-verify -m "docs(spec): T0a investigation findings — HTTP_PROXY hypothesis confirmed
+git commit --no-verify -m "docs(spec): T0a' renewed test — option C (NO_PROXY=\"\") confirmed
 
-Per spec's Investigation findings template. T0a verified locally
-inside the lefthook Podman gate: adding HTTP_PROXY=http://127.0.0.1:8443
-alongside the existing HTTPS_PROXY in wrap_spawn unblocks all 3
-HTTP layer4 tests. reqwest scheme-gates the env vars (HTTPS_PROXY
-HTTPS-only, HTTP_PROXY HTTP-only); cassette server is plain HTTP.
+Per spec's T0a' template. T0a' verified locally inside the lefthook
+Podman gate: adding NO_PROXY=\"\" (explicit empty) alongside the
+T0a-tested HTTPS_PROXY + HTTP_PROXY env vars in wrap_spawn unblocks
+all 3 HTTP layer4 tests. Confirms the post-T0a loopback-bypass
+diagnosis: reqwest's default loopback exemption is NO_PROXY-driven,
+and an explicit-empty NO_PROXY overrides it.
 
-Hypothesis confirmed. T0b applies the one-line fix.
+Option C confirmed; T0b applies the 2-line fix + un-#[ignore]
+3 tests.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 "
 ```
 
-- [ ] **Step 6 (if hypothesis falsified): Revert + escalate**
+- [ ] **Step 5 (if 1+ tests FAIL): Populate T0a' template with falsification + escalate**
 
-If 1 or more of the 3 HTTP tests still fails after the local edit:
+Replace the template's bracketed placeholders with the falsification outcome. Set "Decision: ESCALATE to user — option C falsified; option D investigation needed."
 
 ```bash
-git checkout -- crates/tau-sandbox-native/src/strict.rs
-git status  # clean
+git add docs/superpowers/specs/2026-05-11-http-transport-proxy-chain-design.md
+git commit --no-verify -m "docs(spec): T0a' renewed test — option C falsified
+
+NO_PROXY=\"\" alongside HTTPS_PROXY + HTTP_PROXY did not unblock the
+3 HTTP layer4 tests. reqwest's loopback bypass may be hardcoded
+beyond NO_PROXY env override. Option D (cassette-side non-loopback
+base_url) needs investigation. Escalated to user.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+"
 ```
 
-Populate the spec template with the FAIL outcome + exact failure shape. Set "Decision: escalate to user — hypothesis falsified". Commit the spec edit. Report DONE_WITH_CONCERNS to main agent with the failure shape so main can decide next steps (likely: strace investigation of the proxy chain).
-
-DO NOT proceed to T0b.
+Report DONE_WITH_CONCERNS to main agent. DO NOT proceed to T0b.
 
 ---
 
 ## Task 0b: Apply env fix + un-`#[ignore]` 3 HTTP tests
 
-**Prerequisite:** T0a confirmed the hypothesis.
+**Prerequisite:** T0a' confirmed option C in Step 4.
 
 **Files:**
-- Modify: `crates/tau-sandbox-native/src/strict.rs:453` (add HTTP_PROXY env)
-- Modify: `crates/tau-plugin-compat/tests/layer4_native.rs:538, 642, 739` (remove `#[ignore]` from 3 HTTP tests)
+- Modify: `crates/tau-sandbox-native/src/strict.rs:453` area (add HTTP_PROXY + NO_PROXY env lines)
+- Modify: `crates/tau-plugin-compat/tests/layer4_native.rs:538, 642, 739` (remove `#[ignore]`)
 
-- [ ] **Step 1: Apply the env fix in wrap_spawn**
+- [ ] **Step 1: Apply the env additions in wrap_spawn**
 
 Edit `crates/tau-sandbox-native/src/strict.rs`. Find the existing line at ~453:
 
@@ -210,18 +214,21 @@ Replace with:
         // reqwest scheme-gates env: HTTPS_PROXY for HTTPS-scheme URLs only,
         // HTTP_PROXY for plain-HTTP URLs only. Plugin cassette tests use
         // plain HTTP; without HTTP_PROXY, reqwest bypasses the bridge for
-        // those requests and tries direct TCP inside the empty netns
-        // (where nothing is reachable). Both env vars alias the same
-        // bridge destination, so this doesn't broaden the security
-        // envelope. T0a 2026-05-11.
+        // those requests.
         cmd.env("HTTP_PROXY", "http://127.0.0.1:8443");
+        // reqwest's default loopback bypass would short-circuit the proxy
+        // for any 127.0.0.1 URL (which is what cassette test servers use).
+        // Explicit-empty NO_PROXY overrides the bypass so the proxy applies
+        // to loopback too. Both env vars alias the same bridge destination,
+        // so this doesn't broaden the security envelope.
+        cmd.env("NO_PROXY", "");
 ```
 
 - [ ] **Step 2: Remove `#[ignore]` from 3 HTTP layer4 tests**
 
-Edit `crates/tau-plugin-compat/tests/layer4_native.rs`. Find lines 538, 642, 739 — each is an `#[ignore = "Plugin now spawns, handshakes, and dispatches via the strict-tier sandbox cleanly..."]` attribute. Delete ALL THREE LINES (just the `#[ignore]` attribute lines; do NOT touch the `#[tokio::test]` or `async fn` lines below them or the test bodies).
+Edit `crates/tau-plugin-compat/tests/layer4_native.rs`. Find lines 538, 642, 739 — each is an `#[ignore = "..."]` attribute. Delete those 3 lines entirely. Do NOT touch the `#[tokio::test]` or `async fn` lines below them; do NOT touch test bodies. The shell test at line 246 retains its `#[ignore]`.
 
-After deletion, only line 246 (shell test, sub-project E territory) retains `#[ignore]` in `layer4_native.rs`.
+After deletion, only line 246 (shell, sub-project E) retains `#[ignore]` in layer4_native.rs.
 
 - [ ] **Step 3: Run unit tests + clippy + fmt**
 
@@ -233,13 +240,11 @@ timeout 240 env CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=target/agent-impl \
 timeout 30 cargo fmt --all -- --check 2>&1 | tail -5
 ```
 
-All clean. If fmt fails, run `cargo fmt --all` (no `--check`).
-
-If sccache fails with EPERM, prefix with `RUSTC_WRAPPER=`.
+All clean. If fmt fails, run `cargo fmt --all` (no `--check`). If sccache fails with EPERM, prefix with `RUSTC_WRAPPER=`.
 
 - [ ] **Step 4: Verify in Podman gate**
 
-Single Podman invocation. Run ALL 4 un-`#[ignore]`'d layer4 native tests (fs-read regression check + 3 HTTP closure) PLUS the existing strict_bridge + strict_proxy + strict_seccomp e2e tests:
+Run all un-`#[ignore]`'d layer4_native tests PLUS the existing tau-sandbox-native integration tests:
 
 ```bash
 podman run --rm \
@@ -274,7 +279,7 @@ for bin in anthropic-plugin ollama-plugin openai-plugin fs-read-plugin tau tau-n
   cp -f target/lefthook-podman/release/$bin target/release/$bin 2>/dev/null || true
 done
 
-# Without --include-ignored: 4 should pass (fs-read + 3 HTTP), shell stays ignored.
+# Without --include-ignored: 4 layer4_native tests should pass (fs-read + 3 HTTP), shell stays ignored.
 timeout 180 cargo nextest run -p tau-plugin-compat --test layer4_native \
   --features integration-tests \
   --no-fail-fast 2>&1 | tail -25
@@ -287,29 +292,36 @@ timeout 180 cargo nextest run -p tau-sandbox-native \
 ```
 
 Expected:
-- `tau-plugin-compat::layer4_native`: 4 passed, 1 skipped (shell stays `#[ignore]`'d), 0 failed
+- `tau-plugin-compat::layer4_native`: 4 passed, 1 skipped (shell), 0 failed
 - `tau-sandbox-native` integration tests: all pass (strict_bridge, strict_proxy, strict_seccomp, etc.)
 
-If any test fails: hard-stop, investigate, do NOT commit until clean.
+If any test fails: hard-stop. Do NOT commit.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git status  # confirm 2 files modified: strict.rs + layer4_native.rs
 git add crates/tau-sandbox-native/src/strict.rs crates/tau-plugin-compat/tests/layer4_native.rs
-git commit --no-verify -m "fix(sandbox-native): HTTP_PROXY env in wrap_spawn — closes 3 HTTP layer4 tests
+git commit --no-verify -m "fix(sandbox-native): HTTP_PROXY + NO_PROXY env in wrap_spawn — closes 3 HTTP layer4 tests
 
-Per T0a investigation (committed in this branch's prior commit):
-reqwest scheme-gates the proxy env vars — HTTPS_PROXY is consulted
-only for HTTPS-scheme URLs, HTTP_PROXY only for plain-HTTP URLs.
-Plugin cassette tests use plain HTTP (random port, no TLS). Without
-HTTP_PROXY set, reqwest bypassed the bridge for cassette requests
-and tried direct TCP inside the empty netns — nothing reachable
-there, so requests failed with 'error sending request for url'.
+Per T0a + T0a' investigations (committed earlier on this branch):
 
-Fix: set HTTP_PROXY=http://127.0.0.1:8443 alongside the existing
-HTTPS_PROXY in wrap_spawn. Both env vars alias the same bridge
-destination, so this doesn't broaden the security envelope.
+T0a confirmed: reqwest scheme-gates the proxy env vars — HTTPS_PROXY
+is consulted only for HTTPS-scheme URLs, HTTP_PROXY only for plain-
+HTTP URLs. Without HTTP_PROXY, reqwest bypasses the bridge for plain-
+HTTP cassette URLs. But HTTP_PROXY alone is not sufficient.
+
+T0a' confirmed: reqwest's default loopback bypass short-circuits any
+configured proxy for 127.0.0.1 URLs. The cassette server runs on the
+host's loopback at a random port and the test fixtures pass that URL
+to the plugin's base_url config. Setting NO_PROXY=\"\" (explicit empty)
+overrides the bypass so the proxy applies to loopback too.
+
+Fix: set both HTTP_PROXY=http://127.0.0.1:8443 AND NO_PROXY=\"\" in
+wrap_spawn alongside the existing HTTPS_PROXY. Both env vars alias
+the same bridge destination, so this doesn't broaden the security
+envelope (the strict-tier seccomp + landlock baseline still gates
+all network destinations).
 
 Verified inside the lefthook Podman gate:
 - anthropic_layer4_native_completes_via_cassette: PASS
@@ -318,14 +330,18 @@ Verified inside the lefthook Podman gate:
 - fs_read_layer4_native_reads_data_file: PASS (no regression)
 - shell_layer4_native_runs_echo_hello: still #[ignore]'d
   (sub-project E territory; out of scope)
-- tau-sandbox-native integration tests all pass (no regression
-  in strict_bridge / strict_proxy / strict_seccomp)
+- tau-sandbox-native integration tests all pass (no regression in
+  strict_bridge / strict_proxy / strict_seccomp)
 
-Closes the original PR 2 work end-to-end. Today's progression:
-- Pre-Phase-0: spawn ENOENT
-- Phase 0 (#49): spawn + stdio fixed → handshake EOF
-- Bridge integration (#51): seccomp bind/listen → reqwest transport error
-- This PR: HTTP_PROXY env → all 3 HTTP layer4 tests pass
+Closes the original PR 2 work end-to-end. Today's full progression
+across the 3 HTTP layer4 tests:
+
+- Pre-Phase-0: spawn ENOENT (test infra missed bridge binary path)
+- Phase 0 (#49): spawn fixed; failure → handshake EOF
+- Bridge integration (#51): bridge SIGSYS on bind/listen — fixed
+- This PR (T0a): HTTPS_PROXY-vs-HTTP_PROXY scheme gating — fixed
+  but exposed loopback bypass
+- This PR (T0a'): reqwest loopback bypass via NO_PROXY=\"\" — fixed
 
 Spec: docs/superpowers/specs/2026-05-11-http-transport-proxy-chain-design.md.
 
@@ -346,15 +362,15 @@ git status  # clean working tree
 git log --oneline main..HEAD
 ```
 
-Expected: 3 commits ahead of main (spec, T0a findings, T0b fix).
+Expected: 6 commits ahead of main (original spec, plan, T0a falsification, spec amendment, T0a' findings, T0b fix).
 
-- [ ] **Step 2: Push via the helper**
+- [ ] **Step 2: Push via agent-push.sh**
 
 ```bash
 scripts/agent-push.sh -u origin feat/http-transport-proxy-chain
 ```
 
-If the lefthook gate hangs at xtask-plugin-images for >20 min, the Podman VM may be in disk-full deadlock. Recovery (per CLAUDE.md AGENT PUSH RULES):
+If the lefthook gate hangs at xtask-plugin-images for >20 min (Podman VM disk-full deadlock), recover per CLAUDE.md AGENT PUSH RULES:
 ```bash
 podman machine stop && podman machine start
 git push --no-verify -u origin feat/http-transport-proxy-chain
@@ -363,36 +379,39 @@ git push --no-verify -u origin feat/http-transport-proxy-chain
 - [ ] **Step 3: Open PR**
 
 ```bash
-gh pr create --title "fix(sandbox-native): HTTP_PROXY env in wrap_spawn — closes 3 HTTP layer4 tests" --body "$(cat <<'EOF'
+gh pr create --title "fix(sandbox-native): HTTP_PROXY + NO_PROXY in wrap_spawn — closes 3 HTTP layer4 tests" --body "$(cat <<'EOF'
 ## Summary
 
-Closes the original PR 2 work for the Layer 4 plugin-compat sub-project. After Phase 0 (PR #49 — spawn + stdio) and bridge integration (PR #51 — seccomp bind/listen + bridge survival), the 3 HTTP layer4 tests still failed with reqwest "error sending request for url". T0a's hypothesis-first investigation confirmed the root cause: `wrap_spawn` set HTTPS_PROXY but not HTTP_PROXY. reqwest scheme-gates these env vars (HTTPS_PROXY for HTTPS-scheme URLs only; HTTP_PROXY for plain-HTTP URLs only). Cassette servers are plain HTTP, so reqwest bypassed the bridge entirely.
+Closes the original PR 2 work for the Layer 4 plugin-compat sub-project. After Phase 0 (PR #49) and bridge integration (PR #51), the 3 HTTP layer4 tests still failed at HTTP transport. T0a + T0a' investigations confirmed two compounding root causes:
 
-**Fix:** one line in `tau-sandbox-native::strict::wrap_spawn` adding `HTTP_PROXY=http://127.0.0.1:8443` alongside the existing HTTPS_PROXY. Both env vars alias the same bridge destination — no broadening of the security envelope.
+1. **HTTPS_PROXY-vs-HTTP_PROXY scheme gate** (T0a): reqwest uses HTTPS_PROXY only for HTTPS URLs; HTTP_PROXY only for plain HTTP. Cassette tests use plain HTTP. wrap_spawn was setting HTTPS_PROXY only.
+2. **reqwest default loopback bypass** (T0a'): reqwest auto-exempts 127.0.0.1 URLs from any configured proxy. Cassette tests use 127.0.0.1:<random-port>. Explicit-empty NO_PROXY overrides this bypass.
+
+**Fix:** 3 env lines in wrap_spawn (HTTPS_PROXY existing + HTTP_PROXY new + NO_PROXY new). All three alias the same bridge destination inside the netns; security envelope unchanged.
 
 **Verified inside lefthook Podman gate:**
 - `anthropic_layer4_native_completes_via_cassette`: PASS
 - `ollama_layer4_native_completes_via_cassette`: PASS
 - `openai_layer4_native_completes_via_cassette`: PASS
 - `fs_read_layer4_native_reads_data_file`: PASS (no regression)
-- `tau-sandbox-native` integration tests: all pass (no regression in strict_bridge / strict_proxy / strict_seccomp)
+- tau-sandbox-native integration tests: all pass (no regression in strict_bridge / strict_proxy / strict_seccomp)
 
-The shell layer4 test stays `#[ignore]`'d (sub-project E territory — per-command exec gating).
+Shell layer4 test stays `#[ignore]`'d (sub-project E territory — per-command exec gating).
 
 ## Today's full progression on these 3 HTTP tests
 
 | Stage | Status | PR |
 |---|---|---|
-| Pre-Phase-0: spawn ENOENT (test infra missed bridge binary path) | ✓ fixed | #49 |
-| Handshake EOF (bridge ran but stdio dropped by Command rebuild) | ✓ fixed | #49 |
+| Pre-Phase-0: spawn ENOENT | ✓ fixed | #49 |
+| Phase 0: handshake EOF | ✓ fixed | #49 |
 | Bridge SIGSYS on bind/listen | ✓ fixed | #51 |
-| reqwest "error sending request" (HTTPS_PROXY-only) | ✓ fixed | THIS PR |
+| reqwest HTTPS-only proxy env | ✓ fixed | THIS PR (T0a) |
+| reqwest loopback bypass | ✓ fixed | THIS PR (T0a') |
 
 ## Test plan
 
-- [ ] CI green on the 14 required checks (especially `test (tau-plugin-compat / linux)`)
-- [ ] Diff review: 2-line addition in strict.rs + 3 `#[ignore]` line deletions
-- [ ] T0a investigation findings in spec are concrete (hypothesis explicitly confirmed)
+- [ ] CI green on 14 required checks
+- [ ] Diff review: 4-line addition in strict.rs (2 env lines + comments) + 3 #[ignore] deletions
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
@@ -445,20 +464,30 @@ git log --oneline -3
 
 Expected: top commit is the squash-merged PR.
 
-- [ ] **Step 4: Optional memory update**
+- [ ] **Step 4: Optional memory snapshot**
 
-This PR closes a 12+ hour multi-PR thread (#49, #51, #52, this one). Consider writing a session snapshot to `~/.claude/projects/-Users-titouanlebocq-code-tau/memory/` capturing the 4-step progression for future-self context. Optional; the commit history is the canonical record.
+This PR closes a multi-PR thread on the layer4 HTTP tests (#49, #51, #52, this one). Consider writing a session snapshot to `~/.claude/projects/-Users-titouanlebocq-code-tau/memory/` documenting the 5-step progression. Optional; commit history is the canonical record.
 
 ---
 
 ## Self-review checklist
 
-After all tasks complete, verify:
-
-- [ ] `git log --oneline main..HEAD` shows 3 commits (spec, T0a findings, T0b fix)
-- [ ] All 14 required CI checks green on the PR
+- [ ] `git log --oneline main..HEAD` shows the expected commits (spec, plan, T0a falsification, spec amendment, T0a' findings, T0b fix)
+- [ ] All 14 required CI checks green on PR
 - [ ] 3 HTTP layer4 tests un-`#[ignore]`'d and passing in CI
-- [ ] fs-read continues passing (no regression)
-- [ ] tau-sandbox-native integration tests continue passing (strict_bridge, strict_proxy)
-- [ ] Spec's "Investigation findings" section is filled with concrete data
-- [ ] No new public API (extension in existing `wrap_spawn` only)
+- [ ] fs-read continues passing
+- [ ] tau-sandbox-native integration tests continue passing
+- [ ] Spec's T0a' findings section filled with concrete data
+- [ ] No new public API; extension in existing wrap_spawn only
+
+---
+
+## If T0a' falsifies (option D escalation)
+
+If renewed T0a' falsifies option C, the implementer reports DONE_WITH_CONCERNS and main agent escalates to user. Option D requires its own investigation:
+
+1. **Decide D's mechanism** (cassette returns `.test` synthetic hostname, host's primary IP, `0.0.0.0`, etc.) — needs verification that the chosen mechanism actually routes through the proxy.
+2. **Possibly touch** `crates/tau-plugin-test-support/src/cassette.rs:124`, `crates/tau-sandbox-proxy/`, or `crates/tau-sandbox-native/src/bin/tau-net-bridge.rs` depending on mechanism.
+3. **Either** extend this PR's scope or close this PR and open a separate one.
+
+That investigation is OUT OF SCOPE for this plan unless C falsifies. If escalated, user decides path forward.
