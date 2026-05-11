@@ -64,6 +64,10 @@ pub(crate) fn baseline_syscall_map() -> std::collections::BTreeMap<i64, Vec<Secc
     allow!(
         libc::SYS_read,
         libc::SYS_write,
+        libc::SYS_readv,
+        libc::SYS_writev,
+        libc::SYS_preadv,
+        libc::SYS_pwritev,
         libc::SYS_pread64,
         libc::SYS_pwrite64,
         libc::SYS_openat,
@@ -358,6 +362,17 @@ pub(crate) fn apply_strict(
     // net_filter/INTEGRATION.md for the post-spawn hook plan (F task 6.5).
     let unshare_flags = crate::net::unshare_flags_for_plan(plan);
 
+    // Capture host uid/gid in the parent. After CLONE_NEWUSER unshare, the
+    // child must write /proc/self/uid_map and /proc/self/gid_map to gain
+    // real capabilities inside the new user namespace; until those are
+    // written the process is mapped to nobody (kernel uid 65534) with no
+    // effective caps. That breaks `tau-net-bridge`'s rtnetlink call to
+    // bring `lo` up inside the netns (CAP_NET_ADMIN required → EPERM),
+    // which in turn prevents the plugin's reqwest from connecting to the
+    // bridge's 127.0.0.1:8443 listener (no loopback route).
+    let host_uid = nix::unistd::getuid().as_raw();
+    let host_gid = nix::unistd::getgid().as_raw();
+
     // Determine if the plan requests outbound HTTP.
     let has_network_http = plan.capabilities.iter().any(|c| {
         matches!(
@@ -450,7 +465,11 @@ pub(crate) fn apply_strict(
                 }
             }
         }
+        // Set BOTH HTTPS_PROXY and HTTP_PROXY: reqwest's auto-detection
+        // gates each by scheme — a cassette test that returns an http://
+        // base_url is only proxied if HTTP_PROXY is set.
         cmd.env("HTTPS_PROXY", "http://127.0.0.1:8443");
+        cmd.env("HTTP_PROXY", "http://127.0.0.1:8443");
 
         Some(handle)
     } else {
@@ -468,12 +487,39 @@ pub(crate) fn apply_strict(
     // not affect the parent process.
     unsafe {
         cmd.pre_exec(move || {
-            // Step 1: landlock filesystem isolation (read/write) + exec gating.
+            // Step 1: drop into new user namespace + isolated network namespace
+            // BEFORE landlock so that writes to /proc/self/{setgroups,uid_map,
+            // gid_map} succeed. After landlock, /proc/self is read-only and
+            // those writes return EACCES.
+            unshare(unshare_flags).map_err(|e| std::io::Error::other(e.to_string()))?;
+
+            // Step 1a: write setgroups/uid_map/gid_map so the child has real
+            // CAP_* inside the new user_ns. Without this, the bridge runs as
+            // nobody (uid 65534) and lacks CAP_NET_ADMIN to bring `lo` up,
+            // which silently fails — manifests as the plugin's reqwest
+            // failing to connect to the bridge proxy listener.
+            //
+            // Order: setgroups "deny" must be written BEFORE gid_map for
+            // unprivileged user_ns (kernel ≥ 3.19). Tolerate EPERM/EACCES
+            // on setgroups — the parent user_ns may have already locked us
+            // into deny (e.g. nested under Podman).
+            let sg_res = std::fs::write("/proc/self/setgroups", "deny\n");
+            if let Err(e) = &sg_res {
+                let raw = e.raw_os_error().unwrap_or(0);
+                if raw != 1 && raw != 13 {
+                    return Err(std::io::Error::other(format!("setgroups: {e}")));
+                }
+            }
+            std::fs::write("/proc/self/uid_map", format!("0 {host_uid} 1\n"))
+                .map_err(|e| std::io::Error::other(format!("uid_map: {e}")))?;
+            std::fs::write("/proc/self/gid_map", format!("0 {host_gid} 1\n"))
+                .map_err(|e| std::io::Error::other(format!("gid_map: {e}")))?;
+
+            // Step 2: landlock filesystem isolation (read/write) + exec gating.
+            // Must come AFTER the uid_map writes above (which need /proc/self
+            // writable) but BEFORE seccomp (which blocks the landlock syscalls).
             install_landlock_from_plan(&read_paths, &write_paths, &exec_paths)
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
-
-            // Step 2: drop into new user namespace + isolated network namespace.
-            unshare(unshare_flags).map_err(|e| std::io::Error::other(e.to_string()))?;
 
             // Step 3: install seccomp BPF allow-list (blocks unshare/landlock after this).
             seccompiler::apply_filter(bpf.as_slice())
