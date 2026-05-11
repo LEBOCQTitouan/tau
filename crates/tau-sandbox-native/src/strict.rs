@@ -634,4 +634,128 @@ mod tests {
             .expect("apply_strict must succeed on a plan with no capabilities");
         drop(handle);
     }
+
+    /// Asserts that the vectored I/O syscalls are in the baseline.
+    /// hyper/reqwest uses `writev` for HTTP headers + body (single
+    /// scatter-gather syscall) — without it the first HTTP request triggers
+    /// SIGSYS and kills the plugin mid-call. `readv` is the inbound twin.
+    /// `preadv`/`pwritev` are positional variants used by some I/O paths.
+    ///
+    /// Regression guard for PR #53 — see project memory
+    /// `project_layer4_http_tests_resolved_2026_05_11.md`.
+    #[test]
+    fn baseline_includes_vectored_io_for_http_plugins() {
+        let map = baseline_syscall_map();
+        for (nr, name) in [
+            (libc::SYS_writev, "writev"),
+            (libc::SYS_readv, "readv"),
+            (libc::SYS_preadv, "preadv"),
+            (libc::SYS_pwritev, "pwritev"),
+        ] {
+            assert!(
+                map.contains_key(&nr),
+                "SYS_{name} must be in baseline allow-list — hyper/reqwest \
+                 uses vectored I/O for HTTP send/recv; without it HTTP \
+                 plugins die with SIGSYS at first request"
+            );
+        }
+    }
+
+    /// Asserts that the message-oriented socket syscalls are in the baseline.
+    /// reqwest/hyper falls back to `sendmsg`/`recvmsg` for some I/O patterns,
+    /// and the IPC protocol uses `socketpair`. These are baseline (not
+    /// gated on Network(Http)) because the IPC framing protocol needs them
+    /// regardless of network capability.
+    #[test]
+    fn baseline_includes_ipc_socket_syscalls() {
+        let map = baseline_syscall_map();
+        for (nr, name) in [
+            (libc::SYS_socketpair, "socketpair"),
+            (libc::SYS_sendmsg, "sendmsg"),
+            (libc::SYS_recvmsg, "recvmsg"),
+            (libc::SYS_sendto, "sendto"),
+            (libc::SYS_recvfrom, "recvfrom"),
+            (libc::SYS_setsockopt, "setsockopt"),
+            (libc::SYS_getsockopt, "getsockopt"),
+            (libc::SYS_shutdown, "shutdown"),
+        ] {
+            assert!(
+                map.contains_key(&nr),
+                "SYS_{name} must be in baseline allow-list (IPC + HTTP)"
+            );
+        }
+    }
+
+    /// Asserts that an Http-capability plan causes `wrap_spawn` to set BOTH
+    /// `HTTP_PROXY` and `HTTPS_PROXY` env vars on the spawned Command.
+    /// reqwest's auto-detection matcher gates by scheme — a test cassette
+    /// returning an `http://` URL won't be proxied if only `HTTPS_PROXY`
+    /// is set. Regression guard for PR #53.
+    #[tokio::test]
+    async fn wrap_spawn_with_http_cap_sets_both_proxy_env_vars() {
+        let plan_json = serde_json::json!({
+            "capabilities": [{
+                "kind": "net.http",
+                "hosts": ["127.0.0.1"],
+                "methods": ["GET", "POST"],
+            }],
+            "context": null,
+            "limits": null,
+        });
+        let plan: tau_ports::SandboxPlan = serde_json::from_value(plan_json).expect("valid plan");
+
+        let mut cmd = Command::new("/bin/true");
+        let _handle = match apply_strict(&plan, &mut cmd) {
+            Ok(h) => h,
+            Err(SandboxError::Proxy { .. }) => {
+                // Proxy spawn requires a working tokio runtime + permitted
+                // socket dir; skip gracefully if the test env can't supply
+                // them. The env-var assertion needs apply_strict to have
+                // succeeded, so we can't usefully continue.
+                eprintln!("SKIP: proxy spawn failed in this environment");
+                return;
+            }
+            Err(e) => panic!("apply_strict failed unexpectedly: {e:?}"),
+        };
+
+        let env_names: std::collections::HashSet<&std::ffi::OsStr> =
+            cmd.get_envs().filter_map(|(k, v)| v.map(|_| k)).collect();
+        assert!(
+            env_names.contains(std::ffi::OsStr::new("HTTPS_PROXY")),
+            "wrap_spawn must set HTTPS_PROXY for Network(Http) plans"
+        );
+        assert!(
+            env_names.contains(std::ffi::OsStr::new("HTTP_PROXY")),
+            "wrap_spawn must set HTTP_PROXY for Network(Http) plans — \
+             reqwest's matcher gates per-scheme, so `http://` URLs are \
+             only proxied when HTTP_PROXY is set"
+        );
+    }
+
+    /// Asserts that a plan WITHOUT Network(Http) does NOT set the proxy
+    /// env vars. Confirms the gating logic is symmetric (no leakage of
+    /// HTTP-only side effects to other plans).
+    #[tokio::test]
+    async fn wrap_spawn_without_http_cap_omits_proxy_env_vars() {
+        let plan_json = serde_json::json!({
+            "capabilities": [],
+            "context": null,
+            "limits": null,
+        });
+        let plan: tau_ports::SandboxPlan = serde_json::from_value(plan_json).expect("valid plan");
+
+        let mut cmd = Command::new("/bin/true");
+        apply_strict(&plan, &mut cmd).expect("apply_strict on empty plan");
+
+        let env_names: std::collections::HashSet<&std::ffi::OsStr> =
+            cmd.get_envs().filter_map(|(k, v)| v.map(|_| k)).collect();
+        assert!(
+            !env_names.contains(std::ffi::OsStr::new("HTTPS_PROXY")),
+            "HTTPS_PROXY must NOT be set for plans without Network(Http)"
+        );
+        assert!(
+            !env_names.contains(std::ffi::OsStr::new("HTTP_PROXY")),
+            "HTTP_PROXY must NOT be set for plans without Network(Http)"
+        );
+    }
 }
