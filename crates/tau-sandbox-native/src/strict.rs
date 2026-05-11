@@ -718,10 +718,8 @@ mod tests {
             Err(e) => panic!("apply_strict failed unexpectedly: {e:?}"),
         };
 
-        let env_names: std::collections::HashSet<&std::ffi::OsStr> = cmd
-            .get_envs()
-            .filter_map(|(k, v)| v.map(|_| k))
-            .collect();
+        let env_names: std::collections::HashSet<&std::ffi::OsStr> =
+            cmd.get_envs().filter_map(|(k, v)| v.map(|_| k)).collect();
         assert!(
             env_names.contains(std::ffi::OsStr::new("HTTPS_PROXY")),
             "wrap_spawn must set HTTPS_PROXY for Network(Http) plans"
@@ -749,10 +747,8 @@ mod tests {
         let mut cmd = Command::new("/bin/true");
         apply_strict(&plan, &mut cmd).expect("apply_strict on empty plan");
 
-        let env_names: std::collections::HashSet<&std::ffi::OsStr> = cmd
-            .get_envs()
-            .filter_map(|(k, v)| v.map(|_| k))
-            .collect();
+        let env_names: std::collections::HashSet<&std::ffi::OsStr> =
+            cmd.get_envs().filter_map(|(k, v)| v.map(|_| k)).collect();
         assert!(
             !env_names.contains(std::ffi::OsStr::new("HTTPS_PROXY")),
             "HTTPS_PROXY must NOT be set for plans without Network(Http)"
