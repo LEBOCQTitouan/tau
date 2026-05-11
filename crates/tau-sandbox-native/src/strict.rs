@@ -510,17 +510,21 @@ pub(crate) fn apply_strict(
             // write for state-specific reasons. If setgroups isn't actually
             // deny, gid_map will fail with EPERM and we'll surface that.
             if write_id_maps {
+                // All three writes are best-effort: success grants CAP_NET_ADMIN
+                // inside the new user_ns, which the bridge needs to bring `lo`
+                // up. If the kernel/host refuses (GitHub Actions runner ns
+                // layout, some hardened distros), the bridge's rtnetlink call
+                // will fail and lo-up degrades to best-effort — matching the
+                // bridge's existing `bridge: bring lo up failed (continuing)`
+                // path. The plugin's HTTP request then either succeeds (lo
+                // already up by inheritance) or fails like before.
+                //
+                // Critically: we MUST NOT propagate these errors out of
+                // pre_exec. Returning Err here causes std::process to abort
+                // the spawn entirely, which breaks every Network(Http) plan.
                 let _ = std::fs::write("/proc/self/setgroups", "deny\n");
-                // Pass the raw errno through (don't wrap in io::Error::other,
-                // which std::process serializes as a useless EINVAL).
-                if let Err(e) = std::fs::write("/proc/self/uid_map", format!("0 {host_uid} 1\n")) {
-                    let raw = e.raw_os_error().unwrap_or(libc::EIO);
-                    return Err(std::io::Error::from_raw_os_error(raw));
-                }
-                if let Err(e) = std::fs::write("/proc/self/gid_map", format!("0 {host_gid} 1\n")) {
-                    let raw = e.raw_os_error().unwrap_or(libc::EIO);
-                    return Err(std::io::Error::from_raw_os_error(raw));
-                }
+                let _ = std::fs::write("/proc/self/uid_map", format!("0 {host_uid} 1\n"));
+                let _ = std::fs::write("/proc/self/gid_map", format!("0 {host_gid} 1\n"));
             }
 
             // Step 2: landlock filesystem isolation (read/write) + exec gating.
