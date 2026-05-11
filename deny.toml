@@ -1,0 +1,65 @@
+# cargo-deny configuration — Tier 4 operational hygiene.
+# See https://embarkstudios.github.io/cargo-deny/ for the schema.
+
+[graph]
+all-features = false
+no-default-features = false
+
+[advisories]
+version = 2
+# Block on known RustSec advisories (subsumes cargo-audit).
+yanked = "deny"
+# Scope `unmaintained` check to workspace-direct dependencies only.
+# Transitive crates marked unmaintained upstream (e.g. `paste`) are
+# beyond our control — flagging them gives no actionable signal until
+# the consuming crate cuts a release using a maintained alternative.
+unmaintained = "workspace"
+# Empty ignore list — review and add specific RUSTSEC-IDs or
+# `{ crate = "...", reason = "..." }` entries here if a flagged
+# vulnerability has no upstream patch + an explicit accept rationale.
+ignore = []
+
+[licenses]
+version = 2
+# Confidence threshold for license detection. Default 0.8; raised here to
+# reduce false positives from ambiguous SPDX expressions.
+confidence-threshold = 0.93
+# Allow-list reviewed for tau's dependency tree. Add new licenses here
+# only after reading the actual license text and confirming compatibility
+# with tau's distribution model.
+allow = [
+    "MIT",
+    "MIT-0",                    # MIT without attribution (e.g. ring's spec)
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",                  # boost.org Software License (used by some crates)
+    "CC0-1.0",                  # public-domain dedication (used by tiny_keccak etc.)
+    "CDLA-Permissive-2.0",      # Linux Foundation Community Data License (permissive)
+    "ISC",                      # libloading and friends
+    "MPL-2.0",                  # webpki-roots, openssl-ffi (file-scoped copyleft, OK to use)
+    "Unicode-3.0",              # icu / unicode-ident (post-2024 renaming)
+    "Unicode-DFS-2016",         # icu / unicode-ident (pre-2024)
+    "Zlib",                     # tinyvec etc.
+]
+# Skip our own `publish = false` workspace crates (xtask, etc.) — they
+# inherit the workspace's MIT-OR-Apache-2.0 license but don't carry a
+# per-crate `license` field, and cargo-deny doesn't follow the workspace
+# inheritance.
+private = { ignore = true }
+
+[bans]
+# Detect duplicate versions of the same dep — warn, don't block. Some
+# dupes are unavoidable (e.g., transitive crates with stricter version
+# requirements) and cleaning them up is a separate hygiene task.
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+
+[sources]
+# Only allow crates.io as a registry source.
+unknown-registry = "deny"
+# Allow no unknown git sources. Workspace-local git deps must be declared
+# in [sources.allow-org] / [sources.allow-git] below if added later.
+unknown-git = "deny"

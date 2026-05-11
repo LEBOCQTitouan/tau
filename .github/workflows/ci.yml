@@ -49,6 +49,17 @@ jobs:
           with-mold: true
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  cargo-deny:
+    name: cargo-deny / linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          # check advisories + licenses + bans + sources per deny.toml at repo root.
+          arguments: --all-features
+
   test-stable:
     name: test-stable / ${{ matrix.os == 'ubuntu-latest' && 'linux' || matrix.os == 'macos-latest' && 'macos' || 'windows' }}
     runs-on: ${{ matrix.os }}
