@@ -90,28 +90,87 @@ Phase 0 PR: feat/http-transport-proxy-chain (cut from b0a0f41)
 
 ## Investigation findings
 
-To be populated by T0a.
+### T0a — HTTP_PROXY hypothesis verification (2026-05-11)
 
-```markdown
-### T0a — HTTP_PROXY hypothesis verification (DATE)
+**Investigator:** subagent (T0a implementer).
 
-**Investigator:** [agent-id or human].
-
-**Environment:** lefthook Podman gate on darwin-arm64 host.
+**Environment:** lefthook Podman gate (`docker.io/library/rust:1.82-bookworm`) on darwin-arm64 host.
 
 **Hypothesis tested:** Setting `HTTP_PROXY=http://127.0.0.1:8443` alongside `HTTPS_PROXY` in `wrap_spawn`'s child env will unblock the 3 HTTP layer4 tests.
 
-**Local edit applied (NOT committed):** [exact code change made to strict.rs or wherever wrap_spawn sets env]
+**Local edit applied (NOT committed):** 2-line addition at `crates/tau-sandbox-native/src/strict.rs:453` (right after the existing `cmd.env("HTTPS_PROXY", ...)`):
+
+```rust
+        cmd.env("HTTPS_PROXY", "http://127.0.0.1:8443");
+        // T0a (2026-05-11): reqwest scheme-gates HTTPS_PROXY (HTTPS-only)
+        // vs HTTP_PROXY (HTTP-only). Cassette tests use plain-HTTP URLs.
+        // Both env vars route to the same bridge inside the netns.
+        cmd.env("HTTP_PROXY", "http://127.0.0.1:8443");
+```
 
 **Test command:**
-[exact Podman command run]
+
+```bash
+podman run --rm \
+  --cap-add SYS_ADMIN --cap-add NET_ADMIN \
+  --security-opt seccomp=unconfined \
+  --security-opt apparmor=unconfined \
+  --security-opt label=disable \
+  -v "$PWD:/workspace" \
+  -v cargo-cache:/usr/local/cargo/registry \
+  -v target-cache:/workspace/target/lefthook-podman \
+  -w /workspace \
+  -e CARGO_INCREMENTAL=0 \
+  -e CARGO_TARGET_DIR=/workspace/target/lefthook-podman \
+  docker.io/library/rust:1.82-bookworm \
+  bash -c '
+set -ex
+apt-get update -qq && apt-get install -y -qq iproute2 nftables
+ARCH=$(uname -m)
+case "$ARCH" in
+  aarch64) NEXTEST_URL="https://get.nexte.st/latest/linux-arm" ;;
+  *)       NEXTEST_URL="https://get.nexte.st/latest/linux" ;;
+esac
+if ! command -v cargo-nextest >/dev/null; then
+  curl -LsSf "$NEXTEST_URL" | tar zxf - -C /usr/local/cargo/bin
+fi
+
+cargo build --release -p anthropic -p ollama -p openai -p tau-sandbox-native --bin tau-net-bridge
+cargo build -p tau-cli --bin tau
+
+mkdir -p target/release
+for bin in anthropic-plugin ollama-plugin openai-plugin tau tau-net-bridge; do
+  cp -f target/lefthook-podman/release/$bin target/release/$bin 2>/dev/null || true
+done
+
+timeout 180 cargo nextest run -p tau-plugin-compat --test layer4_native \
+  anthropic_layer4_native_completes_via_cassette \
+  ollama_layer4_native_completes_via_cassette \
+  openai_layer4_native_completes_via_cassette \
+  --features integration-tests \
+  --no-fail-fast \
+  -- --include-ignored 2>&1 | tail -40
+'
+```
 
 **Outcome:**
-[verbatim: did 3 tests pass? if some failed, which ones + what shape?]
+
+Verbatim nextest summary: `3 tests run: 0 passed, 3 failed, 2 skipped`.
+
+All 3 HTTP layer4 tests FAILED with identical failure shape — `reqwest` returned `error sending request for url (http://127.0.0.1:<port>/...)` where `<port>` is the cassette server's loopback port on the host:
+
+- `anthropic_layer4_native_completes_via_cassette` (line 609): `transport: anthropic transport: error sending request for url (http://127.0.0.1:46737/v1/messages)`
+- `ollama_layer4_native_completes_via_cassette` (line 710): `transport: ollama transport: error sending request for url (http://127.0.0.1:34929/api/chat)`
+- `openai_layer4_native_completes_via_cassette` (line 805): `transport: openai transport: error sending request for url (http://127.0.0.1:42075/v1/chat/completions)`
+
+The URLs being attempted are the cassette server's host-side loopback addresses (random high ports). Inside the plugin's netns the bridge listens on `127.0.0.1:8443`, but reqwest's request never reaches it.
 
 **Confidence assessment:**
-[hypothesis confirmed / falsified; rationale]
+
+Hypothesis **FALSIFIED**. Adding `HTTP_PROXY=http://127.0.0.1:8443` alongside `HTTPS_PROXY` is not sufficient to unblock the tests. The failure shape changed from previous runs (the request now fails inside reqwest's transport layer rather than at some earlier point), but the tests still do not pass.
+
+Likely root cause hypothesis (un-verified — for follow-up investigation): reqwest by default bypasses configured `HTTP_PROXY`/`HTTPS_PROXY` for loopback addresses (`127.0.0.1`, `localhost`). The cassette test fixtures configure the plugin's `base_url` to a `127.0.0.1:<random-port>` URL on the host, so reqwest sees a loopback target and short-circuits the proxy, attempting a direct connection inside the netns where no such port exists. Setting `HTTP_PROXY` is therefore necessary but not sufficient; the proxy must also be applied to loopback targets (e.g., by configuring reqwest with `no_proxy()` disabled, or by using a proxy build-mode that doesn't auto-exempt loopback).
 
 **Decision:**
-[proceed to T0b with proposed fix / escalate to user for chain investigation]
-```
+
+**Escalate to user.** Do not proceed to T0b with the one-line `HTTP_PROXY` fix — it's insufficient. The chain needs deeper investigation: (1) confirm reqwest's loopback-bypass behavior, (2) decide whether to configure the plugin's HTTP clients to disable proxy bypass for loopback, configure cassette-test base_urls differently, or expose a proxy-handling toggle in tau-runtime. Pattern: same HARD GATE escalation as Phase 0 / PR #51 — investigate full chain (consider `strace` of the child, or instrumenting the plugin's `reqwest::Client` builder) before code commit.
