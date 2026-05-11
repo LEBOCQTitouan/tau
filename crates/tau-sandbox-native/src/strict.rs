@@ -64,6 +64,10 @@ pub(crate) fn baseline_syscall_map() -> std::collections::BTreeMap<i64, Vec<Secc
     allow!(
         libc::SYS_read,
         libc::SYS_write,
+        libc::SYS_readv,
+        libc::SYS_writev,
+        libc::SYS_preadv,
+        libc::SYS_pwritev,
         libc::SYS_pread64,
         libc::SYS_pwrite64,
         libc::SYS_openat,
@@ -366,6 +370,16 @@ pub(crate) fn apply_strict(
         )
     });
 
+    // Capture host uid/gid in the parent so the child can write
+    // /proc/self/uid_map / gid_map after unshare(CLONE_NEWUSER). The
+    // writes gate CAP_NET_ADMIN inside the new user_ns, which the bridge
+    // needs to bring `lo` up via rtnetlink (so the plugin's reqwest can
+    // dial 127.0.0.1:8443). Only relevant for HTTP plugins — non-HTTP
+    // plugins don't use the bridge and don't need loopback up.
+    let host_uid = nix::unistd::getuid().as_raw();
+    let host_gid = nix::unistd::getgid().as_raw();
+    let write_id_maps = has_network_http;
+
     // For Network(Http): spawn the userspace proxy, extend landlock paths,
     // and wrap cmd with tau-net-bridge so the child dials through the proxy.
     // The proxy guard is returned inside the SandboxHandle for LIFO cleanup.
@@ -450,7 +464,11 @@ pub(crate) fn apply_strict(
                 }
             }
         }
+        // Set BOTH HTTPS_PROXY and HTTP_PROXY: reqwest's auto-detection
+        // gates each by scheme — a cassette test that returns an http://
+        // base_url is only proxied if HTTP_PROXY is set.
         cmd.env("HTTPS_PROXY", "http://127.0.0.1:8443");
+        cmd.env("HTTP_PROXY", "http://127.0.0.1:8443");
 
         Some(handle)
     } else {
@@ -468,12 +486,52 @@ pub(crate) fn apply_strict(
     // not affect the parent process.
     unsafe {
         cmd.pre_exec(move || {
-            // Step 1: landlock filesystem isolation (read/write) + exec gating.
+            // Step 1: drop into new user namespace + isolated network namespace
+            // BEFORE landlock so that writes to /proc/self/{setgroups,uid_map,
+            // gid_map} succeed. After landlock, /proc/self is read-only and
+            // those writes return EACCES.
+            unshare(unshare_flags).map_err(|e| std::io::Error::other(e.to_string()))?;
+
+            // Step 1a: write setgroups/uid_map/gid_map so the child has real
+            // CAP_* inside the new user_ns. Without this, the bridge runs as
+            // nobody (uid 65534) and lacks CAP_NET_ADMIN to bring `lo` up,
+            // which silently fails — manifests as the plugin's reqwest
+            // failing to connect to the bridge proxy listener.
+            //
+            // Only gated by HTTP capability: non-HTTP plugins don't run the
+            // bridge and don't need lo up, so they don't need uid_map.
+            // (Skipping for non-HTTP also preserves pre-existing behavior
+            // for those plugins on kernels/runners where the writes fail.)
+            //
+            // Order: setgroups "deny" must be written BEFORE gid_map for
+            // unprivileged user_ns (kernel ≥ 3.19). Tolerate any setgroups
+            // error — the parent user_ns may have already locked us into
+            // deny (e.g. nested under Podman), or the kernel may refuse the
+            // write for state-specific reasons. If setgroups isn't actually
+            // deny, gid_map will fail with EPERM and we'll surface that.
+            if write_id_maps {
+                // All three writes are best-effort: success grants CAP_NET_ADMIN
+                // inside the new user_ns, which the bridge needs to bring `lo`
+                // up. If the kernel/host refuses (GitHub Actions runner ns
+                // layout, some hardened distros), the bridge's rtnetlink call
+                // will fail and lo-up degrades to best-effort — matching the
+                // bridge's existing `bridge: bring lo up failed (continuing)`
+                // path. The plugin's HTTP request then either succeeds (lo
+                // already up by inheritance) or fails like before.
+                //
+                // Critically: we MUST NOT propagate these errors out of
+                // pre_exec. Returning Err here causes std::process to abort
+                // the spawn entirely, which breaks every Network(Http) plan.
+                let _ = std::fs::write("/proc/self/setgroups", "deny\n");
+                let _ = std::fs::write("/proc/self/uid_map", format!("0 {host_uid} 1\n"));
+                let _ = std::fs::write("/proc/self/gid_map", format!("0 {host_gid} 1\n"));
+            }
+
+            // Step 2: landlock filesystem isolation (read/write) + exec gating.
+            // Must come AFTER the uid_map writes above (which need /proc/self
+            // writable) but BEFORE seccomp (which blocks the landlock syscalls).
             install_landlock_from_plan(&read_paths, &write_paths, &exec_paths)
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
-
-            // Step 2: drop into new user namespace + isolated network namespace.
-            unshare(unshare_flags).map_err(|e| std::io::Error::other(e.to_string()))?;
 
             // Step 3: install seccomp BPF allow-list (blocks unshare/landlock after this).
             seccompiler::apply_filter(bpf.as_slice())
