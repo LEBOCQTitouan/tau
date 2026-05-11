@@ -9,8 +9,14 @@ no-default-features = false
 version = 2
 # Block on known RustSec advisories (subsumes cargo-audit).
 yanked = "deny"
-# Empty ignore list — review and add specific RUSTSEC-IDs here if a CVE
-# has no patch upstream and we have an explicit accept rationale.
+# Scope `unmaintained` check to workspace-direct dependencies only.
+# Transitive crates marked unmaintained upstream (e.g. `paste`) are
+# beyond our control — flagging them gives no actionable signal until
+# the consuming crate cuts a release using a maintained alternative.
+unmaintained = "workspace"
+# Empty ignore list — review and add specific RUSTSEC-IDs or
+# `{ crate = "...", reason = "..." }` entries here if a flagged
+# vulnerability has no upstream patch + an explicit accept rationale.
 ignore = []
 
 [licenses]
