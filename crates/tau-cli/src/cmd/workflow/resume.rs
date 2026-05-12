@@ -37,8 +37,7 @@ pub async fn run(args: &WorkflowResumeArgs, output: &mut Output) -> anyhow::Resu
     let wf_path = cwd
         .join("workflows")
         .join(format!("{}.toml", workflow_name));
-    let workflow =
-        Workflow::from_path(&wf_path).with_context(|| format!("parsing {wf_path:?}"))?;
+    let workflow = Workflow::from_path(&wf_path).with_context(|| format!("parsing {wf_path:?}"))?;
 
     let records = replay(&log_path).await.context("replaying log")?;
 

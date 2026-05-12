@@ -79,11 +79,7 @@ fn workflow_log_pretty_prints_records() {
         "duration_ms": 6122,
         "status": "ok"
     });
-    fs::write(
-        scope_dir.join("echo-01HKZTEST.jsonl"),
-        format!("{line}\n"),
-    )
-    .unwrap();
+    fs::write(scope_dir.join("echo-01HKZTEST.jsonl"), format!("{line}\n")).unwrap();
 
     let assert = Command::cargo_bin("tau")
         .unwrap()

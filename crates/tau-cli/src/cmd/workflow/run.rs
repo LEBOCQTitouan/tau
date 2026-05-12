@@ -15,9 +15,7 @@ pub async fn run(args: &WorkflowRunArgs, output: &mut Output) -> anyhow::Result<
     let cwd = std::env::current_dir()?;
     let scope = Scope::resolve(&cwd).context("resolving package scope")?;
 
-    let wf_path = cwd
-        .join("workflows")
-        .join(format!("{}.toml", args.name));
+    let wf_path = cwd.join("workflows").join(format!("{}.toml", args.name));
     let workflow = Workflow::from_path(&wf_path)
         .with_context(|| format!("parsing workflow at {wf_path:?}"))?;
 

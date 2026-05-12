@@ -9,7 +9,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::Utc;
-use tau_domain::{Address, AgentDefinition, AgentInstanceId, Message, MessagePayload, PackageManifest};
+use tau_domain::{
+    Address, AgentDefinition, AgentInstanceId, Message, MessagePayload, PackageManifest,
+};
 use tau_runtime::Runtime;
 
 use crate::error::WorkflowError;
@@ -101,13 +103,14 @@ impl Runner {
                         &workflow.name,
                         &step.id,
                     )?;
-                    let (agent_def, manifest) = opts.agents.get(agent).ok_or_else(|| {
-                        WorkflowError::AgentNotFound {
-                            workflow: workflow.name.clone(),
-                            step_id: step.id.clone(),
-                            agent: agent.clone(),
-                        }
-                    })?;
+                    let (agent_def, manifest) =
+                        opts.agents
+                            .get(agent)
+                            .ok_or_else(|| WorkflowError::AgentNotFound {
+                                workflow: workflow.name.clone(),
+                                step_id: step.id.clone(),
+                                agent: agent.clone(),
+                            })?;
                     let initial_message = build_user_message(resolved_input.clone());
                     let result = self
                         .runtime
@@ -122,27 +125,22 @@ impl Runner {
                 }
                 StepKind::ToolCall { tool, args } => {
                     // Resolve any template strings inside args (string values only).
-                    let resolved_args = resolve_args(
-                        args,
-                        &opts.input,
-                        &prior_outputs,
-                        &workflow.name,
-                        &step.id,
-                    )?;
-                    let default_agent_id =
-                        workflow.default_agent.as_ref().ok_or_else(|| {
-                            WorkflowError::ParseFailed {
-                                path: workflow.source_path.clone(),
-                                message: "tool.call step requires [workflow].default-agent".into(),
+                    let resolved_args =
+                        resolve_args(args, &opts.input, &prior_outputs, &workflow.name, &step.id)?;
+                    let default_agent_id = workflow.default_agent.as_ref().ok_or_else(|| {
+                        WorkflowError::ParseFailed {
+                            path: workflow.source_path.clone(),
+                            message: "tool.call step requires [workflow].default-agent".into(),
+                        }
+                    })?;
+                    let (agent_def, manifest) =
+                        opts.agents.get(default_agent_id).ok_or_else(|| {
+                            WorkflowError::AgentNotFound {
+                                workflow: workflow.name.clone(),
+                                step_id: step.id.clone(),
+                                agent: default_agent_id.clone(),
                             }
                         })?;
-                    let (agent_def, manifest) = opts.agents.get(default_agent_id).ok_or_else(
-                        || WorkflowError::AgentNotFound {
-                            workflow: workflow.name.clone(),
-                            step_id: step.id.clone(),
-                            agent: default_agent_id.clone(),
-                        },
-                    )?;
                     // Convert serde_json::Value → tau_domain::Value for invoke_tool.
                     let tau_args = json_to_tau_value(&resolved_args);
                     let result = self
@@ -240,7 +238,10 @@ fn agent_outcome_to_string(
             Err(("agent_failed".into(), format!("{status:?}")))
         }
         // #[non_exhaustive] forward-compat wildcard
-        Ok(_) => Err(("unknown_outcome".into(), "unknown RunOutcome variant".into())),
+        Ok(_) => Err((
+            "unknown_outcome".into(),
+            "unknown RunOutcome variant".into(),
+        )),
         Err(e) => Err(("runtime_error".into(), format!("{e}"))),
     }
 }
@@ -334,10 +335,7 @@ fn resolve_args(
         serde_json::Value::Object(map) => {
             let mut out = serde_json::Map::with_capacity(map.len());
             for (k, v) in map {
-                out.insert(
-                    k.clone(),
-                    resolve_args(v, input, prior, workflow, step_id)?,
-                );
+                out.insert(k.clone(), resolve_args(v, input, prior, workflow, step_id)?);
             }
             Ok(serde_json::Value::Object(out))
         }

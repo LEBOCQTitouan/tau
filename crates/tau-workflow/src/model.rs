@@ -123,29 +123,32 @@ impl Workflow {
 
             let kind = match raw_step.kind.as_str() {
                 "agent.run" => {
-                    let agent = raw_step.agent.clone().ok_or_else(|| {
-                        WorkflowError::ParseFailed {
-                            path: source_path.to_path_buf(),
-                            message: format!(
-                                "step {:?}: agent.run requires `agent` field",
-                                raw_step.id
-                            ),
-                        }
-                    })?;
+                    let agent =
+                        raw_step
+                            .agent
+                            .clone()
+                            .ok_or_else(|| WorkflowError::ParseFailed {
+                                path: source_path.to_path_buf(),
+                                message: format!(
+                                    "step {:?}: agent.run requires `agent` field",
+                                    raw_step.id
+                                ),
+                            })?;
                     let input = raw_step.input.clone().unwrap_or_default();
                     StepKind::AgentRun { agent, input }
                 }
                 "tool.call" => {
                     has_tool_call = true;
-                    let tool = raw_step.tool.clone().ok_or_else(|| {
-                        WorkflowError::ParseFailed {
+                    let tool = raw_step
+                        .tool
+                        .clone()
+                        .ok_or_else(|| WorkflowError::ParseFailed {
                             path: source_path.to_path_buf(),
                             message: format!(
                                 "step {:?}: tool.call requires `tool` field",
                                 raw_step.id
                             ),
-                        }
-                    })?;
+                        })?;
                     let args = raw_step
                         .args
                         .as_ref()

@@ -763,9 +763,7 @@ paths = ["**"]
     #[tokio::test]
     async fn invoke_tool_dispatches_to_registered_tool_and_returns_result() {
         use std::str::FromStr;
-        use tau_domain::{
-            AgentId, PackageId, PackageName, UncheckedManifest, Version,
-        };
+        use tau_domain::{AgentId, PackageId, PackageName, UncheckedManifest, Version};
         use tau_ports::fixtures::{make_tool_result, make_tool_spec, MockLlmBackend, MockTool};
         use tau_ports::ToolContent;
 

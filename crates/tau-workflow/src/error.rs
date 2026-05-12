@@ -74,7 +74,9 @@ pub enum WorkflowError {
 
     /// Resume requested but the JSONL file's recorded steps no longer match
     /// the workflow's current step ids. Use `--force` to override.
-    #[error("workflow drift: log step ids {logged:?} differ from current workflow step ids {current:?}")]
+    #[error(
+        "workflow drift: log step ids {logged:?} differ from current workflow step ids {current:?}"
+    )]
     DriftDetected {
         /// Step ids found in the JSONL log.
         logged: Vec<String>,

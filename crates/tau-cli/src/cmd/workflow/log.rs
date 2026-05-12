@@ -34,7 +34,10 @@ pub async fn run(args: &WorkflowLogArgs, output: &mut Output) -> anyhow::Result<
 
     let path = found_path
         .ok_or_else(|| anyhow::anyhow!("no run log found for run id {:?}", args.run_id))?;
-    let records = replay(&path).await.map_err(|e| anyhow::anyhow!(e)).context("replaying log")?;
+    let records = replay(&path)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))
+        .context("replaying log")?;
 
     if args.json {
         for record in &records {

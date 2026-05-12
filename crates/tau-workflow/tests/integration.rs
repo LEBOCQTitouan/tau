@@ -19,7 +19,7 @@ use tau_ports::fixtures::{make_completion_response, make_token_usage, MockLlmBac
 use tau_ports::StopReason;
 use tau_workflow::{
     persistence::{replay, StepStatus},
-    Runner, RunOpts, Workflow,
+    RunOpts, Runner, Workflow,
 };
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,8 @@ fn manifest_no_caps() -> tau_domain::PackageManifest {
         "#,
     )
     .expect("test manifest TOML must parse");
-    raw.validate().expect("test manifest must satisfy validation")
+    raw.validate()
+        .expect("test manifest must satisfy validation")
 }
 
 /// Build a minimal `AgentDefinition` backed by the given LLM backend name.

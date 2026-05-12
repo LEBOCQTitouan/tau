@@ -140,13 +140,11 @@ pub(crate) async fn build_runtime_for_workflow(
     );
 
     // Default host options: no recording, no forced sandbox override.
-    let (host_options, _ledger) =
-        crate::cmd::plugin_loader::build_host_options(None, false, None);
+    let (host_options, _ledger) = crate::cmd::plugin_loader::build_host_options(None, false, None);
 
-    let loaded =
-        crate::cmd::plugin_loader::load_plugins(entry, scope, trace_context, host_options)
-            .await
-            .with_context(|| format!("loading plugins for agent {:?}", first_agent_id))?;
+    let loaded = crate::cmd::plugin_loader::load_plugins(entry, scope, trace_context, host_options)
+        .await
+        .with_context(|| format!("loading plugins for agent {:?}", first_agent_id))?;
 
     loaded
         .builder

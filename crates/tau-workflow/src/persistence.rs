@@ -134,22 +134,24 @@ impl RunLog {
 /// Replay a JSONL log into a vector of records. Tolerates a trailing
 /// partial line (truncated mid-write on crash) by skipping it.
 pub async fn replay(path: &Path) -> Result<Vec<StepRecord>, crate::WorkflowError> {
-    let file =
-        File::open(path)
+    let file = File::open(path)
+        .await
+        .map_err(|e| crate::WorkflowError::PersistenceError {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+    let reader = BufReader::new(file);
+    let mut lines = reader.lines();
+    let mut records = Vec::new();
+    while let Some(line) =
+        lines
+            .next_line()
             .await
             .map_err(|e| crate::WorkflowError::PersistenceError {
                 path: path.to_path_buf(),
                 source: e,
-            })?;
-    let reader = BufReader::new(file);
-    let mut lines = reader.lines();
-    let mut records = Vec::new();
-    while let Some(line) = lines.next_line().await.map_err(|e| {
-        crate::WorkflowError::PersistenceError {
-            path: path.to_path_buf(),
-            source: e,
-        }
-    })? {
+            })?
+    {
         if line.is_empty() {
             continue;
         }
