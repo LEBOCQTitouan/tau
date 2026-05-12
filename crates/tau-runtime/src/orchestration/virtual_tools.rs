@@ -350,6 +350,12 @@ struct AgentSpawnArgs {
     grant: Vec<Capability>,
     /// Initial user message for the child.
     message: String,
+    /// Optional system prompt for the child. When `None`, the child
+    /// inherits the parent's system_prompt. When `Some`, replaces it.
+    /// This is the v1.2 foundation for per-kind agent definitions
+    /// (a "skill" = `(system_prompt, grant, optional tools)`).
+    #[serde(default)]
+    system_prompt: Option<String>,
     // `kind` is in the tool name, not here — ignore any `kind` field in args.
 }
 
@@ -363,6 +369,9 @@ pub struct AgentSpawnRequest {
     pub grant: Vec<Capability>,
     /// Initial user message for the child.
     pub message: String,
+    /// Optional system prompt override for the child. `None` ⇒ inherit
+    /// parent's. v1.2: foundation for per-kind agent definitions.
+    pub system_prompt: Option<String>,
 }
 
 /// Validate an `agent.<kind>.spawn` virtual tool call.
@@ -415,6 +424,7 @@ pub fn validate_agent_spawn(
         kind: kind.into(),
         grant: a.grant,
         message: a.message,
+        system_prompt: a.system_prompt,
     })
 }
 
@@ -566,6 +576,30 @@ mod tests {
             .unwrap();
         assert_eq!(req.kind, "researcher");
         assert_eq!(req.message, "hi");
+        assert!(req.system_prompt.is_none());
+    }
+
+    #[test]
+    fn validate_agent_spawn_passes_system_prompt_through() {
+        // v1.2: spawn args may carry an optional system_prompt override
+        // so the orchestrator can spawn semantically different children
+        // (the foundation for skills — see ROADMAP §"Skills as packages").
+        let parent_grant: Vec<Capability> = vec![serde_json::from_value(serde_json::json!({
+            "kind": "agent.spawn",
+            "allowed_kinds": ["critic"]
+        }))
+        .unwrap()];
+        let args = serde_json::json!({
+            "message": "review this draft",
+            "system_prompt": "You are a strict editor. Flag every claim that lacks a source."
+        });
+        let req =
+            validate_agent_spawn("agent.critic.spawn", &args, &"p".into(), &parent_grant).unwrap();
+        assert_eq!(req.kind, "critic");
+        assert_eq!(
+            req.system_prompt.as_deref(),
+            Some("You are a strict editor. Flag every claim that lacks a source.")
+        );
     }
 
     #[test]

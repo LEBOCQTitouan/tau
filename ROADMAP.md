@@ -262,6 +262,36 @@ Tier ordering reflects criticality, not strict implementation order
       9 remaining priority-12 follow-ups (B–K minus A) stay
       tracked in the followups doc. No new CI jobs (25 required
       checks unchanged).
+16. **Skills as first-class packages** (Constitution G10). Currently
+    *partial*: `kinds::SKILL = "skill"` is a recognized `PackageKind`
+    in tau-domain (per Constitution G10's commitment that "Skills and
+    MCP are first-class concepts in core"), and the v1.2 multi-agent
+    spawn arg `system_prompt: Option<String>` (PR #61, commit cb894cc's
+    follow-up) provides the runtime foundation. What's missing: the
+    end-to-end installation, discovery, and invocation pipeline. A
+    Skill package contains a `(system_prompt, capability declaration,
+    optional tools list)` triple — fundamentally what a spawn arg
+    encodes, but shipped as an installable artifact. Concretely:
+    - Manifest extension: `[skill]` table in tau.toml documenting the
+      skill's purpose, capability requirements, and default system
+      prompt (parallel to `[plugin]` and `[sandbox]` blocks).
+    - `tau install <skill-pkg>` resolves + installs to scope (reuses
+      tau-pkg).
+    - `tau skill list` enumerates installed skills (parallel to
+      `tau list agents`).
+    - Agent-side invocation: a spawned `agent.<skill-name>.spawn`
+      resolves to the installed skill's manifest, pulling system_prompt
+      + grant defaults from the package rather than requiring the
+      caller to supply them inline. Caller can override per spawn.
+    - Agent Skills spec compliance — interop with the broader 2026
+      ecosystem (the Anthropic Agent Skills spec, etc.).
+    - Reference skill packages shipped as test fixtures + docs.
+
+    This closes Constitution G10's commitment ("Skills and MCP are
+    first-class concepts in core. Tau understands the Agent Skills
+    spec and the Model Context Protocol natively"). The v1.2 spawn
+    arg work is the necessary precondition; this is the layer that
+    makes skills installable and discoverable. ~3-4 weeks of work.
 
 ### Tier 4 — operational quality
 
