@@ -26,3 +26,5 @@ ulid        = "1"
 [dev-dependencies]
 tempfile    = { workspace = true }
 tokio       = { workspace = true, features = ["fs", "io-util", "time", "macros", "rt", "test-util"] }
+tau-domain  = { workspace = true, features = ["test-fixtures"] }
+tau-ports   = { workspace = true, features = ["test-fixtures"] }
