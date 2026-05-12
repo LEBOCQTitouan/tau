@@ -458,9 +458,20 @@ pub(crate) fn run_streaming_inner(
                                                     agent_def.package.clone(),
                                                     agent_def.llm_backend.clone(),
                                                 );
-                                            if let Some(sp) =
-                                                agent_def.system_prompt.clone()
-                                            {
+                                            // System prompt resolution (v1.2):
+                                            // • Spawn arg `system_prompt`
+                                            //   takes precedence (per-kind
+                                            //   skill differentiation)
+                                            // • Otherwise inherit parent's
+                                            //   system_prompt
+                                            // • Otherwise None
+                                            let child_system_prompt = req
+                                                .system_prompt
+                                                .clone()
+                                                .or_else(|| {
+                                                    agent_def.system_prompt.clone()
+                                                });
+                                            if let Some(sp) = child_system_prompt {
                                                 child_def = child_def
                                                     .with_system_prompt(sp);
                                             }
