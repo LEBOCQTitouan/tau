@@ -10,6 +10,7 @@ pub mod error_render;
 pub mod init;
 pub mod install;
 pub mod list;
+pub mod output_orchestration;
 pub mod plugin;
 pub(crate) mod plugin_loader;
 pub mod resolve;
