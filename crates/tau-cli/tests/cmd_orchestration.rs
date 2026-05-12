@@ -14,7 +14,7 @@
 //! Implementer notes:
 //! - Lift the MockLlmBackend pattern from tau-runtime's test fixtures
 //!   (`crates/tau-runtime/tests/run_completed.rs` /
-//!    `crates/tau-runtime/tests/common/mod.rs`) or equivalent.
+//!   `crates/tau-runtime/tests/common/mod.rs`) or equivalent.
 //! - Each mock turn sequence must be scripted to emit the JSON tool-call
 //!   payloads the orchestration virtual-tool resolver expects.
 //! - The property tests in Task 13 (`crates/tau-runtime/tests/

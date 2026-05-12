@@ -355,13 +355,13 @@ impl TaskList {
                 filter
                     .owner
                     .as_ref()
-                    .map_or(true, |o| t.owner.as_ref() == Some(o))
+                    .is_none_or(|o| t.owner.as_ref() == Some(o))
             })
             .filter(|t| {
                 filter
                     .parent
                     .as_ref()
-                    .map_or(true, |p| t.parent_task_id.as_ref() == Some(p))
+                    .is_none_or(|p| t.parent_task_id.as_ref() == Some(p))
             })
             .filter(|t| !filter.unclaimed_only || t.owner.is_none())
             .cloned()

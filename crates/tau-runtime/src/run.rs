@@ -346,8 +346,10 @@ impl Runtime {
 
         let state_arc = Arc::new(Mutex::new(state));
 
-        let mut opts = crate::RunOptions::default();
-        opts.orchestration_state = Some(state_arc.clone());
+        let opts = crate::RunOptions {
+            orchestration_state: Some(state_arc.clone()),
+            ..crate::RunOptions::default()
+        };
 
         let outcome = self
             .run_with_history(
