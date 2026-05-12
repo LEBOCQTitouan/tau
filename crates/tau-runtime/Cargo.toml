@@ -27,6 +27,7 @@ tracing             = { workspace = true }
 uuid                = { workspace = true, features = ["v4"] }
 # Plugin host carries plugin config as JSON values across the IPC
 # boundary; surfaces in `plugin_host::load_*` signatures.
+serde               = { workspace = true }
 serde_json          = "1"
 # Plugin host spawns plugin binaries and reads their stdio streams.
 # `fs` is needed by `plugin_host::recording`, which uses
@@ -52,6 +53,12 @@ globset             = { workspace = true }
 # JSON Schema validation for tool args at the kernel boundary.
 # Realizes ADR-0010 (Tier 2 priority 6).
 jsonschema          = { workspace = true }
+# Multi-agent orchestration (ROADMAP §9): wall-clock timestamps on tasks,
+# leases, and trace events.
+chrono              = { workspace = true }
+# Multi-agent orchestration: ULID generation for run-ids, agent-ids,
+# trace-event-ids.
+ulid                = { workspace = true }
 
 # macOS-only: sandbox-exec adapter. Selected for RegistryKind::Native on
 # macOS hosts; the Linux NativeSandbox is selected on Linux.

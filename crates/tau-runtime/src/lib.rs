@@ -22,6 +22,7 @@ pub mod capability_override;
 pub(crate) mod dispatch;
 pub mod error;
 pub mod options;
+pub mod orchestration;
 pub mod outcome;
 pub mod plugin_host;
 mod run;

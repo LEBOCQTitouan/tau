@@ -166,6 +166,58 @@ pub async fn run(
         },
     );
 
+    // ---- Multi-agent dispatch -----------------------------------------------
+    //
+    // Trigger: the agent's package manifest declares either an
+    // `Agent::Spawn` capability or a `TaskList::*` capability. When
+    // either is present, route through `Runtime::spawn_root_agent` instead
+    // of the single-agent flow. The single-agent flow is preserved as the
+    // default for backward compatibility.
+    let is_multi_agent = manifest.capabilities().iter().any(|c| {
+        matches!(
+            c,
+            tau_domain::Capability::Agent(tau_domain::AgentCapability::Spawn { .. })
+                | tau_domain::Capability::TaskList { .. }
+        )
+    });
+
+    if is_multi_agent {
+        use crate::cmd::output_orchestration::{print_summary, AgentStats};
+
+        let scope_root = scope.path().to_path_buf();
+        let snapshot = runtime
+            .spawn_root_agent(
+                agent_def,
+                manifest,
+                initial,
+                tau_ports::RunBudget::default(), // TODO: thread from CLI flags
+                scope_root,
+            )
+            .await
+            .with_context(|| format!("multi-agent run for agent {:?}", args.agent_id))?;
+
+        drop(runtime);
+        plugin_loader::flush_recorders(recorder_ledger).await;
+
+        // Print snapshot summary. Live trace rendering is deferred;
+        // v1 reads the JSONL log post-hoc. Stats are empty here because
+        // the printer was not wired to the trace stream — that wiring is
+        // a follow-up (requires subscribe-handle plumbing through
+        // spawn_root_agent).
+        let stats: std::collections::BTreeMap<String, AgentStats> =
+            std::collections::BTreeMap::new();
+        print_summary(&snapshot, &stats);
+
+        return if matches!(snapshot.status, tau_ports::RunStatus::Completed) {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "multi-agent run failed (status: {:?})",
+                snapshot.status
+            ))
+        };
+    }
+
     if args.stream {
         let result =
             run_streaming_path(&runtime, agent_def, manifest, initial, options, output).await;

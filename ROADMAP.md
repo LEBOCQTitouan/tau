@@ -197,9 +197,24 @@ Tier ordering reflects criticality, not strict implementation order
 
 ### Tier 3 — extends the runtime
 
-9. **Multi-agent orchestration** (G10's deferred half).
+9. **Multi-agent orchestration** (G10's deferred half). 🚧 In progress —
+    primitive-set spec at
+    [`2026-05-12-multi-agent-orchestration-design.md`](docs/superpowers/specs/2026-05-12-multi-agent-orchestration-design.md).
+    Defines the 6 entities (Identity, Capability, Agent, Task, TraceEvent,
+    Run), 3 verb classes (think/call/complete, virtual tools, host-emitted),
+    and 3 channels (sync return, shared state, trace) that compose into
+    linear / hierarchical / supervisor / worker-pool / plan-revise patterns.
+    Coordination via shared TaskList with hierarchical task ids + locks
+    (owner + lease + heartbeat). No bus, no inbox, no push-into-LLM. CLI
+    output is npm/cargo-style line-feed.
 10. **Workflow / pipeline runner** (deterministic step-by-step
-    pipelines; possibly new `tau-workflow` crate).
+    pipelines) ✅ Shipped 2026-05-12 — see
+    [spec](docs/superpowers/specs/2026-05-12-tau-workflow-design.md) and
+    [ADR-0022](docs/decisions/0022-tau-workflow.md). New `tau-workflow`
+    crate; `tau workflow {list, run, log, resume}`; JSONL persistence;
+    `--resume` with drift checking. v1 is linear pipelines; DAG and
+    parallel branches earmarked as a "workflow-DAG" sub-project (see
+    deferred follow-ups below).
 11. **REPL persistence** (`tau chat --resume <id>`) ✅ Shipped 2026-05-02 — see
     [spec](docs/superpowers/specs/2026-05-01-repl-persistence-design.md)
     and [ADR-0013](docs/decisions/0013-repl-persistence.md).
@@ -251,9 +266,49 @@ Tier ordering reflects criticality, not strict implementation order
 ### Tier 4 — operational quality
 
 13. **Performance budgets enforced in CI** (Constitution QG14, G16).
-14. **`cargo audit` + `cargo-deny` in CI** (Constitution QG16).
+14. **`cargo audit` + `cargo-deny` in CI** (Constitution QG16) ✅ Shipped
+    2026-05-11 (PR #57, commit f8ad58f). `cargo-deny / linux` is the
+    19th required CI check; gates RustSec advisories + license
+    allow-list + non-crates.io sources.
 15. **Serve mode** (JSON-RPC over stdio; Constitution G6, QG12). Lives
     in `tau-app`.
+
+### Deferred sub-projects (cross-tier)
+
+Tracked here as future extensions of v1 primitives. Each is a clean
+addition (not a re-architecture) when a concrete use case lands. See
+the "Considered and rejected" table in
+[`2026-05-12-multi-agent-orchestration-design.md`](docs/superpowers/specs/2026-05-12-multi-agent-orchestration-design.md)
+for design context.
+
+- **Background tools / monitors** — claude-code-style `Monitor` pattern:
+  a tool that runs in the background, emits events over time, delivered
+  to the agent's context at turn boundaries. Different primitive class
+  than v1's synchronous tools: needs a fourth channel (push-at-turn-
+  boundary) + `BackgroundTool` entity + `Tool::Background` capability.
+  Useful for watching CI runs, log files, file changes, webhooks. Not
+  in v1; tracked here for future implementation when a use case justifies
+  the design surface (sandbox lifecycle of long-running tools is the
+  load-bearing problem).
+- **Inter-agent message bus / inbox stacks** — rejected for v1 in favor
+  of shared TaskList. Would re-open if many-to-many coordination or
+  unsolicited interrupts become necessary.
+- **Pull-status tool** — `agent.<kind>_status()` virtual tool letting
+  parent's LLM check on a still-running child. v1 uses host-side
+  watchdog timeouts instead.
+- **Output schemas** — typed tool returns (Pydantic / JSON schema
+  constraints on results). Refinement of `Tool.result_schema`.
+- **Plan DAG with task dependencies** — `Task.depends_on: [TaskId]` +
+  topological scheduling. v1 uses linear hierarchy via
+  `parent_task_id`.
+- **Cross-run memory** — persistent state above `Run`. Currently each
+  run is independent; session persistence (Tier 3 §11) is per-session
+  not per-content.
+- **Workflow-DAG** — extension of tau-workflow v1 from linear pipelines
+  to a DAG with parallel branches + fan-out / fan-in. Tracked in
+  [ADR-0022](docs/decisions/0022-tau-workflow.md).
+- **Group chat / mediator agent** — many-to-many via a mediator. v1
+  uses TaskList as the coordination primitive instead.
 
 ## Phase 2 — Tau as a compiled language for agentic workflows
 

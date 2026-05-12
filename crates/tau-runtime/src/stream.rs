@@ -315,6 +315,140 @@ pub(crate) fn run_streaming_inner(
                     tool_name = %tool_use.name,
                 );
 
+                // ----- Orchestration virtual-tool intercept -----------------
+                // When a multi-agent run is active and the tool name matches
+                // task.* / run.* / agent.<kind>.spawn, dispatch in-kernel via
+                // crate::orchestration instead of forwarding to a plugin host.
+                // v1: task.* + run.* fully wired; agent.<kind>.spawn returns
+                // an is_error=true ToolResult noting deferred-to-follow-up.
+                if let Some(state_arc) = options.orchestration_state.as_ref() {
+                    if crate::orchestration::is_virtual(&tool_use.name) {
+                        // Capability check against agent's grant.
+                        let required_cap = crate::orchestration::required_capability(
+                            &tool_use.name,
+                        );
+                        let required_slice = std::slice::from_ref(&required_cap);
+                        let missing = crate::capability::check_capabilities(
+                            &granted_capabilities,
+                            required_slice,
+                        );
+                        if let Some(cap) = missing {
+                            let kind = crate::run::capability_kind_str(cap);
+                            warn!(
+                                name = "capability.deny",
+                                tool_name = %tool_use.name,
+                                missing_kind = %kind,
+                            );
+                            let denial = crate::error::CapabilityDenial {
+                                agent_id: agent_def.id.to_string(),
+                                package_id: agent_def.package.name.to_string(),
+                                tool_name: tool_use.name.clone(),
+                                required_kind: kind,
+                                required_detail: format!("{cap:?}"),
+                            };
+                            let outcome = crate::run::build_policy_denied_outcome(
+                                denial,
+                                messages,
+                                total_turns,
+                                aggregated_tokens,
+                            );
+                            yield RunEvent::RunCompleted { outcome };
+                            return;
+                        }
+
+                        // Append the tool-call message (parallels normal path).
+                        let agent_addr = Address::Agent(agent_instance_id);
+                        let tool_addr = Address::Tool(tool_use.name.clone());
+                        messages.push(Message::new(
+                            agent_addr.clone(),
+                            tool_addr.clone(),
+                            MessagePayload::ToolCall {
+                                args: tool_use.input.clone(),
+                            },
+                        ));
+
+                        // Build the ToolResult.
+                        let is_agent_spawn = tool_use.name.starts_with("agent.")
+                            && tool_use.name.ends_with(".spawn");
+                        let tool_result: ToolResult = if is_agent_spawn {
+                            // v1: recursive agent.spawn not yet wired. Returns
+                            // a self-explanatory ToolResult with is_error=true
+                            // so the agent's LLM gets immediate feedback.
+                            // Tracked as follow-up; see ADR-0023.
+                            ToolResult::new(
+                                vec![tau_ports::ToolContent::Text {
+                                    text: format!(
+                                        "agent.<kind>.spawn (name={}) is declared but recursive \
+                                         runtime dispatch is deferred to a follow-up PR. \
+                                         v1 ships task.* + run.* virtual tools only.",
+                                        tool_use.name
+                                    ),
+                                }],
+                                true,
+                            )
+                        } else {
+                            let agent_id_str = agent_def.id.to_string();
+                            // tau_domain::Value -> serde_json::Value via serde
+                            // (orchestration::dispatch consumes serde_json::Value
+                            // because that's the shape virtual-tool handlers
+                            // parse with `serde_json::from_value`).
+                            let args_json = serde_json::to_value(&tool_use.input)
+                                .unwrap_or(serde_json::Value::Null);
+                            let dispatch_res = {
+                                let mut state = state_arc.lock().await;
+                                crate::orchestration::dispatch(
+                                    &tool_use.name,
+                                    args_json,
+                                    &agent_id_str,
+                                    &mut state,
+                                )
+                            };
+                            match dispatch_res {
+                                Ok(json) => ToolResult::new(
+                                    vec![tau_ports::ToolContent::Text {
+                                        text: serde_json::to_string(&json)
+                                            .unwrap_or_else(|_| "{}".into()),
+                                    }],
+                                    false,
+                                ),
+                                Err(e) => ToolResult::new(
+                                    vec![tau_ports::ToolContent::Text {
+                                        text: format!("{e}"),
+                                    }],
+                                    true,
+                                ),
+                            }
+                        };
+
+                        // Append the tool-result message (parallels normal path).
+                        let result_payload = if tool_result.is_error {
+                            MessagePayload::ToolError {
+                                kind: "orchestration_virtual_tool_error".into(),
+                                message: crate::run::flatten_content_to_string(
+                                    &tool_result.content,
+                                ),
+                                details: None,
+                            }
+                        } else {
+                            MessagePayload::ToolResult {
+                                body: crate::run::content_to_value(&tool_result.content),
+                            }
+                        };
+                        messages.push(Message::new(
+                            tool_addr,
+                            agent_addr,
+                            result_payload,
+                        ));
+
+                        yield RunEvent::ToolCallCompleted {
+                            id: tool_use.id.clone(),
+                            name: tool_use.name.clone(),
+                            result: Ok(tool_result),
+                        };
+                        continue; // next tool_use; skip plugin dispatch
+                    }
+                }
+
                 // Resolve the tool from the registry snapshot.
                 let tool = match tools.get(tool_use.name.as_str()) {
                     Some(t) => t.clone(),
