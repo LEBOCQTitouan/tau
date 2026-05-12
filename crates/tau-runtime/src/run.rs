@@ -315,10 +315,14 @@ impl Runtime {
     /// `TraceEventKind::OrphanedTasksAtTermination` if orphans remain, and
     /// returns a read-only [`tau_ports::RunSnapshot`].
     ///
-    /// v1 limitation: `agent.<kind>.spawn` is declared but recursive
-    /// dispatch is deferred — see ADR-0023.
+    /// As of v1.1 (ADR-0025), `agent.<kind>.spawn` recursively invokes
+    /// [`Runtime::run_with_history`] for the child via the `Arc<Self>`
+    /// recursion handle threaded through `RunOptions::orchestration_runtime`.
+    /// The child run inherits the parent's `PackageManifest`, gets a
+    /// fresh `AgentId`, and runs with the validated narrowed grant from
+    /// [`crate::orchestration::AgentSpawnRequest`].
     pub async fn spawn_root_agent(
-        &self,
+        self: std::sync::Arc<Self>,
         root_agent_def: tau_domain::AgentDefinition,
         root_manifest: tau_domain::PackageManifest,
         initial_message: tau_domain::Message,
@@ -348,6 +352,7 @@ impl Runtime {
 
         let opts = crate::RunOptions {
             orchestration_state: Some(state_arc.clone()),
+            orchestration_runtime: Some(self.clone()),
             ..crate::RunOptions::default()
         };
 

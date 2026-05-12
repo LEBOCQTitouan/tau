@@ -70,6 +70,20 @@ pub struct RunOptions {
     /// Callers using single-agent `Runtime::run` should leave this `None`.
     pub orchestration_state:
         Option<std::sync::Arc<tokio::sync::Mutex<crate::orchestration::run_state::RunState>>>,
+
+    /// Set by `Runtime::spawn_root_agent` (v1.1+). Carries the `Arc<Runtime>`
+    /// so the in-stream `agent.<kind>.spawn` intercept can recursively
+    /// invoke a child run via `run_with_history` without re-resolving
+    /// the kernel. None for single-agent runs.
+    pub orchestration_runtime: Option<std::sync::Arc<crate::builder::Runtime>>,
+
+    /// Set by the orchestration recursion path (v1.1+). When `Some`,
+    /// short-circuits the `compute_effective(manifest + project_override)`
+    /// calculation and uses this list directly as the agent's effective
+    /// grant. The capability subset law (`check_capability_subset`) is the
+    /// authoritative gate before this is set, so the kernel trusts it as a
+    /// pre-validated narrowing of the parent's grant.
+    pub granted_capabilities_override: Option<Vec<tau_domain::Capability>>,
 }
 
 impl std::fmt::Debug for RunOptions {
@@ -82,6 +96,14 @@ impl std::fmt::Debug for RunOptions {
                 "orchestration_state",
                 &self.orchestration_state.as_ref().map(|_| "<RunState>"),
             )
+            .field(
+                "orchestration_runtime",
+                &self.orchestration_runtime.as_ref().map(|_| "<Runtime>"),
+            )
+            .field(
+                "granted_capabilities_override",
+                &self.granted_capabilities_override,
+            )
             .finish()
     }
 }
@@ -93,6 +115,8 @@ impl Default for RunOptions {
             trace_label: None,
             project_override: Vec::new(),
             orchestration_state: None,
+            orchestration_runtime: None,
+            granted_capabilities_override: None,
         }
     }
 }

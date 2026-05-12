@@ -185,7 +185,12 @@ pub async fn run(
         use crate::cmd::output_orchestration::{print_summary, AgentStats};
 
         let scope_root = scope.path().to_path_buf();
-        let snapshot = runtime
+        // v1.1: spawn_root_agent takes `Arc<Runtime>` so the in-stream
+        // agent.<kind>.spawn intercept can recursively invoke run_with_history
+        // on the same kernel. Single-agent runs below stay on the non-arc path.
+        let runtime_arc = std::sync::Arc::new(runtime);
+        let snapshot = runtime_arc
+            .clone()
             .spawn_root_agent(
                 agent_def,
                 manifest,
@@ -196,7 +201,7 @@ pub async fn run(
             .await
             .with_context(|| format!("multi-agent run for agent {:?}", args.agent_id))?;
 
-        drop(runtime);
+        drop(runtime_arc);
         plugin_loader::flush_recorders(recorder_ledger).await;
 
         // Print snapshot summary. Live trace rendering is deferred;
