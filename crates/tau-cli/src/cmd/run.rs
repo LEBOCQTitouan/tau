@@ -211,7 +211,10 @@ pub async fn run(
         return if matches!(snapshot.status, tau_ports::RunStatus::Completed) {
             Ok(())
         } else {
-            Err(anyhow::anyhow!("multi-agent run failed (status: {:?})", snapshot.status))
+            Err(anyhow::anyhow!(
+                "multi-agent run failed (status: {:?})",
+                snapshot.status
+            ))
         };
     }
 
