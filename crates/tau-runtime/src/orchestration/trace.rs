@@ -17,7 +17,7 @@ use tau_ports::TraceEvent;
 pub type TraceSubscriber = mpsc::UnboundedSender<TraceEvent>;
 
 /// Multi-consumer fan-out. Each emit clones the event to every subscriber.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct TraceStream {
     subscribers: Vec<TraceSubscriber>,
 }

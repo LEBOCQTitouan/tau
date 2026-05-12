@@ -323,24 +323,50 @@ mod capability_de {
                     Some(m @ ("read" | "write" | "manage")) => Capability::TaskList {
                         mode: m.to_string(),
                     },
-                    _ => Capability::Custom {
-                        name: raw.kind,
-                        params: raw.rest,
-                    },
+                    _ => {
+                        // Unknown mode: fall back to Custom but preserve mode
+                        // in params so downstream tools (capability_satisfies)
+                        // can see all fields the caller supplied.
+                        let mut params = raw.rest;
+                        if let Some(m) = raw.mode {
+                            params.insert("mode".into(), Value::String(m));
+                        }
+                        Capability::Custom {
+                            name: raw.kind,
+                            params,
+                        }
+                    }
                 },
                 "plan" => match raw.mode.as_deref() {
                     Some(m @ ("read" | "write")) => Capability::Plan {
                         mode: m.to_string(),
                     },
-                    _ => Capability::Custom {
+                    _ => {
+                        let mut params = raw.rest;
+                        if let Some(m) = raw.mode {
+                            params.insert("mode".into(), Value::String(m));
+                        }
+                        Capability::Custom {
+                            name: raw.kind,
+                            params,
+                        }
+                    }
+                },
+                _ => {
+                    // For any unknown kind, the Custom fallback must
+                    // preserve every JSON field the caller supplied. Since
+                    // `mode` is a named field on RawCapability (added for
+                    // task_list/plan parsing), it does NOT live in `rest`
+                    // for non-task_list/plan kinds — re-insert it.
+                    let mut params = raw.rest;
+                    if let Some(m) = raw.mode {
+                        params.insert("mode".into(), Value::String(m));
+                    }
+                    Capability::Custom {
                         name: raw.kind,
-                        params: raw.rest,
-                    },
-                },
-                _ => Capability::Custom {
-                    name: raw.kind,
-                    params: raw.rest,
-                },
+                        params,
+                    }
+                }
             })
         }
     }

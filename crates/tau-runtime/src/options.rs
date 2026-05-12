@@ -46,7 +46,7 @@ pub struct TokenUsage {
 /// opts.trace_label = Some("session-abc".into());
 /// ```
 #[non_exhaustive]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RunOptions {
     /// Hard cap on agent loop iterations. Hitting this returns
     /// `Ok(RunOutcome::Failed { kind: OutOfResources, .. })`.
@@ -62,6 +62,26 @@ pub struct RunOptions {
     /// also validates at parse time). When non-empty, narrows the
     /// agent's effective grant from its package manifest.
     pub project_override: Vec<crate::capability_override::CapabilityOverride>,
+
+    /// Set by `Runtime::spawn_root_agent` when running inside a
+    /// multi-agent orchestrated run. When present, virtual tool calls
+    /// (`task.*`, `run.*`, `agent.<kind>.spawn`) are intercepted before
+    /// plugin dispatch and routed through `crate::orchestration`.
+    /// Callers using single-agent `Runtime::run` should leave this `None`.
+    pub orchestration_state: Option<
+        std::sync::Arc<tokio::sync::Mutex<crate::orchestration::run_state::RunState>>,
+    >,
+}
+
+impl std::fmt::Debug for RunOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunOptions")
+            .field("max_turns", &self.max_turns)
+            .field("trace_label", &self.trace_label)
+            .field("project_override", &self.project_override)
+            .field("orchestration_state", &self.orchestration_state.as_ref().map(|_| "<RunState>"))
+            .finish()
+    }
 }
 
 impl Default for RunOptions {
@@ -70,6 +90,7 @@ impl Default for RunOptions {
             max_turns: 16,
             trace_label: None,
             project_override: Vec::new(),
+            orchestration_state: None,
         }
     }
 }

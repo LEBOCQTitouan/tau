@@ -300,6 +300,111 @@ impl Runtime {
         let _ = tool.teardown(()).await;
         Ok(result?)
     }
+
+    /// Multi-agent orchestrated run entry point (ROADMAP §9, v1).
+    ///
+    /// Builds a shared [`crate::orchestration::run_state::RunState`] (TaskList,
+    /// trace stream, budget counters), spawns a JSONL persister subscribed to
+    /// the trace stream, then runs the root agent via [`Runtime::run_with_history`]
+    /// with `orchestration_state` set in `RunOptions`. Virtual tool calls
+    /// (`task.*` / `run.*`) inside the agent loop are intercepted at the
+    /// kernel-dispatch boundary (see `crate::stream::run_streaming_inner`).
+    ///
+    /// On completion: marks the run terminal status (Completed iff agent
+    /// finished AND no orphan tasks), emits a final
+    /// `TraceEventKind::OrphanedTasksAtTermination` if orphans remain, and
+    /// returns a read-only [`tau_ports::RunSnapshot`].
+    ///
+    /// v1 limitation: `agent.<kind>.spawn` is declared but recursive
+    /// dispatch is deferred — see ADR-0023.
+    pub async fn spawn_root_agent(
+        &self,
+        root_agent_def: tau_domain::AgentDefinition,
+        root_manifest: tau_domain::PackageManifest,
+        initial_message: tau_domain::Message,
+        budget: tau_ports::RunBudget,
+        scope_root: std::path::PathBuf,
+    ) -> Result<tau_ports::RunSnapshot, RuntimeError> {
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        let run_id = ulid::Ulid::new().to_string();
+        let root_agent_id = root_agent_def.id.to_string();
+        let now = chrono::Utc::now();
+
+        let mut state =
+            crate::orchestration::run_state::RunState::new(
+                run_id.clone(),
+                root_agent_id,
+                budget,
+                now,
+            );
+
+        // Subscribe a JSONL writer before wrapping state in Arc<Mutex<>>.
+        let log_path = crate::orchestration::persistence::run_log_path(&scope_root, &run_id);
+        let writer_rx = state.trace.subscribe();
+        let _writer_handle =
+            crate::orchestration::persistence::spawn_writer(log_path, writer_rx);
+
+        let state_arc = Arc::new(Mutex::new(state));
+
+        let mut opts = crate::RunOptions::default();
+        opts.orchestration_state = Some(state_arc.clone());
+
+        let outcome = self
+            .run_with_history(
+                root_agent_def,
+                root_manifest,
+                Vec::new(),
+                initial_message,
+                opts,
+            )
+            .await?;
+
+        let now_end = chrono::Utc::now();
+        {
+            let mut s = state_arc.lock().await;
+            s.ended_at = Some(now_end);
+            let success = matches!(outcome, crate::RunOutcome::Completed { .. });
+            let orphans_present = !s.task_list.all_terminal();
+            s.status = if success && !orphans_present {
+                tau_ports::RunStatus::Completed
+            } else {
+                tau_ports::RunStatus::Failed
+            };
+            if orphans_present {
+                let orphan_ids: Vec<_> = s
+                    .task_list
+                    .all()
+                    .into_iter()
+                    .filter(|t| {
+                        !matches!(
+                            t.status,
+                            tau_ports::TaskStatus::Done
+                                | tau_ports::TaskStatus::Failed
+                                | tau_ports::TaskStatus::Discarded
+                        )
+                    })
+                    .map(|t| t.id)
+                    .collect();
+                s.trace.emit(tau_ports::TraceEvent {
+                    id: ulid::Ulid::new().to_string(),
+                    ts: now_end,
+                    run_id: run_id.clone(),
+                    agent_id: None,
+                    kind: tau_ports::TraceEventKind::OrphanedTasksAtTermination {
+                        task_ids: orphan_ids,
+                    },
+                });
+            }
+        }
+
+        let snapshot = {
+            let s = state_arc.lock().await;
+            s.snapshot(now_end)
+        };
+        Ok(snapshot)
+    }
 }
 
 // ---------------------------------------------------------------------------

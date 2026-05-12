@@ -5,7 +5,7 @@
 //! to a plugin host. Result is returned synchronously as a tool_result.
 
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use tau_domain::Capability;
 use tau_ports::{AgentId, Task, TaskListFilter, TaskStatus};

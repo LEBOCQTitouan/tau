@@ -192,6 +192,16 @@ pub struct ToolResult {
     pub is_error: bool,
 }
 
+impl ToolResult {
+    /// Construct a `ToolResult` from outside the `tau-ports` crate. The
+    /// struct is `#[non_exhaustive]`, so struct-literal construction is
+    /// blocked for external callers — this constructor is the only entry
+    /// point they have.
+    pub fn new(content: Vec<ToolContent>, is_error: bool) -> Self {
+        Self { content, is_error }
+    }
+}
+
 /// One content block within a [`ToolResult`].
 ///
 /// v0.1 admits [`ToolContent::Text`] and [`ToolContent::Json`] only.

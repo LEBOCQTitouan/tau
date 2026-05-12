@@ -12,6 +12,7 @@ use tau_ports::{RunBudget, RunId, RunStatus};
 use crate::orchestration::{TaskList, TraceStream};
 
 /// Per-run mutable state.
+#[derive(Debug)]
 pub struct RunState {
     /// Run id.
     pub run_id: RunId,
