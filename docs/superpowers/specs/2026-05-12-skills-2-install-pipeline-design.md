@@ -41,16 +41,32 @@ packages because skills have no plugin process. Manifest parse-time
 validation in tau-domain rejects packages that combine `kind =
 "skill"` with a `[plugin]` block.
 
-Lockfile schema is unchanged; `${SKILL_DIR}` is stored symbolically
-and resolved at runtime by Skills-4. `tau skill list` (Skills-3)
-re-reads `SKILL.md` from disk on demand rather than caching
-frontmatter in the lockfile.
+**Reference lint is hard-failing** (revised from initial warn-only
+draft): if `SKILL.md` body contains `${SKILL_DIR}/<rel-path>`
+references and no `[[capabilities]] kind = "fs.read"` glob covers
+the path, install rejects with `InstallError::SkillReferenceWithoutCapability`.
+Catches the misconfiguration at install time rather than at runtime
+when the agent gets a confusing capability-denied error mid-task.
+The fix is trivial (skill author adds one capability line or removes
+the reference), so false-positive cost is low.
+
+**Lockfile schema migration** (revised from initial no-migration
+draft): a new lockfile schema version adds two fields per skill
+entry — `content_sha256: [u8; 32]` (SHA-256 of the `SKILL.md` file
+bytes) and `frontmatter: SkillFrontmatterSnapshot { name, description }`.
+This lets `tau skill list` enumerate installed skills from the
+lockfile alone (no disk seeks per skill — fast for scopes with many
+skills) and `tau verify` detects SKILL.md drift the same way it
+detects plugin-binary drift today.
+
+`${SKILL_DIR}` remains symbolic in both lockfile and manifest; runtime
+substitution is Skills-4's responsibility.
 
 This option was reached after weighing it against two alternatives:
 (a) inline the skill-specific logic in `install_with_options` instead
-of a parallel module, and (b) cache parsed `SKILL.md` content in the
-lockfile to speed up Skills-3. Both rejected — see "Considered and
-rejected" below.
+of a parallel module, and (b) keep the lockfile schema unchanged
+(re-read `SKILL.md` on demand from `tau skill list`). Both rejected —
+see "Considered and rejected" below.
 
 ## What `skill_check` does
 
@@ -92,24 +108,37 @@ file. Body is everything after the closing `---`. The full
 - Mismatch → `InstallError::SkillNameMismatch { tau_toml, skill_md }`
   carrying both strings for the error message.
 
-### Step 4: Reference lint (warn-only)
+### Step 4: Reference lint (hard-fail)
 
 Scan the body for substrings matching `${SKILL_DIR}/<rel-path>`. For
 each match, check whether ANY `[[capabilities]] kind = "fs.read"`
 entry has a `paths` glob covering `${SKILL_DIR}/<rel-path>`.
 
-- No covering glob → `tracing::warn!("skill {name}: SKILL.md
-  references ${{SKILL_DIR}}/{path} but no fs.read capability covers
-  it. The agent may be unable to read this file at runtime.")`
+- No covering glob → `InstallError::SkillReferenceWithoutCapability {
+  reference: String, declared_paths: Vec<String> }`.
 
-Warn-only because false positives are common (a reference may be for
-human readers, the skill author may intend the parent agent to read
-on behalf of the child, etc.). Hard-fail at install time is too
-strict for content the runtime never actually needs.
+The error carries both the offending reference (so the user sees
+exactly what's missing) and the set of `fs.read` paths actually
+declared (so the user sees what would need to extend).
+
+Hard-fail rationale: the false-positive cost (skill author adds one
+`[[capabilities]]` line or removes a stale reference) is trivial.
+The true-positive cost — caught at runtime when the agent gets a
+capability-denied error mid-task — is severe (confusing failure mode
+for the agent's LLM, no clear remediation path from the runtime error
+alone). Install time is the right gate.
 
 The glob check reuses `globset::Glob` (already a tau-pkg dep via
 `compute_effective`) for consistency with how `fs.read` paths are
 matched everywhere else in tau.
+
+Reference extraction is conservative: matches the literal string
+`${SKILL_DIR}/` followed by a path-like sequence (`[A-Za-z0-9_\-./]+`).
+Markdown link syntax (`[name](${SKILL_DIR}/foo.md)`), inline code
+(`` `${SKILL_DIR}/foo.md` ``), and prose mention all match equivalently.
+Skill authors who genuinely want a human-only reference (not for the
+agent) can use an explicit prose form without the `${SKILL_DIR}/`
+prefix, e.g. "see the style guide in references/".
 
 ## Wiring into `install_with_options`
 
@@ -176,17 +205,57 @@ responsibility (already handled per ADR-0007 §5).
 
 ## Lockfile
 
-Unchanged. The lockfile already records `LockedPlugin { name,
-version, source, kind, binary_sha256, ... }` keyed by name; `kind =
-"skill"` is a valid value today (it's in `kinds::SKILL`). The
-existing lockfile readers don't distinguish kinds.
+**Schema migration: v4 → v5** (additive — old v4 entries auto-upgrade
+on read with a `tracing::warn!` once per process, matching the v2→v3
+migration precedent from sub-project 12).
 
-`binary_sha256` is `None` for skill packages (no binary). Existing
-verify-time logic already tolerates `None` (per priority 7's `tau
-verify`).
+Two new fields per skill entry:
 
-No fields cached from `SKILL.md` (description, body) — Skills-3
-re-reads on demand.
+```rust
+/// SHA-256 of the SKILL.md file bytes at install time. Lets
+/// `tau verify` detect drift the same way binary_sha256 does for
+/// plugin binaries. None for non-skill packages.
+content_sha256: Option<[u8; 32]>,
+
+/// Snapshot of SKILL.md frontmatter at install time. Lets
+/// `tau skill list` and `tau skill show` enumerate without disk
+/// seeks. None for non-skill packages.
+frontmatter: Option<SkillFrontmatterSnapshot>,
+```
+
+Where:
+
+```rust
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillFrontmatterSnapshot {
+    pub name: String,
+    pub description: String,
+}
+```
+
+**Snapshot scope:** only `name` + `description` are cached. The body
+is NOT cached — it can be arbitrarily large and Skills-4 will load
+it lazily at spawn time. The cached fields are exactly what
+`tau skill list` needs for its summary view.
+
+**Drift detection:** `tau verify` (priority 7) checks `content_sha256`
+against the on-disk file. Mismatch surfaces as
+`VerifyReport::SkillContentDrift { name, expected, got }` — a new
+variant parallel to the existing `BinaryDrift` for plugin binaries.
+The user remediates by re-running `tau install` (which will recompute
+the hash + refresh the cached frontmatter).
+
+**Existing fields unchanged:** `binary_sha256` is `None` for skill
+packages (no binary); verify logic already tolerates `None`. Other
+fields (`name`, `version`, `source`, `kind`) carry through unchanged.
+
+**Why cache:** scopes with ~30-50 installed skills would otherwise
+incur that many file opens per `tau skill list`. Cached frontmatter
+(~200 bytes per skill) is negligible storage; the perf payoff
+compounds across other CLI surfaces (autocomplete, `tau skill show`,
+future indexing). Drift is solved by the SHA-256 check the same way
+plugin binaries are protected today.
 
 ## `${SKILL_DIR}` at install time
 
@@ -223,6 +292,14 @@ SkillFrontmatterInvalid {
     /// "YAML parse error at line 3: ...").
     detail: String,
 },
+
+SkillReferenceWithoutCapability {
+    /// The offending `${SKILL_DIR}/<path>` reference found in body.
+    reference: String,
+    /// `fs.read` glob entries declared in the manifest at install time
+    /// (so the error message can suggest "extend one of these").
+    declared_paths: Vec<String>,
+},
 ```
 
 All `#[non_exhaustive]`-friendly additions to the existing
@@ -251,27 +328,48 @@ Snapshot tests via `insta` (mirrors `cmd_install_cross_check_render`).
 
 ### Unit tests (tau-pkg `--lib skill_check`)
 
-~5 tests:
+~6 tests:
 - `skill_check_succeeds_on_valid_critic_fixture`
 - `skill_check_returns_content_missing_when_skill_md_absent`
 - `skill_check_returns_frontmatter_invalid_on_malformed_yaml`
 - `skill_check_returns_name_mismatch_when_diverged`
-- `skill_check_warns_on_uncovered_skill_dir_reference` (uses
-  `tracing_test` or captures warnings via a test subscriber)
+- `skill_check_returns_reference_without_capability_when_body_refs_uncovered_path`
+- `skill_check_accepts_reference_covered_by_fs_read_glob`
 
 ### Integration tests (tau-pkg `--test install_skill_cross_check`)
 
-~3 tests using a minimal critic fixture package at
+~4 tests using a minimal critic fixture package at
 `crates/tau-pkg/tests/fixtures/skills/critic/`:
 - Happy path: skill with valid SKILL.md installs cleanly, lockfile
-  records `kind = "skill"`
+  records `kind = "skill"` + caches `content_sha256` +
+  `frontmatter { name, description }`
 - `SkillContentMissing` triggers + propagates through
   `install_with_options`
 - `SkillNameMismatch` triggers + propagates
+- `SkillReferenceWithoutCapability` triggers when SKILL.md body
+  references `${SKILL_DIR}/refs/foo.md` but manifest's `fs.read`
+  paths don't cover it
+
+### Verify-time test (tau-pkg `--test verify_skill_drift`)
+
+~2 tests:
+- Happy path: `tau verify` returns Ok for a skill whose SKILL.md
+  matches the cached `content_sha256`
+- Drift: mutating SKILL.md after install produces
+  `VerifyReport::SkillContentDrift { name, expected, got }`
 
 ### Snapshot tests (tau-cli `--test cmd_install_skill_render`)
 
-~3 insta snapshots covering each of the 3 new error variants.
+~4 insta snapshots covering each of the 4 new error variants
+(`SkillContentMissing`, `SkillNameMismatch`,
+`SkillFrontmatterInvalid`, `SkillReferenceWithoutCapability`).
+
+### Lockfile migration test (tau-pkg `--lib lockfile`)
+
+~1 test: load a v4 lockfile (no `content_sha256` / `frontmatter`
+fields on skill entries), verify auto-upgrade emits the once-per-
+process warning and treats the missing fields as needing refresh
+on next `tau install`.
 
 ## Manifest parse-time test (tau-domain)
 
@@ -281,14 +379,19 @@ block, asserts `PackageManifestError::SkillCannotHavePluginBlock`.
 
 ## Estimated effort
 
-3-4 days. Components:
-- `crates/tau-pkg/src/skill_check.rs` (~120 LOC + 5 unit tests)
-- 3 new `InstallError` variants in `crates/tau-pkg/src/error.rs`
+4-5 days (revised up from 3-4 after strengthening #2 and #3).
+Components:
+- `crates/tau-pkg/src/skill_check.rs` (~150 LOC + 6 unit tests —
+  hard-fail reference lint adds the most logic)
+- 4 new `InstallError` variants in `crates/tau-pkg/src/error.rs`
 - `install_with_options` integration in
-  `crates/tau-pkg/src/install.rs` (~20 LOC)
-- 3 integration tests + critic fixture
-- `crates/tau-cli/src/cmd/error_render.rs` extension (~30 LOC)
-- 3 insta snapshots in `crates/tau-cli/tests/`
+  `crates/tau-pkg/src/install.rs` (~30 LOC including content_sha256
+  computation + frontmatter snapshotting)
+- Lockfile schema v4 → v5 migration (~50 LOC + 1 test)
+- `tau verify` extension for `SkillContentDrift` (~30 LOC + 2 tests)
+- 4 integration tests + critic fixture
+- `crates/tau-cli/src/cmd/error_render.rs` extension (~40 LOC)
+- 4 insta snapshots in `crates/tau-cli/tests/`
 - 1 tau-domain test for skill+plugin rejection
 
 ## Out of scope (deferred)
@@ -301,8 +404,6 @@ block, asserts `PackageManifestError::SkillCannotHavePluginBlock`.
 - **Plugin-package symmetry** (rejecting `[skill]` block on
   `kind = "plugin"` packages) — Skills-5 if needed; not load-bearing
   for v1
-- **Caching parsed SKILL.md in lockfile** — explicitly rejected; see
-  below
 
 ## Considered and rejected
 
@@ -317,21 +418,46 @@ Tempting because Skills-2 is small. Rejected because:
 - Symmetry with the existing pattern matters more than line-count
   savings.
 
-### Cache parsed `SKILL.md` content in the lockfile
+### Warn-only reference lint (initial draft)
 
-Would speed up Skills-3 (`tau skill list` reads from lockfile, no
-disk seek per skill). Rejected because:
-- Drift: lockfile snapshot vs on-disk source can diverge if a skill
-  author edits SKILL.md without re-running install. The lockfile
-  should be the install contract, not a denormalized content store.
-- Skills are small in count (humans install ~5-50 per scope). Disk
-  reads at list time are negligible.
-- Skills-3 can always optimize later if list time becomes a problem
-  — the lockfile schema is additive.
+The first draft of this spec emitted `tracing::warn!` when SKILL.md
+referenced `${SKILL_DIR}/<path>` without a covering `fs.read`
+capability. Rejected on review:
+- The true-positive cost (caught at runtime when the agent gets a
+  capability-denied error mid-task) is severe — confusing failure
+  mode for the agent's LLM, no clear remediation path from the
+  runtime error alone.
+- The false-positive cost (skill author adds one `[[capabilities]]`
+  line or removes a stale reference) is trivial.
+- Hard-fail at install time matches how the rest of tau handles
+  capability declarations: explicit > implicit. Warn-only would be
+  the outlier.
+
+### Keep lockfile schema unchanged (initial draft)
+
+The first draft had no lockfile migration — `tau skill list` would
+re-read every `SKILL.md` from disk on demand. Rejected on review:
+- A scope with 30-50 installed skills incurs 30-50 file opens per
+  `tau skill list`. Noticeable latency that compounds across CLI
+  surfaces (autocomplete, `tau skill show`, indexing).
+- Drift between snapshot and source IS a concern, but it's solved
+  by the same SHA-256 mechanism that protects plugin binaries today
+  (`tau verify` checks `content_sha256`).
+- Cached frontmatter is ~200 bytes per skill — negligible lockfile
+  growth.
+- Better to migrate the schema once in Skills-2 than to ship an
+  optimization PR later when list time gets slow.
 
 ## ADR
 
 ADR-0026 will document this decision once Skills-2 ships. Open items
-for the ADR: the inline-vs-module call, the no-cache lockfile choice,
-the skill-cannot-have-plugin-block validation, and Skills-2's relation
-to Layer 2 sandbox cross-check (skipped for skills).
+for the ADR:
+- The inline-vs-module call for `skill_check`
+- The hard-fail reference lint (and the rejected warn-only draft)
+- The lockfile v4 → v5 migration adding `content_sha256` + cached
+  frontmatter
+- The skill-cannot-have-plugin-block validation
+- Skills-2's relation to Layer 2 sandbox cross-check (skipped for
+  skills)
+- `SkillContentDrift` as a new `VerifyReport` variant parallel to
+  `BinaryDrift`
