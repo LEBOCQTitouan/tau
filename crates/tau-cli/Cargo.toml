@@ -15,9 +15,10 @@ path = "src/main.rs"
 [dependencies]
 tau-domain          = { workspace = true, features = ["serde"] }
 tau-pkg             = { workspace = true }
-tau-runtime         = { workspace = true }
 tau-ports           = { workspace = true }
 tau-plugin-protocol = { workspace = true }
+tau-runtime         = { workspace = true }
+tau-workflow        = { workspace = true }
 futures-core        = { workspace = true }
 base64             = { workspace = true }
 humantime          = "2"
