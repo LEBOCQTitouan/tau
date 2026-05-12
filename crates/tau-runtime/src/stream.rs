@@ -149,7 +149,7 @@ pub enum RunEvent {
 pub(crate) fn run_streaming_inner(
     backend: Arc<dyn DynLlmBackend>,
     agent_def: AgentDefinition,
-    _package_manifest: PackageManifest,
+    package_manifest: PackageManifest,
     history: Vec<Message>,
     initial_message: Message,
     options: RunOptions,
@@ -370,30 +370,227 @@ pub(crate) fn run_streaming_inner(
                         // Build the ToolResult.
                         let is_agent_spawn = tool_use.name.starts_with("agent.")
                             && tool_use.name.ends_with(".spawn");
+                        let agent_id_str = agent_def.id.to_string();
+                        // tau_domain::Value -> serde_json::Value via serde
+                        // (orchestration handlers parse serde_json::Value).
+                        let args_json = serde_json::to_value(&tool_use.input)
+                            .unwrap_or(serde_json::Value::Null);
                         let tool_result: ToolResult = if is_agent_spawn {
-                            // v1: recursive agent.spawn not yet wired. Returns
-                            // a self-explanatory ToolResult with is_error=true
-                            // so the agent's LLM gets immediate feedback.
-                            // Tracked as follow-up; see ADR-0023.
-                            ToolResult::new(
-                                vec![tau_ports::ToolContent::Text {
-                                    text: format!(
-                                        "agent.<kind>.spawn (name={}) is declared but recursive \
-                                         runtime dispatch is deferred to a follow-up PR. \
-                                         v1 ships task.* + run.* virtual tools only.",
-                                        tool_use.name
-                                    ),
-                                }],
-                                true,
-                            )
+                            // v1.1: recursive agent.<kind>.spawn dispatch.
+                            // Validate via validate_agent_spawn (parent's
+                            // Agent::Spawn allowed_kinds check + capability
+                            // subset law), then build a child agent_def +
+                            // child opts with the validated narrowed grant +
+                            // the same shared RunState, and recursively call
+                            // Runtime::run_with_history. Child's final
+                            // assistant text becomes the ToolResult body.
+                            //
+                            // If orchestration_runtime is None (single-agent
+                            // run that somehow saw a multi-agent virtual tool),
+                            // fail with is_error so the LLM can recover.
+                            match options.orchestration_runtime.as_ref() {
+                                None => ToolResult::new(
+                                    vec![tau_ports::ToolContent::Text {
+                                        text: "agent.<kind>.spawn: no orchestration runtime; \
+                                               this run was not launched via spawn_root_agent."
+                                            .into(),
+                                    }],
+                                    true,
+                                ),
+                                Some(child_runtime) => {
+                                    match crate::orchestration::validate_agent_spawn(
+                                        &tool_use.name,
+                                        &args_json,
+                                        &agent_id_str,
+                                        &granted_capabilities,
+                                    ) {
+                                        Err(e) => ToolResult::new(
+                                            vec![tau_ports::ToolContent::Text {
+                                                text: format!("{e}"),
+                                            }],
+                                            true,
+                                        ),
+                                        Ok(req) => {
+                                            // Record the spawn in the shared
+                                            // RunState's counter for budget.
+                                            {
+                                                let s = state_arc.lock().await;
+                                                s.record_agent_spawn();
+                                            }
+
+                                            // Build child agent id: parent id +
+                                            // 8-char ulid suffix, lowercased.
+                                            // Falls back to parent id on
+                                            // construction failure (defensive;
+                                            // shouldn't happen for compliant
+                                            // AgentIds).
+                                            let suffix = ulid::Ulid::new()
+                                                .to_string()
+                                                .to_lowercase();
+                                            let suffix_short: String = suffix
+                                                .chars()
+                                                .filter(|c| {
+                                                    c.is_ascii_lowercase()
+                                                        || c.is_ascii_digit()
+                                                })
+                                                .take(8)
+                                                .collect();
+                                            let child_id_str = format!(
+                                                "{}-{}",
+                                                agent_def.id.as_str(),
+                                                suffix_short
+                                            );
+                                            let child_id = std::str::FromStr::from_str(
+                                                &child_id_str,
+                                            )
+                                            .unwrap_or_else(|_| {
+                                                agent_def.id.clone()
+                                            });
+
+                                            // Build child def: inherit parent's
+                                            // package + llm_backend + system
+                                            // prompt; new id; display_name
+                                            // derived from the spawn kind.
+                                            let mut child_def =
+                                                tau_domain::AgentDefinition::new(
+                                                    child_id,
+                                                    format!("{} (spawn)", req.kind),
+                                                    agent_def.package.clone(),
+                                                    agent_def.llm_backend.clone(),
+                                                );
+                                            if let Some(sp) =
+                                                agent_def.system_prompt.clone()
+                                            {
+                                                child_def = child_def
+                                                    .with_system_prompt(sp);
+                                            }
+                                            child_def = child_def
+                                                .with_config(agent_def.config.clone());
+
+                                            // Build child opts: share state +
+                                            // runtime arc; override grant with
+                                                // validated child grant.
+                                            let child_opts = crate::RunOptions {
+                                                orchestration_state: Some(
+                                                    state_arc.clone(),
+                                                ),
+                                                orchestration_runtime: Some(
+                                                    child_runtime.clone(),
+                                                ),
+                                                granted_capabilities_override: Some(
+                                                    req.grant.clone(),
+                                                ),
+                                                ..crate::RunOptions::default()
+                                            };
+
+                                            // Initial user message for the child.
+                                            let child_msg = Message::new(
+                                                Address::User,
+                                                Address::Agent(AgentInstanceId::new()),
+                                                MessagePayload::Text {
+                                                    content: req.message,
+                                                },
+                                            );
+
+                                            // Emit a Spawn trace event before
+                                            // recursing, so the printer / log
+                                            // can pick it up.
+                                            {
+                                                let mut s = state_arc.lock().await;
+                                                let run_id = s.run_id.clone();
+                                                s.trace.emit(
+                                                    tau_ports::TraceEvent {
+                                                        id: ulid::Ulid::new()
+                                                            .to_string(),
+                                                        ts: chrono::Utc::now(),
+                                                        run_id,
+                                                        agent_id: Some(
+                                                            agent_id_str.clone(),
+                                                        ),
+                                                        kind:
+                                                            tau_ports::TraceEventKind::Spawn {
+                                                                child_id: child_id_str
+                                                                    .clone(),
+                                                                agent_kind:
+                                                                    req.kind.clone(),
+                                                                grant_size: req
+                                                                    .grant
+                                                                    .len(),
+                                                            },
+                                                    },
+                                                );
+                                            }
+
+                                            // Recurse. Box::pin for async
+                                            // recursion (the future would
+                                            // otherwise be infinitely sized).
+                                            let child_runtime_clone = child_runtime.clone();
+                                            let package_manifest_clone = package_manifest.clone();
+                                            let child_outcome_res: Result<
+                                                RunOutcome,
+                                                crate::error::RuntimeError,
+                                            > = Box::pin(async move {
+                                                child_runtime_clone
+                                                    .run_with_history(
+                                                        child_def,
+                                                        package_manifest_clone,
+                                                        Vec::new(),
+                                                        child_msg,
+                                                        child_opts,
+                                                    )
+                                                    .await
+                                            })
+                                            .await;
+
+                                            match child_outcome_res {
+                                                Ok(RunOutcome::Completed {
+                                                    final_message,
+                                                    ..
+                                                }) => {
+                                                    let text = match &final_message
+                                                        .payload
+                                                    {
+                                                        MessagePayload::Text {
+                                                            content,
+                                                        } => content.clone(),
+                                                        _ => {
+                                                            "<child run completed \
+                                                             without text payload>"
+                                                                .to_string()
+                                                        }
+                                                    };
+                                                    ToolResult::new(
+                                                        vec![
+                                                            tau_ports::ToolContent::Text {
+                                                                text,
+                                                            },
+                                                        ],
+                                                        false,
+                                                    )
+                                                }
+                                                Ok(other) => ToolResult::new(
+                                                    vec![tau_ports::ToolContent::Text {
+                                                        text: format!(
+                                                            "child run did not \
+                                                             complete: {other:?}"
+                                                        ),
+                                                    }],
+                                                    true,
+                                                ),
+                                                Err(e) => ToolResult::new(
+                                                    vec![tau_ports::ToolContent::Text {
+                                                        text: format!(
+                                                            "child run error: {e}"
+                                                        ),
+                                                    }],
+                                                    true,
+                                                ),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         } else {
-                            let agent_id_str = agent_def.id.to_string();
-                            // tau_domain::Value -> serde_json::Value via serde
-                            // (orchestration::dispatch consumes serde_json::Value
-                            // because that's the shape virtual-tool handlers
-                            // parse with `serde_json::from_value`).
-                            let args_json = serde_json::to_value(&tool_use.input)
-                                .unwrap_or(serde_json::Value::Null);
                             let dispatch_res = {
                                 let mut state = state_arc.lock().await;
                                 crate::orchestration::dispatch(

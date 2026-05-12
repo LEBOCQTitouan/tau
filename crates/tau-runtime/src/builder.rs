@@ -492,61 +492,90 @@ impl Runtime {
 
         info!(name = "runtime.run_streaming_started");
 
-        // Step 1: Apply capability override (defense-in-depth, mirrors
-        // `run_with_history`). Narrowing is enforced plugin-side via
+        // Step 1: Determine the effective grant set.
+        //
+        // Multi-agent orchestration v1.1: when a child run is launched
+        // recursively via agent.<kind>.spawn, the orchestration layer
+        // passes the validated child grant directly via
+        // `granted_capabilities_override`. The capability subset law
+        // (`check_capability_subset`) has already verified
+        // child.grant ⊆ parent.grant ⊆ manifest, so we trust it without
+        // re-running `compute_effective`. project_override is ignored on
+        // this path because the spawn arg already represents the final
+        // narrowed grant the child should see.
+        //
+        // Default path: apply project capability override (defense-in-depth,
+        // mirrors `run_with_history`). Narrowing is enforced plugin-side via
         // SessionContext.
-        let effective = crate::capability_override::compute_effective(
-            package_manifest.capabilities(),
-            &options.project_override,
-        )
-        .map_err(|e| {
-            warn!(
-                name = "runtime.streaming_capability_override_rejected",
-                agent_id = %agent_def.id,
-                package_id = %agent_def.package.name,
-                kind = %e.kind,
-                reason = %e.reason,
+        let (granted_for_kernel, granted_for_session, deny_entries) = if let Some(override_grant) =
+            options.granted_capabilities_override.as_ref()
+        {
+            debug!(
+                name = "runtime.streaming_capability_set_loaded_from_override",
+                count = override_grant.len(),
+                reason = "agent.<kind>.spawn child run",
             );
-            crate::error::RuntimeError::CapabilityOverrideExpands {
-                kind: e.kind,
-                reason: e.reason,
-            }
-        })?;
+            // On the override path, granted_for_session = granted_for_kernel and
+            // deny_entries is empty: per-capability narrowing via DenyEntry is
+            // not threaded through the agent.spawn args in v1.1.
+            let kernel: Vec<Capability> = override_grant.clone();
+            let session: Vec<Capability> = override_grant.clone();
+            (kernel, session, Vec::<DenyEntry>::new())
+        } else {
+            let effective = crate::capability_override::compute_effective(
+                package_manifest.capabilities(),
+                &options.project_override,
+            )
+            .map_err(|e| {
+                warn!(
+                    name = "runtime.streaming_capability_override_rejected",
+                    agent_id = %agent_def.id,
+                    package_id = %agent_def.package.name,
+                    kind = %e.kind,
+                    reason = %e.reason,
+                );
+                crate::error::RuntimeError::CapabilityOverrideExpands {
+                    kind: e.kind,
+                    reason: e.reason,
+                }
+            })?;
 
-        // Step 2: Build granted_for_kernel (structural package grants).
-        let granted_for_kernel: Vec<Capability> =
-            effective.iter().map(|e| e.source.clone()).collect();
+            let granted_for_kernel: Vec<Capability> =
+                effective.iter().map(|e| e.source.clone()).collect();
+            debug!(
+                name = "runtime.streaming_capability_set_loaded",
+                count = granted_for_kernel.len(),
+                overrides_applied = options.project_override.len(),
+            );
+
+            let granted_for_session: Vec<Capability> = effective
+                .iter()
+                .map(narrowed_capability_for_session)
+                .collect();
+
+            let deny_entries: Vec<DenyEntry> = effective
+                .iter()
+                .filter(|e| !e.deny.is_empty())
+                .map(|e| {
+                    let kind = match &e.source {
+                        Capability::Filesystem(tau_domain::FsCapability::Read { .. }) => "fs.read",
+                        Capability::Filesystem(tau_domain::FsCapability::Write { .. }) => {
+                            "fs.write"
+                        }
+                        Capability::Filesystem(tau_domain::FsCapability::Exec { .. }) => "fs.exec",
+                        Capability::Network(tau_domain::NetCapability::Http { .. }) => "net.http",
+                        Capability::Process(tau_domain::ProcessCapability::Spawn { .. }) => {
+                            "process.spawn"
+                        }
+                        _ => "unknown",
+                    };
+                    DenyEntry::new(kind.to_string(), e.deny.clone())
+                })
+                .collect();
+
+            (granted_for_kernel, granted_for_session, deny_entries)
+        };
         let granted: &[Capability] = &granted_for_kernel;
-        debug!(
-            name = "runtime.streaming_capability_set_loaded",
-            count = granted.len(),
-            overrides_applied = options.project_override.len(),
-        );
-
-        // Step 3: Build granted_for_session (narrowed view).
-        let granted_for_session: Vec<Capability> = effective
-            .iter()
-            .map(narrowed_capability_for_session)
-            .collect();
-
-        // Step 4: Build deny_entries.
-        let deny_entries: Vec<DenyEntry> = effective
-            .iter()
-            .filter(|e| !e.deny.is_empty())
-            .map(|e| {
-                let kind = match &e.source {
-                    Capability::Filesystem(tau_domain::FsCapability::Read { .. }) => "fs.read",
-                    Capability::Filesystem(tau_domain::FsCapability::Write { .. }) => "fs.write",
-                    Capability::Filesystem(tau_domain::FsCapability::Exec { .. }) => "fs.exec",
-                    Capability::Network(tau_domain::NetCapability::Http { .. }) => "net.http",
-                    Capability::Process(tau_domain::ProcessCapability::Spawn { .. }) => {
-                        "process.spawn"
-                    }
-                    _ => "unknown",
-                };
-                DenyEntry::new(kind.to_string(), e.deny.clone())
-            })
-            .collect();
 
         // Step 5: Resolve LLM backend.
         let backend = self
