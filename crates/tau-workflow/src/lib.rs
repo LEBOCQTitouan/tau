@@ -8,3 +8,9 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+
+pub mod error;
+pub mod persistence;
+
+pub use error::WorkflowError;
+pub use persistence::{run_log_path, StepRecord, StepStatus};
