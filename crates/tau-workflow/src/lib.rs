@@ -10,7 +10,9 @@
 #![warn(missing_docs)]
 
 pub mod error;
+pub mod model;
 pub mod persistence;
 
 pub use error::WorkflowError;
+pub use model::{Step, StepKind, Workflow};
 pub use persistence::{run_log_path, StepRecord, StepStatus};
