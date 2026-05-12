@@ -235,6 +235,71 @@ impl Runtime {
         )
         .await
     }
+
+    /// Invoke a single tool by name without engaging the LLM loop.
+    ///
+    /// Bypasses the multi-turn agent driver — useful for callers that
+    /// want to compose tools directly (e.g., `tau-workflow`'s
+    /// `tool.call` step kind). The tool's capability requirements are
+    /// still checked against the `agent_def`'s package grant set, so
+    /// the caller must pass the workflow's default-agent definition.
+    ///
+    /// Follows the same sequence as the run loop's tool-dispatch arm:
+    /// `resolve_tool → capability check → init → invoke → teardown`.
+    ///
+    /// # Errors
+    ///
+    /// - [`RuntimeError::ToolNotRegistered`] — the tool name is unknown.
+    /// - [`RuntimeError::Internal`] — the agent's package does not grant
+    ///   a capability required by the tool (capability-denied path; the
+    ///   run loop surfaces this as `Ok(RunOutcome::Failed)` instead, but
+    ///   the direct-dispatch caller has no `RunOutcome` envelope).
+    /// - [`RuntimeError::Tool`] — the tool's `init`, `invoke`, or
+    ///   `teardown` returned a [`tau_ports::ToolError`].
+    pub async fn invoke_tool(
+        &self,
+        agent_def: &AgentDefinition,
+        package_manifest: &PackageManifest,
+        tool_name: &str,
+        args: tau_domain::Value,
+    ) -> Result<tau_ports::ToolResult, RuntimeError> {
+        use tau_domain::AgentInstanceId;
+        use tau_ports::SessionContext;
+
+        let tool = self.resolve_tool(tool_name)?.clone();
+
+        // Capability check: mirror the run loop's structural check.
+        // If the agent's package grants are insufficient, surface as
+        // RuntimeError::Internal (no CapabilityDenied variant exists on
+        // RuntimeError; the run loop returns Ok(RunOutcome::Failed) in
+        // the same situation, but invoke_tool has no RunOutcome envelope).
+        let granted: Vec<tau_domain::Capability> = package_manifest.capabilities().to_vec();
+        let required: &[tau_domain::Capability] = tool.capabilities();
+        if let Some(missing) = crate::capability::check_capabilities(&granted, required) {
+            let denial = crate::error::CapabilityDenial {
+                agent_id: agent_def.id.to_string(),
+                package_id: agent_def.package.name.to_string(),
+                tool_name: tool_name.to_owned(),
+                required_kind: crate::run::capability_kind_str(missing),
+                required_detail: format!("{missing:?}"),
+            };
+            return Err(RuntimeError::Internal {
+                message: format!("capability denied: {denial}"),
+            });
+        }
+
+        // Build a minimal SessionContext (no deadline, no deny entries).
+        // invoke_tool is a direct-dispatch path — callers that need
+        // capability narrowing or deny carve-outs should use run().
+        let ctx = SessionContext::new(AgentInstanceId::new(), uuid::Uuid::new_v4(), None)
+            .with_granted_capabilities(granted);
+
+        tool.init(ctx.clone()).await?;
+        let result = tool.invoke(&ctx, &mut (), args).await;
+        // teardown best-effort: don't mask invoke's error if both fail.
+        let _ = tool.teardown(()).await;
+        Ok(result?)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -691,5 +756,117 @@ paths = ["**"]
             params,
         };
         assert_eq!(capability_kind_str(&cap), "mcp.tool.use");
+    }
+
+    // -------------------- invoke_tool --------------------
+
+    #[tokio::test]
+    async fn invoke_tool_dispatches_to_registered_tool_and_returns_result() {
+        use std::str::FromStr;
+        use tau_domain::{
+            AgentId, PackageId, PackageName, UncheckedManifest, Version,
+        };
+        use tau_ports::fixtures::{make_tool_result, make_tool_spec, MockLlmBackend, MockTool};
+        use tau_ports::ToolContent;
+
+        let spec = make_tool_spec(
+            "echo".to_string(),
+            "echo tool".to_string(),
+            Value::Object(Default::default()),
+        );
+        let canned_result = make_tool_result(
+            vec![ToolContent::Text {
+                text: "pong".to_string(),
+            }],
+            false,
+        );
+        let tool = MockTool::new("echo", spec).with_result(canned_result.clone());
+
+        let runtime = crate::builder::Runtime::builder()
+            .with_llm_backend(MockLlmBackend::new("gpt-4"))
+            .with_tool(tool)
+            .build()
+            .expect("build runtime");
+
+        let pkg = PackageId::new(
+            PackageName::from_str("test-pkg").unwrap(),
+            Version::parse("0.1.0").unwrap(),
+        );
+        let agent_def = AgentDefinition::new(
+            AgentId::from_str("test-agent").unwrap(),
+            "test".to_string(),
+            pkg,
+            PackageName::from_str("gpt-4").unwrap(),
+        );
+
+        let toml_str = r#"
+            name = "test-pkg"
+            version = "0.1.0"
+            description = "test package"
+            authors = []
+            source = "https://example.com/test.git"
+            kind = "tool"
+            dependencies = []
+            capabilities = []
+        "#;
+        let unchecked: UncheckedManifest = toml::from_str(toml_str).unwrap();
+        let manifest = unchecked.validate().unwrap();
+
+        let result = runtime
+            .invoke_tool(&agent_def, &manifest, "echo", Value::Null)
+            .await
+            .expect("invoke_tool must succeed");
+
+        assert!(!result.is_error);
+        assert_eq!(result.content.len(), 1);
+        match &result.content[0] {
+            ToolContent::Text { text } => assert_eq!(text, "pong"),
+            other => panic!("expected Text content, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn invoke_tool_returns_err_for_unknown_tool() {
+        use std::str::FromStr;
+        use tau_domain::{AgentId, PackageId, PackageName, UncheckedManifest, Version};
+        use tau_ports::fixtures::MockLlmBackend;
+
+        let runtime = crate::builder::Runtime::builder()
+            .with_llm_backend(MockLlmBackend::new("gpt-4"))
+            .build()
+            .expect("build runtime");
+
+        let pkg = PackageId::new(
+            PackageName::from_str("test-pkg").unwrap(),
+            Version::parse("0.1.0").unwrap(),
+        );
+        let agent_def = AgentDefinition::new(
+            AgentId::from_str("test-agent").unwrap(),
+            "test".to_string(),
+            pkg,
+            PackageName::from_str("gpt-4").unwrap(),
+        );
+        let toml_str = r#"
+            name = "test-pkg"
+            version = "0.1.0"
+            description = "test package"
+            authors = []
+            source = "https://example.com/test.git"
+            kind = "tool"
+            dependencies = []
+            capabilities = []
+        "#;
+        let unchecked: UncheckedManifest = toml::from_str(toml_str).unwrap();
+        let manifest = unchecked.validate().unwrap();
+
+        let err = runtime
+            .invoke_tool(&agent_def, &manifest, "no-such-tool", Value::Null)
+            .await
+            .expect_err("should return ToolNotRegistered");
+
+        assert!(
+            matches!(err, RuntimeError::ToolNotRegistered { .. }),
+            "expected ToolNotRegistered, got {err:?}"
+        );
     }
 }
