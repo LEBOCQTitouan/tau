@@ -20,3 +20,4 @@ pub mod session;
 pub mod uninstall;
 pub mod update;
 pub mod verify;
+pub mod workflow;

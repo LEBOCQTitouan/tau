@@ -109,6 +109,9 @@ pub enum Command {
     Session(SessionArgs),
     /// Sandbox configuration and diagnostics.
     Sandbox(SandboxArgs),
+    /// Workflow subcommand group (list, run, log, resume).
+    #[command(subcommand)]
+    Workflow(WorkflowSubcommand),
 }
 
 /// `tau plugin <action>` — debug-tier helpers per spec §9.
@@ -484,6 +487,49 @@ pub enum SandboxRequiredTierArg {
     Light,
     /// Full strict tier required.
     Strict,
+}
+
+/// `tau workflow <subcommand>` variants.
+#[derive(Debug, clap::Subcommand)]
+pub enum WorkflowSubcommand {
+    /// List workflows declared under workflows/ in the current project.
+    List,
+    /// Run a workflow.
+    Run(WorkflowRunArgs),
+    /// Pretty-print a workflow run's JSONL log.
+    Log(WorkflowLogArgs),
+    /// Resume a workflow run from its saved JSONL log.
+    Resume(WorkflowResumeArgs),
+}
+
+/// Arguments for `tau workflow run`.
+#[derive(Debug, clap::Args)]
+pub struct WorkflowRunArgs {
+    /// Workflow name (matches workflows/<name>.toml).
+    pub name: String,
+    /// Input string passed to the first step as ${input}.
+    #[arg(long, default_value = "")]
+    pub input: String,
+}
+
+/// Arguments for `tau workflow log`.
+#[derive(Debug, clap::Args)]
+pub struct WorkflowLogArgs {
+    /// Run id (ULID) from a prior `tau workflow run`.
+    pub run_id: String,
+    /// Emit raw JSONL lines instead of the pretty view.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `tau workflow resume`.
+#[derive(Debug, clap::Args)]
+pub struct WorkflowResumeArgs {
+    /// Run id (ULID) of the prior incomplete run.
+    pub run_id: String,
+    /// Override drift detection (workflow file changed since the original run).
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[cfg(test)]

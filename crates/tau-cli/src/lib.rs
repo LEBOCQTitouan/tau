@@ -112,5 +112,6 @@ async fn dispatch(cli: cli::Cli) -> anyhow::Result<()> {
         }
         cli::Command::Session(args) => cmd::session::run(&args, &mut output).await,
         cli::Command::Sandbox(args) => cmd::sandbox::run(&args, &mut output).await,
+        cli::Command::Workflow(sub) => cmd::workflow::dispatch(sub, &mut output).await,
     }
 }
