@@ -36,25 +36,36 @@ pub fn is_virtual(tool_name: &str) -> bool {
 /// path to gate the call before invoking the handler.
 pub fn required_capability(tool_name: &str) -> Capability {
     match tool_name {
-        "task.list" | "task.get" => Capability::TaskList { mode: "read".into() },
-        "task.create"
-        | "task.claim"
-        | "task.heartbeat"
-        | "task.release"
-        | "task.update"
-        | "task.complete"
-        | "task.fail" => Capability::TaskList { mode: "write".into() },
-        "task.discard" => Capability::TaskList { mode: "manage".into() },
-        "run.note" => Capability::Plan { mode: "write".into() },
-        "run.plan" => Capability::Plan { mode: "read".into() },
+        "task.list" | "task.get" => Capability::TaskList {
+            mode: "read".into(),
+        },
+        "task.create" | "task.claim" | "task.heartbeat" | "task.release" | "task.update"
+        | "task.complete" | "task.fail" => Capability::TaskList {
+            mode: "write".into(),
+        },
+        "task.discard" => Capability::TaskList {
+            mode: "manage".into(),
+        },
+        "run.note" => Capability::Plan {
+            mode: "write".into(),
+        },
+        "run.plan" => Capability::Plan {
+            mode: "read".into(),
+        },
         s if s.starts_with("agent.") && s.ends_with(".spawn") => {
             // The Spawn capability's allowed_kinds list is checked in
             // validate_agent_spawn (Task 9), not here.
             // Use serde round-trip to construct because AgentCapability::Spawn is #[non_exhaustive].
             serde_json::from_value(serde_json::json!({"kind": "agent.spawn", "allowed_kinds": []}))
-                .unwrap_or(Capability::Custom { name: "agent.spawn".into(), params: Default::default() })
+                .unwrap_or(Capability::Custom {
+                    name: "agent.spawn".into(),
+                    params: Default::default(),
+                })
         }
-        _ => Capability::Custom { name: tool_name.into(), params: Default::default() },
+        _ => Capability::Custom {
+            name: tool_name.into(),
+            params: Default::default(),
+        },
     }
 }
 
@@ -137,12 +148,13 @@ fn handle_task_claim(
     agent_id: &AgentId,
     state: &mut RunState,
 ) -> Result<Value, OrchestrationError> {
-    let a: TaskIdArg =
-        serde_json::from_value(args).map_err(|e| OrchestrationError::ArgError {
-            tool: "task.claim".into(),
-            detail: format!("arg parse error: {e}"),
-        })?;
-    state.task_list.claim(&a.task_id, agent_id.clone(), Utc::now())?;
+    let a: TaskIdArg = serde_json::from_value(args).map_err(|e| OrchestrationError::ArgError {
+        tool: "task.claim".into(),
+        detail: format!("arg parse error: {e}"),
+    })?;
+    state
+        .task_list
+        .claim(&a.task_id, agent_id.clone(), Utc::now())?;
     Ok(serde_json::json!({"ok": true}))
 }
 
@@ -151,12 +163,13 @@ fn handle_task_heartbeat(
     agent_id: &AgentId,
     state: &mut RunState,
 ) -> Result<Value, OrchestrationError> {
-    let a: TaskIdArg =
-        serde_json::from_value(args).map_err(|e| OrchestrationError::ArgError {
-            tool: "task.heartbeat".into(),
-            detail: format!("arg parse error: {e}"),
-        })?;
-    state.task_list.heartbeat(&a.task_id, agent_id, Utc::now())?;
+    let a: TaskIdArg = serde_json::from_value(args).map_err(|e| OrchestrationError::ArgError {
+        tool: "task.heartbeat".into(),
+        detail: format!("arg parse error: {e}"),
+    })?;
+    state
+        .task_list
+        .heartbeat(&a.task_id, agent_id, Utc::now())?;
     Ok(serde_json::json!({"ok": true}))
 }
 
@@ -165,11 +178,10 @@ fn handle_task_release(
     agent_id: &AgentId,
     state: &mut RunState,
 ) -> Result<Value, OrchestrationError> {
-    let a: TaskIdArg =
-        serde_json::from_value(args).map_err(|e| OrchestrationError::ArgError {
-            tool: "task.release".into(),
-            detail: format!("arg parse error: {e}"),
-        })?;
+    let a: TaskIdArg = serde_json::from_value(args).map_err(|e| OrchestrationError::ArgError {
+        tool: "task.release".into(),
+        detail: format!("arg parse error: {e}"),
+    })?;
     state.task_list.release(&a.task_id, agent_id, Utc::now())?;
     Ok(serde_json::json!({"ok": true}))
 }
@@ -193,7 +205,9 @@ fn handle_task_update(
             tool: "task.update".into(),
             detail: format!("arg parse error: {e}"),
         })?;
-    state.task_list.update(&a.task_id, agent_id, a.status, a.notes, Utc::now())?;
+    state
+        .task_list
+        .update(&a.task_id, agent_id, a.status, a.notes, Utc::now())?;
     Ok(serde_json::json!({"ok": true}))
 }
 
@@ -213,7 +227,9 @@ fn handle_task_complete(
             tool: "task.complete".into(),
             detail: format!("arg parse error: {e}"),
         })?;
-    state.task_list.complete(&a.task_id, agent_id, a.result_summary, Utc::now())?;
+    state
+        .task_list
+        .complete(&a.task_id, agent_id, a.result_summary, Utc::now())?;
     Ok(serde_json::json!({"ok": true}))
 }
 
@@ -233,7 +249,9 @@ fn handle_task_fail(
             tool: "task.fail".into(),
             detail: format!("arg parse error: {e}"),
         })?;
-    state.task_list.fail(&a.task_id, agent_id, a.error, Utc::now())?;
+    state
+        .task_list
+        .fail(&a.task_id, agent_id, a.error, Utc::now())?;
     Ok(serde_json::json!({"ok": true}))
 }
 
@@ -253,7 +271,9 @@ fn handle_task_discard(
             tool: "task.discard".into(),
             detail: format!("arg parse error: {e}"),
         })?;
-    state.task_list.discard(&a.task_id, agent_id, a.reason, Utc::now())?;
+    state
+        .task_list
+        .discard(&a.task_id, agent_id, a.reason, Utc::now())?;
     Ok(serde_json::json!({"ok": true}))
 }
 
@@ -264,11 +284,10 @@ fn handle_task_list(args: Value, state: &mut RunState) -> Result<Value, Orchestr
 }
 
 fn handle_task_get(args: Value, state: &mut RunState) -> Result<Value, OrchestrationError> {
-    let a: TaskIdArg =
-        serde_json::from_value(args).map_err(|e| OrchestrationError::ArgError {
-            tool: "task.get".into(),
-            detail: format!("arg parse error: {e}"),
-        })?;
+    let a: TaskIdArg = serde_json::from_value(args).map_err(|e| OrchestrationError::ArgError {
+        tool: "task.get".into(),
+        detail: format!("arg parse error: {e}"),
+    })?;
     let task = state.task_list.get(&a.task_id).cloned();
     Ok(serde_json::json!({"task": task}))
 }
@@ -431,13 +450,11 @@ mod tests {
     fn task_create_then_get_round_trip() {
         let mut state = new_state();
         let create_args = serde_json::json!({"description": "do thing"});
-        let result =
-            dispatch("task.create", create_args, &"agent_x".into(), &mut state).unwrap();
+        let result = dispatch("task.create", create_args, &"agent_x".into(), &mut state).unwrap();
         let task_id = result["task_id"].as_str().unwrap().to_string();
 
         let get_args = serde_json::json!({"task_id": task_id});
-        let get_result =
-            dispatch("task.get", get_args, &"agent_x".into(), &mut state).unwrap();
+        let get_result = dispatch("task.get", get_args, &"agent_x".into(), &mut state).unwrap();
         assert!(get_result["task"].is_object());
         assert_eq!(get_result["task"]["description"], "do thing");
     }
@@ -531,9 +548,8 @@ mod tests {
         }))
         .unwrap()];
         let args = serde_json::json!({"message": "hi"});
-        let err =
-            validate_agent_spawn("agent.writer.spawn", &args, &"p".into(), &parent_grant)
-                .unwrap_err();
+        let err = validate_agent_spawn("agent.writer.spawn", &args, &"p".into(), &parent_grant)
+            .unwrap_err();
         assert!(matches!(err, OrchestrationError::SpawnNotAuthorized { .. }));
     }
 
@@ -546,19 +562,24 @@ mod tests {
         }))
         .unwrap()];
         let args = serde_json::json!({"message": "hi"});
-        let req =
-            validate_agent_spawn("agent.researcher.spawn", &args, &"p".into(), &parent_grant)
-                .unwrap();
+        let req = validate_agent_spawn("agent.researcher.spawn", &args, &"p".into(), &parent_grant)
+            .unwrap();
         assert_eq!(req.kind, "researcher");
         assert_eq!(req.message, "hi");
     }
 
     #[test]
     fn capability_subset_rejects_extras() {
-        let parent = vec![Capability::TaskList { mode: "read".into() }];
+        let parent = vec![Capability::TaskList {
+            mode: "read".into(),
+        }];
         let child = vec![
-            Capability::TaskList { mode: "read".into() },
-            Capability::TaskList { mode: "write".into() }, // not in parent
+            Capability::TaskList {
+                mode: "read".into(),
+            },
+            Capability::TaskList {
+                mode: "write".into(),
+            }, // not in parent
         ];
         let err = check_capability_subset(&parent, &child).unwrap_err();
         assert!(matches!(err, OrchestrationError::GrantNotSubset { .. }));
@@ -567,10 +588,16 @@ mod tests {
     #[test]
     fn capability_subset_allows_exact_subset() {
         let parent = vec![
-            Capability::TaskList { mode: "read".into() },
-            Capability::TaskList { mode: "write".into() },
+            Capability::TaskList {
+                mode: "read".into(),
+            },
+            Capability::TaskList {
+                mode: "write".into(),
+            },
         ];
-        let child = vec![Capability::TaskList { mode: "read".into() }];
+        let child = vec![Capability::TaskList {
+            mode: "read".into(),
+        }];
         check_capability_subset(&parent, &child).unwrap();
     }
 }

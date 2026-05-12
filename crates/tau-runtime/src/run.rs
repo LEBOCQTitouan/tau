@@ -332,19 +332,17 @@ impl Runtime {
         let root_agent_id = root_agent_def.id.to_string();
         let now = chrono::Utc::now();
 
-        let mut state =
-            crate::orchestration::run_state::RunState::new(
-                run_id.clone(),
-                root_agent_id,
-                budget,
-                now,
-            );
+        let mut state = crate::orchestration::run_state::RunState::new(
+            run_id.clone(),
+            root_agent_id,
+            budget,
+            now,
+        );
 
         // Subscribe a JSONL writer before wrapping state in Arc<Mutex<>>.
         let log_path = crate::orchestration::persistence::run_log_path(&scope_root, &run_id);
         let writer_rx = state.trace.subscribe();
-        let _writer_handle =
-            crate::orchestration::persistence::spawn_writer(log_path, writer_rx);
+        let _writer_handle = crate::orchestration::persistence::spawn_writer(log_path, writer_rx);
 
         let state_arc = Arc::new(Mutex::new(state));
 

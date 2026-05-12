@@ -97,12 +97,18 @@ impl TaskList {
         agent: AgentId,
         now: DateTime<Utc>,
     ) -> Result<(), OrchestrationError> {
-        let t = self.by_id.get_mut(task_id).ok_or_else(|| {
-            OrchestrationError::TaskNotFound { task: task_id.clone() }
-        })?;
+        let t = self
+            .by_id
+            .get_mut(task_id)
+            .ok_or_else(|| OrchestrationError::TaskNotFound {
+                task: task_id.clone(),
+            })?;
 
         // Reject terminal states.
-        if matches!(t.status, TaskStatus::Done | TaskStatus::Failed | TaskStatus::Discarded) {
+        if matches!(
+            t.status,
+            TaskStatus::Done | TaskStatus::Failed | TaskStatus::Discarded
+        ) {
             return Err(OrchestrationError::InvalidTaskTransition {
                 task: task_id.clone(),
                 target: "claimed".into(),
@@ -139,9 +145,12 @@ impl TaskList {
         agent: &AgentId,
         now: DateTime<Utc>,
     ) -> Result<(), OrchestrationError> {
-        let t = self.by_id.get_mut(task_id).ok_or_else(|| {
-            OrchestrationError::TaskNotFound { task: task_id.clone() }
-        })?;
+        let t = self
+            .by_id
+            .get_mut(task_id)
+            .ok_or_else(|| OrchestrationError::TaskNotFound {
+                task: task_id.clone(),
+            })?;
 
         if t.owner.as_ref() != Some(agent) {
             return Err(OrchestrationError::NotTaskOwner {
@@ -167,9 +176,12 @@ impl TaskList {
         agent: &AgentId,
         now: DateTime<Utc>,
     ) -> Result<(), OrchestrationError> {
-        let t = self.by_id.get_mut(task_id).ok_or_else(|| {
-            OrchestrationError::TaskNotFound { task: task_id.clone() }
-        })?;
+        let t = self
+            .by_id
+            .get_mut(task_id)
+            .ok_or_else(|| OrchestrationError::TaskNotFound {
+                task: task_id.clone(),
+            })?;
 
         if t.owner.as_ref() != Some(agent) {
             return Err(OrchestrationError::NotTaskOwner {
@@ -201,9 +213,12 @@ impl TaskList {
         notes: Option<String>,
         now: DateTime<Utc>,
     ) -> Result<(), OrchestrationError> {
-        let t = self.by_id.get_mut(task_id).ok_or_else(|| {
-            OrchestrationError::TaskNotFound { task: task_id.clone() }
-        })?;
+        let t = self
+            .by_id
+            .get_mut(task_id)
+            .ok_or_else(|| OrchestrationError::TaskNotFound {
+                task: task_id.clone(),
+            })?;
 
         if t.owner.as_ref() != Some(agent) {
             return Err(OrchestrationError::NotTaskOwner {
@@ -240,9 +255,12 @@ impl TaskList {
         result_summary: String,
         now: DateTime<Utc>,
     ) -> Result<(), OrchestrationError> {
-        let t = self.by_id.get_mut(task_id).ok_or_else(|| {
-            OrchestrationError::TaskNotFound { task: task_id.clone() }
-        })?;
+        let t = self
+            .by_id
+            .get_mut(task_id)
+            .ok_or_else(|| OrchestrationError::TaskNotFound {
+                task: task_id.clone(),
+            })?;
 
         if t.owner.as_ref() != Some(agent) {
             return Err(OrchestrationError::NotTaskOwner {
@@ -272,9 +290,12 @@ impl TaskList {
         error: String,
         now: DateTime<Utc>,
     ) -> Result<(), OrchestrationError> {
-        let t = self.by_id.get_mut(task_id).ok_or_else(|| {
-            OrchestrationError::TaskNotFound { task: task_id.clone() }
-        })?;
+        let t = self
+            .by_id
+            .get_mut(task_id)
+            .ok_or_else(|| OrchestrationError::TaskNotFound {
+                task: task_id.clone(),
+            })?;
 
         if t.owner.as_ref() != Some(agent) {
             return Err(OrchestrationError::NotTaskOwner {
@@ -305,9 +326,12 @@ impl TaskList {
         reason: String,
         now: DateTime<Utc>,
     ) -> Result<(), OrchestrationError> {
-        let t = self.by_id.get_mut(task_id).ok_or_else(|| {
-            OrchestrationError::TaskNotFound { task: task_id.clone() }
-        })?;
+        let t = self
+            .by_id
+            .get_mut(task_id)
+            .ok_or_else(|| OrchestrationError::TaskNotFound {
+                task: task_id.clone(),
+            })?;
 
         t.status = TaskStatus::Discarded;
         t.owner = None;
@@ -449,9 +473,7 @@ mod tests {
             .create("t".into(), "a".into(), None, None, now_at(0))
             .unwrap();
         tl.claim(&id, "worker_1".into(), now_at(0)).unwrap();
-        let err = tl
-            .claim(&id, "worker_2".into(), now_at(60))
-            .unwrap_err();
+        let err = tl.claim(&id, "worker_2".into(), now_at(60)).unwrap_err();
         assert!(matches!(err, OrchestrationError::TaskLocked { .. }));
     }
 
@@ -488,9 +510,7 @@ mod tests {
             .create("t".into(), "a".into(), None, None, now_at(0))
             .unwrap();
         tl.claim(&id, "w1".into(), now_at(0)).unwrap();
-        let err = tl
-            .heartbeat(&id, &"w2".into(), now_at(60))
-            .unwrap_err();
+        let err = tl.heartbeat(&id, &"w2".into(), now_at(60)).unwrap_err();
         assert!(matches!(err, OrchestrationError::NotTaskOwner { .. }));
     }
 
@@ -519,7 +539,8 @@ mod tests {
             .create("b".into(), "x".into(), None, None, now_at(0))
             .unwrap();
         tl.claim(&a, "w".into(), now_at(0)).unwrap();
-        tl.complete(&a, &"w".into(), "ok".into(), now_at(10)).unwrap();
+        tl.complete(&a, &"w".into(), "ok".into(), now_at(10))
+            .unwrap();
         let done = tl.list(&TaskListFilter {
             status: Some(TaskStatus::Done),
             ..Default::default()
@@ -557,7 +578,8 @@ mod tests {
             .unwrap();
         assert!(!tl.all_terminal());
         tl.claim(&a, "w".into(), now_at(0)).unwrap();
-        tl.complete(&a, &"w".into(), "ok".into(), now_at(10)).unwrap();
+        tl.complete(&a, &"w".into(), "ok".into(), now_at(10))
+            .unwrap();
         assert!(!tl.all_terminal());
         tl.claim(&b, "w".into(), now_at(20)).unwrap();
         tl.fail(&b, &"w".into(), "nope".into(), now_at(30)).unwrap();

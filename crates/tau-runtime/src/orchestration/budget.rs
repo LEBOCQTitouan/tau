@@ -42,7 +42,9 @@ impl BudgetWatchdog {
             }
         }
         if let Some(limit) = state.budget.max_total_agents {
-            let spawned = state.agents_spawned.load(std::sync::atomic::Ordering::Relaxed);
+            let spawned = state
+                .agents_spawned
+                .load(std::sync::atomic::Ordering::Relaxed);
             if spawned > limit {
                 return Err(OrchestrationError::BudgetExceeded {
                     budget: "max_total_agents".into(),

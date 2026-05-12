@@ -68,9 +68,8 @@ pub struct RunOptions {
     /// (`task.*`, `run.*`, `agent.<kind>.spawn`) are intercepted before
     /// plugin dispatch and routed through `crate::orchestration`.
     /// Callers using single-agent `Runtime::run` should leave this `None`.
-    pub orchestration_state: Option<
-        std::sync::Arc<tokio::sync::Mutex<crate::orchestration::run_state::RunState>>,
-    >,
+    pub orchestration_state:
+        Option<std::sync::Arc<tokio::sync::Mutex<crate::orchestration::run_state::RunState>>>,
 }
 
 impl std::fmt::Debug for RunOptions {
@@ -79,7 +78,10 @@ impl std::fmt::Debug for RunOptions {
             .field("max_turns", &self.max_turns)
             .field("trace_label", &self.trace_label)
             .field("project_override", &self.project_override)
-            .field("orchestration_state", &self.orchestration_state.as_ref().map(|_| "<RunState>"))
+            .field(
+                "orchestration_state",
+                &self.orchestration_state.as_ref().map(|_| "<RunState>"),
+            )
             .finish()
     }
 }

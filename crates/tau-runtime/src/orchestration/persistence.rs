@@ -17,7 +17,10 @@ use crate::orchestration::error::OrchestrationError;
 
 /// Build the JSONL path: `<scope_root>/.tau/runs/<run_id>.jsonl`.
 pub fn run_log_path(scope_root: &Path, run_id: &RunId) -> PathBuf {
-    scope_root.join(".tau").join("runs").join(format!("{run_id}.jsonl"))
+    scope_root
+        .join(".tau")
+        .join("runs")
+        .join(format!("{run_id}.jsonl"))
 }
 
 /// Wrapped line shape for the JSONL — tagged union for forward-compat.
@@ -102,7 +105,7 @@ pub async fn replay(path: &Path) -> Result<Vec<TraceEvent>, OrchestrationError> 
         match serde_json::from_str::<RunLogLine>(&line) {
             Ok(RunLogLine::TraceEvent { event }) => events.push(event),
             Ok(RunLogLine::TaskMutation { .. }) => {} // reserved
-            Err(_) => break, // truncated trailing line; stop here
+            Err(_) => break,                          // truncated trailing line; stop here
         }
     }
     Ok(events)

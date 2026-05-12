@@ -16,11 +16,21 @@ use tau_runtime::orchestration::{
 
 fn arb_capability() -> impl Strategy<Value = Capability> {
     prop_oneof![
-        Just(Capability::TaskList { mode: "read".into() }),
-        Just(Capability::TaskList { mode: "write".into() }),
-        Just(Capability::TaskList { mode: "manage".into() }),
-        Just(Capability::Plan { mode: "read".into() }),
-        Just(Capability::Plan { mode: "write".into() }),
+        Just(Capability::TaskList {
+            mode: "read".into()
+        }),
+        Just(Capability::TaskList {
+            mode: "write".into()
+        }),
+        Just(Capability::TaskList {
+            mode: "manage".into()
+        }),
+        Just(Capability::Plan {
+            mode: "read".into()
+        }),
+        Just(Capability::Plan {
+            mode: "write".into()
+        }),
         // AgentCapability::Spawn is #[non_exhaustive] — construct via serde
         // to bypass the struct-literal restriction outside tau-domain.
         prop::collection::vec("[a-z]{3,8}", 1..4).prop_map(|kinds| {
