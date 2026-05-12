@@ -344,3 +344,107 @@ fn resolve_args(
         other => Ok(other.clone()),
     }
 }
+
+/// Compare a workflow's current step ids against a log's recorded step
+/// ids. Returns Err(DriftDetected) when they diverge; returns Ok(()) when
+/// the log's ids are a prefix of the workflow's (the resume case).
+///
+/// "Prefix match" means: every record in `logged_records` (in order)
+/// matches the corresponding step in `workflow.steps`. Trailing steps in
+/// the workflow that aren't yet in the log are fine (that's the work
+/// the resume will do).
+pub fn check_drift(
+    workflow: &Workflow,
+    logged_records: &[StepRecord],
+) -> Result<(), WorkflowError> {
+    if logged_records.len() > workflow.steps.len() {
+        return Err(WorkflowError::DriftDetected {
+            logged: logged_records.iter().map(|r| r.step_id.clone()).collect(),
+            current: workflow.steps.iter().map(|s| s.id.clone()).collect(),
+        });
+    }
+    for (idx, record) in logged_records.iter().enumerate() {
+        if workflow.steps[idx].id != record.step_id {
+            return Err(WorkflowError::DriftDetected {
+                logged: logged_records.iter().map(|r| r.step_id.clone()).collect(),
+                current: workflow.steps.iter().map(|s| s.id.clone()).collect(),
+            });
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod drift_tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn step(id: &str, agent: &str) -> crate::model::Step {
+        crate::model::Step {
+            id: id.into(),
+            kind: crate::model::StepKind::AgentRun {
+                agent: agent.into(),
+                input: String::new(),
+            },
+        }
+    }
+
+    fn workflow_with_steps(steps: Vec<crate::model::Step>) -> Workflow {
+        Workflow {
+            name: "t".into(),
+            source_path: PathBuf::from("t.toml"),
+            description: None,
+            default_agent: None,
+            steps,
+        }
+    }
+
+    fn record(idx: usize, step_id: &str) -> StepRecord {
+        let now = Utc::now();
+        StepRecord {
+            ts: now,
+            run_id: "01HK".into(),
+            step_id: step_id.into(),
+            step_index: idx,
+            kind: "agent.run".into(),
+            input: String::new(),
+            output: String::new(),
+            started_at: now,
+            ended_at: now,
+            duration_ms: 0,
+            status: StepStatus::Ok,
+            error: None,
+            detail: None,
+        }
+    }
+
+    #[test]
+    fn prefix_match_is_ok() {
+        let wf = workflow_with_steps(vec![step("a", "x"), step("b", "y"), step("c", "z")]);
+        let records = vec![record(0, "a"), record(1, "b")];
+        check_drift(&wf, &records).unwrap();
+    }
+
+    #[test]
+    fn full_match_is_ok() {
+        let wf = workflow_with_steps(vec![step("a", "x")]);
+        let records = vec![record(0, "a")];
+        check_drift(&wf, &records).unwrap();
+    }
+
+    #[test]
+    fn mismatched_id_is_drift() {
+        let wf = workflow_with_steps(vec![step("a", "x"), step("b", "y")]);
+        let records = vec![record(0, "a"), record(1, "WRONG")];
+        let err = check_drift(&wf, &records).unwrap_err();
+        assert!(matches!(err, WorkflowError::DriftDetected { .. }));
+    }
+
+    #[test]
+    fn extra_logged_records_are_drift() {
+        let wf = workflow_with_steps(vec![step("a", "x")]);
+        let records = vec![record(0, "a"), record(1, "b")];
+        let err = check_drift(&wf, &records).unwrap_err();
+        assert!(matches!(err, WorkflowError::DriftDetected { .. }));
+    }
+}

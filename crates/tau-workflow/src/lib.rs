@@ -18,5 +18,5 @@ pub mod template;
 pub use error::WorkflowError;
 pub use model::{Step, StepKind, Workflow};
 pub use persistence::{replay, run_log_path, RunLog, StepRecord, StepStatus};
-pub use runner::{RunOpts, RunOutcome, Runner};
+pub use runner::{check_drift, RunOpts, RunOutcome, Runner};
 pub use template::resolve as resolve_template;
