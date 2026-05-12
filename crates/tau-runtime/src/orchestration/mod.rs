@@ -29,3 +29,7 @@ pub use error::OrchestrationError;
 pub use run_state::RunState;
 pub use task_list::TaskList;
 pub use trace::{TraceStream, TraceSubscriber};
+pub use virtual_tools::{
+    check_capability_subset, dispatch, is_virtual, required_capability, validate_agent_spawn,
+    AgentSpawnRequest,
+};
