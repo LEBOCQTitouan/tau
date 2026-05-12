@@ -37,6 +37,20 @@ pub enum Capability {
     Process(ProcessCapability),
     /// Inter-agent capability.
     Agent(AgentCapability),
+    /// Read or mutate the shared TaskList of the current multi-agent Run.
+    /// `mode` is one of `"read"`, `"write"`, `"manage"`. Not OS-sandbox-enforced;
+    /// gated at the virtual-tool dispatch layer in tau-runtime.
+    TaskList {
+        /// Access mode.
+        mode: String,
+    },
+    /// Read or append to the Run's free-form plan/notes scratchpad.
+    /// `mode` is one of `"read"`, `"write"`. Not OS-sandbox-enforced;
+    /// gated at the virtual-tool dispatch layer in tau-runtime.
+    Plan {
+        /// Access mode.
+        mode: String,
+    },
     /// Plugin-specific capability not yet typed in core.
     /// See: [escape-hatches.md#capability-custom](../../../../../docs/explanation/escape-hatches.md#capability-custom).
     Custom {
@@ -243,6 +257,12 @@ impl Capability {
             Capability::Network(NetCapability::Http { .. }) => CapabilityShape::NetworkHttp,
             Capability::Process(ProcessCapability::Spawn { .. }) => CapabilityShape::ProcessExec,
             Capability::Agent(AgentCapability::Spawn { .. }) => CapabilityShape::AgentSpawn,
+            Capability::TaskList { .. } => CapabilityShape::Custom {
+                name: "task_list".to_string(),
+            },
+            Capability::Plan { .. } => CapabilityShape::Custom {
+                name: "plan".to_string(),
+            },
             Capability::Custom { name, .. } => CapabilityShape::Custom { name: name.clone() },
         }
     }
@@ -269,6 +289,8 @@ mod capability_de {
         commands: Option<Vec<String>>,
         #[serde(default)]
         allowed_kinds: Option<Vec<String>>,
+        #[serde(default)]
+        mode: Option<String>,
         #[serde(flatten)]
         rest: BTreeMap<String, Value>,
     }
@@ -297,6 +319,24 @@ mod capability_de {
                 "agent.spawn" => Capability::Agent(AgentCapability::Spawn {
                     allowed_kinds: raw.allowed_kinds.unwrap_or_default(),
                 }),
+                "task_list" => match raw.mode.as_deref() {
+                    Some(m @ ("read" | "write" | "manage")) => Capability::TaskList {
+                        mode: m.to_string(),
+                    },
+                    _ => Capability::Custom {
+                        name: raw.kind,
+                        params: raw.rest,
+                    },
+                },
+                "plan" => match raw.mode.as_deref() {
+                    Some(m @ ("read" | "write")) => Capability::Plan {
+                        mode: m.to_string(),
+                    },
+                    _ => Capability::Custom {
+                        name: raw.kind,
+                        params: raw.rest,
+                    },
+                },
                 _ => Capability::Custom {
                     name: raw.kind,
                     params: raw.rest,
@@ -347,6 +387,18 @@ mod capability_de {
                     let mut m = s.serialize_map(Some(2))?;
                     m.serialize_entry("kind", "agent.spawn")?;
                     m.serialize_entry("allowed_kinds", allowed_kinds)?;
+                    m.end()
+                }
+                Capability::TaskList { mode } => {
+                    let mut m = s.serialize_map(Some(2))?;
+                    m.serialize_entry("kind", "task_list")?;
+                    m.serialize_entry("mode", mode)?;
+                    m.end()
+                }
+                Capability::Plan { mode } => {
+                    let mut m = s.serialize_map(Some(2))?;
+                    m.serialize_entry("kind", "plan")?;
+                    m.serialize_entry("mode", mode)?;
                     m.end()
                 }
                 Capability::Custom { name, params } => {
@@ -484,6 +536,57 @@ mod tests {
         assert_eq!(json, r#"{"kind":"fs.read","paths":["/tmp/**"]}"#);
         let back: Capability = serde_json::from_str(&json).unwrap();
         assert_eq!(cap, back);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn task_list_capability_round_trips() {
+        for mode in ["read", "write", "manage"] {
+            let cap = Capability::TaskList {
+                mode: mode.to_string(),
+            };
+            let json = serde_json::to_string(&cap).unwrap();
+            assert_eq!(json, format!(r#"{{"kind":"task_list","mode":"{mode}"}}"#));
+            let back: Capability = serde_json::from_str(&json).unwrap();
+            assert_eq!(cap, back);
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn plan_capability_round_trips() {
+        for mode in ["read", "write"] {
+            let cap = Capability::Plan {
+                mode: mode.to_string(),
+            };
+            let json = serde_json::to_string(&cap).unwrap();
+            assert_eq!(json, format!(r#"{{"kind":"plan","mode":"{mode}"}}"#));
+            let back: Capability = serde_json::from_str(&json).unwrap();
+            assert_eq!(cap, back);
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn task_list_with_unknown_mode_falls_back_to_custom() {
+        let json = r#"{"kind":"task_list","mode":"bogus"}"#;
+        let cap: Capability = serde_json::from_str(json).unwrap();
+        match cap {
+            Capability::Custom { name, .. } => assert_eq!(name, "task_list"),
+            other => panic!("expected Custom-fallback, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn task_list_required_shape_is_custom_named_task_list() {
+        let cap = Capability::TaskList {
+            mode: "read".into(),
+        };
+        match cap.required_shape() {
+            CapabilityShape::Custom { name } => assert_eq!(name, "task_list"),
+            other => panic!("expected Custom, got {other:?}"),
+        }
     }
 
     #[cfg(feature = "serde")]
