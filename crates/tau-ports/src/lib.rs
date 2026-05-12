@@ -19,6 +19,7 @@ pub mod error;
 #[cfg(any(test, feature = "test-fixtures"))]
 pub mod fixtures;
 pub mod llm;
+pub mod orchestration;
 pub mod sandbox;
 pub mod storage;
 pub mod tool;
@@ -28,6 +29,10 @@ pub use llm::{
     batch_to_stream, stream_to_batch, CompletionChunk, CompletionRequest, CompletionResponse,
     CompletionStream, ContentBlock, LlmBackend, LlmProviderMessage, StopReason, TokenUsage,
     ToolChoice, ToolSpec, ToolUse, ToolUseAccumulator,
+};
+pub use orchestration::{
+    AgentId, RunBudget, RunId, RunSnapshot, RunStatus, Task, TaskEvent, TaskId, TaskListFilter,
+    TaskStatus, TraceEvent, TraceEventKind,
 };
 pub use sandbox::{
     ResourceLimits, Sandbox, SandboxHandle, SandboxPlan, SandboxProbe, SandboxTier, WorkingContext,
