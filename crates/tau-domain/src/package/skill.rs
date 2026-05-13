@@ -150,7 +150,9 @@ pub fn parse_skill_md(input: &str) -> Result<SkillContent, SkillContentError> {
     let mut lines = input.split_inclusive('\n');
 
     // First line must be `---` (with optional whitespace + CR).
-    let first = lines.next().ok_or(SkillContentError::MissingFrontmatterOpener)?;
+    let first = lines
+        .next()
+        .ok_or(SkillContentError::MissingFrontmatterOpener)?;
     let first_stripped = first.strip_suffix('\n').unwrap_or(first);
     let first_stripped = trim_cr(first_stripped);
     if first_stripped.trim() != "---" {
@@ -178,8 +180,8 @@ pub fn parse_skill_md(input: &str) -> Result<SkillContent, SkillContentError> {
     // Parse YAML body into a generic map first so we can produce
     // field-specific errors before serde_yaml's generic missing-field
     // message.
-    let map: serde_yaml::Mapping = serde_yaml::from_str(&yaml_buf)
-        .map_err(|e| SkillContentError::YamlParse(e.to_string()))?;
+    let map: serde_yaml::Mapping =
+        serde_yaml::from_str(&yaml_buf).map_err(|e| SkillContentError::YamlParse(e.to_string()))?;
 
     let name = map
         .get(serde_yaml::Value::String("name".into()))
@@ -204,7 +206,8 @@ mod parse_tests {
 
     #[test]
     fn parses_valid_skill_md() {
-        let input = "---\nname: critic\ndescription: Reviews drafts.\n---\n\nYou are a strict editor.\n";
+        let input =
+            "---\nname: critic\ndescription: Reviews drafts.\n---\n\nYou are a strict editor.\n";
         let parsed = parse_skill_md(input).unwrap();
         assert_eq!(parsed.frontmatter.name, "critic");
         assert_eq!(parsed.frontmatter.description, "Reviews drafts.");
