@@ -29,6 +29,11 @@ pub use package::{
     PluginKind, PluginManifest, PluginRequiredTier, PluginSandboxRequirements, PortKind,
     ProcessCapability, UncheckedManifest,
 };
+pub use crate::package::skill::{
+    SkillContent, SkillContentError, SkillFrontmatter, SkillManifest, SKILL_DIR_VAR,
+};
+#[cfg(feature = "serde")]
+pub use crate::package::skill::parse_skill_md;
 pub use value::Value;
 pub use version::{Version, VersionReq};
 

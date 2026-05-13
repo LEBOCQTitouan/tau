@@ -272,3 +272,49 @@ mod parse_tests {
         assert_eq!(parsed.frontmatter.name, "critic");
     }
 }
+
+#[cfg(all(test, feature = "serde"))]
+mod skill_dir_var_tests {
+    use super::*;
+    use crate::package::manifest::UncheckedManifest;
+
+    #[test]
+    fn skill_dir_var_constant_is_the_canonical_string() {
+        assert_eq!(SKILL_DIR_VAR, "${SKILL_DIR}");
+    }
+
+    #[test]
+    fn skill_dir_var_in_capability_path_round_trips_verbatim() {
+        // Skills-1 is purely symbolic — the ${SKILL_DIR} token survives
+        // serde round-trip without expansion. Substitution is Skills-4.
+        let toml_src = r#"
+name = "critic"
+version = "0.1.0"
+description = "Reviews drafts."
+authors = []
+source = "https://example.com/critic.git"
+kind = "skill"
+dependencies = []
+
+[[capabilities]]
+kind = "fs.read"
+paths = ["${SKILL_DIR}/references/**", "${SKILL_DIR}/templates/**"]
+
+[skill]
+"#;
+        let u: UncheckedManifest = toml::from_str(toml_src).expect("parse");
+        let cap = &u.capabilities[0];
+        match cap {
+            crate::package::capability::Capability::Filesystem(
+                crate::package::capability::FsCapability::Read { paths },
+            ) => {
+                assert_eq!(paths.len(), 2);
+                assert!(paths[0].contains(SKILL_DIR_VAR));
+                assert!(paths[1].contains(SKILL_DIR_VAR));
+                // Verbatim — no expansion happened.
+                assert_eq!(paths[0], "${SKILL_DIR}/references/**");
+            }
+            other => panic!("expected fs.read, got {other:?}"),
+        }
+    }
+}
