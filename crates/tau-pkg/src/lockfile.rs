@@ -49,7 +49,12 @@ use crate::error::RegistryError;
 ///   defaults to `vec![]` for legacy entries via `#[serde(default)]`;
 ///   the runtime falls back to deriving shapes from the manifest at
 ///   startup and logs a warning per affected plugin).
-pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 4;
+/// - `5` — Skill metadata: `LockedPackage::skill: Option<LockedSkill>`
+///   added. v4 lockfiles auto-upgrade to v5 on load (`skill` defaults
+///   to `None` for legacy entries via `#[serde(default)]`; skill
+///   packages installed before the upgrade surface as "unverified"
+///   via `tau verify` until reinstalled).
+pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 5;
 
 /// Schema for `tau-lock.toml`.
 ///
@@ -63,19 +68,21 @@ pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 4;
 /// use tau_pkg::lockfile::LockFile;
 ///
 /// let lf = LockFile::default();
-/// assert_eq!(lf.schema_version, 4);
+/// assert_eq!(lf.schema_version, 5);
 /// assert!(lf.packages.is_empty());
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LockFile {
-    /// Schema version. Currently `4`. Bumped on breaking changes only.
-    /// v1/v2/v3 lockfiles are accepted on load and auto-upgraded to v4
+    /// Schema version. Currently `5`. Bumped on breaking changes only.
+    /// v1–v4 lockfiles are accepted on load and auto-upgraded to v5
     /// on the next save (v1→v2: legacy entries get `plugin = None`;
     /// v2→v3: `LockedPlugin` entries get `binary_sha256 = ""`
     /// defaulted via `#[serde(default)]`; v3→v4: `LockedPlugin`
     /// entries get `required_shapes = []` defaulted via
-    /// `#[serde(default)]` with a per-plugin warning emitted).
+    /// `#[serde(default)]` with a per-plugin warning emitted;
+    /// v4→v5: `LockedPackage` entries get `skill = None` defaulted
+    /// via `#[serde(default)]` with a once-per-process warn emitted).
     pub schema_version: u32,
     /// `CARGO_PKG_VERSION` of the tau-pkg crate that last wrote this file.
     pub generated_by_tau_version: String,
@@ -125,6 +132,14 @@ pub struct LockedPackage {
     /// Added in lockfile schema v2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<LockedPlugin>,
+    /// Skill metadata recorded at install time. `None` for non-skill
+    /// packages and for legacy v4 lockfile entries (which had no
+    /// `skill` field; `#[serde(default)]` populates it as `None` on
+    /// auto-upgrade).
+    ///
+    /// Added in lockfile schema v5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill: Option<LockedSkill>,
 }
 
 /// Recorded build artifact for a plugin package.
@@ -199,6 +214,58 @@ impl LockedPlugin {
     }
 }
 
+/// Snapshot of `SKILL.md` frontmatter at install time. Lets
+/// `tau skill list` and `tau skill show` (Skills-3) enumerate installed
+/// skills without per-skill disk seeks. The body is NOT cached —
+/// arbitrarily large; loaded lazily at spawn time by Skills-4.
+///
+/// Added in lockfile schema v5.
+#[non_exhaustive]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillFrontmatterSnapshot {
+    /// Name field from SKILL.md frontmatter (matches tau.toml name —
+    /// equality enforced at install time by skill_check).
+    pub name: String,
+    /// Short human-readable description.
+    pub description: String,
+}
+
+/// Recorded install-time metadata for a `kind = "skill"` package.
+///
+/// Written by [`crate::install_with_options`] when the installed
+/// package's manifest has `kind = "skill"` and the SKILL.md
+/// validation in [`crate::skill_check`] passes. Consumed by:
+/// - `tau verify` (this crate) — compares `content_sha256` against
+///   the re-hashed SKILL.md to detect drift.
+/// - Skills-3 (`tau skill list / show`) — reads `frontmatter` for
+///   the summary view.
+/// - Skills-4 (runtime invocation) — reads `frontmatter.name` for
+///   resolution; reads the SKILL.md body on demand (NOT cached).
+///
+/// Added in lockfile schema v5.
+#[non_exhaustive]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedSkill {
+    /// SHA-256 of the SKILL.md file bytes at install time. Hex
+    /// encoded (lowercase). Empty for v4-leftover entries (informational
+    /// `unverified` status from `tau verify`, not drift).
+    pub content_sha256: String,
+
+    /// Snapshot of SKILL.md frontmatter (name + description).
+    pub frontmatter: SkillFrontmatterSnapshot,
+}
+
+impl LockedSkill {
+    /// Construct a `LockedSkill`. `#[non_exhaustive]`; external callers
+    /// (notably test synthesis) use this constructor.
+    pub fn new(content_sha256: String, frontmatter: SkillFrontmatterSnapshot) -> Self {
+        Self {
+            content_sha256,
+            frontmatter,
+        }
+    }
+}
+
 /// One installed version's lockfile entry.
 ///
 /// `rev` is opaque user input (branch name, tag, or 40-char SHA);
@@ -258,6 +325,23 @@ fn warn_missing_required_shapes(plugin_bin: &str) {
             "required_shapes missing for plugin {}; falling back to manifest-derived shapes \
              — re-install to refresh",
             bin,
+        );
+    });
+}
+
+/// Emit a once-per-process warning that the lockfile was auto-upgraded
+/// from v4 to v5 (added `LockedSkill` field on `LockedPackage`). Any
+/// skill packages installed before the upgrade will surface as
+/// "unverified" via `tau verify` until reinstalled.
+fn warn_lockfile_pre_v5_once() {
+    use std::sync::Once;
+    static WARN_ONCE: Once = Once::new();
+    WARN_ONCE.call_once(|| {
+        tracing::warn!(
+            name = "tau_pkg.lockfile.v4_to_v5_auto_upgrade",
+            "lockfile auto-upgraded from v4 to v5; skill packages installed before \
+             the upgrade have no cached SKILL.md hash + frontmatter — \
+             re-run `tau install <skill>` to refresh"
         );
     });
 }
@@ -324,29 +408,19 @@ impl LockFile {
             });
         }
 
-        // Auto-upgrade older lockfiles in memory.
-        //
-        // v1 → v2: `LockedPackage::plugin` was not present in v1; it
-        // defaults to `None` via `#[serde(default)]`.
-        //
-        // v2 → v3: `LockedPlugin::binary_sha256` was not present in v2;
-        // it defaults to `""` via `#[serde(default)]`. `tau verify`
-        // treats empty `binary_sha256` as `unverified` (not drift).
-        //
-        // v3 → v4: `LockedPlugin::required_shapes` was not present in v3;
-        // it defaults to `vec![]` via `#[serde(default)]`. The runtime
-        // falls back to manifest-derived shapes and logs a warning per
-        // affected plugin (once per process to avoid log spam).
-        //
-        // In all cases we only need to bump the recorded schema version
-        // so the next `save()` writes the current `MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION`.
+        // Schema migrations — additive. Each `was_pre_vN` flag captures
+        // a lockfile that needs an additive field populated to a
+        // sensible default. `serde(default)` handles the in-memory
+        // population; this block emits the once-per-process warnings
+        // and bumps the recorded schema_version so the next save()
+        // writes the current version.
         let was_pre_v4 = parsed.schema_version < 4;
+        let was_pre_v5 = parsed.schema_version < 5;
         if parsed.schema_version < MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION {
             parsed.schema_version = MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION;
         }
 
-        // Emit once-per-process warning for each plugin whose
-        // `required_shapes` is empty because it came from a v3 lockfile.
+        // v3 → v4 migration: `required_shapes` empty on plugin entries.
         if was_pre_v4 {
             for pkg in &parsed.packages {
                 if let Some(plugin) = &pkg.plugin {
@@ -355,6 +429,18 @@ impl LockFile {
                     }
                 }
             }
+        }
+
+        // v4 → v5 migration: skill entries are absent on legacy
+        // lockfiles. Emit a once-per-process warn so users know to
+        // re-run `tau install` on any pre-v5 skill packages.
+        if was_pre_v5 {
+            // We can't distinguish skill packages from non-skill
+            // packages in a v4 lockfile (no kind discriminator on
+            // LockedPackage). Skills-3 will surface "unverified"
+            // status for entries that ARE skills but lack the cached
+            // frontmatter.
+            warn_lockfile_pre_v5_once();
         }
 
         Ok(parsed)
@@ -519,6 +605,7 @@ mod tests {
             source: "https://example.com/acme/tool.git#main".parse().unwrap(),
             installed_versions: vec![fixture_locked_version()],
             plugin: None,
+            skill: None,
         }
     }
 
@@ -526,7 +613,7 @@ mod tests {
     fn default_lockfile_has_current_schema_version() {
         let lf = LockFile::default();
         assert_eq!(lf.schema_version, MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION);
-        assert_eq!(lf.schema_version, 4);
+        assert_eq!(lf.schema_version, 5);
     }
 
     #[test]
@@ -718,7 +805,7 @@ mod tests {
             err,
             RegistryError::SchemaTooNew {
                 found: 999,
-                supported: 4,
+                supported: 5,
             }
         ));
     }
@@ -958,8 +1045,8 @@ mod tests {
             plugin.required_shapes.is_empty(),
             "required_shapes should default to empty for v3 lockfile entries"
         );
-        // Schema version is bumped to v4 in memory.
-        assert_eq!(loaded.schema_version, 4);
+        // Schema version is bumped to v5 in memory.
+        assert_eq!(loaded.schema_version, 5);
     }
 
     /// A v4 lockfile with `required_shapes` populated must round-trip
@@ -986,7 +1073,7 @@ mod tests {
         lf.save(&path).unwrap();
         let loaded = LockFile::load(&path).unwrap();
 
-        assert_eq!(loaded.schema_version, 4);
+        assert_eq!(loaded.schema_version, 5);
         assert_eq!(loaded.packages.len(), 1);
         let loaded_plugin = loaded.packages[0].plugin.as_ref().unwrap();
         assert_eq!(
@@ -997,5 +1084,28 @@ mod tests {
             ],
             "required_shapes must round-trip through save/load"
         );
+    }
+
+    #[test]
+    fn loads_v4_lockfile_with_skill_none_on_auto_upgrade() {
+        // v4 lockfile (no `skill` field). On load, schema_version
+        // bumps to v5 and pkg.skill is None.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("tau.lock");
+        let v4_text = r#"
+schema_version = 4
+generated_by_tau_version = "0.0.0"
+generated_at = "2025-01-01T00:00:00Z"
+
+[[package]]
+name = "regular-tool"
+active_version = "0.1.0"
+source = "https://example.com/tool.git"
+"#;
+        std::fs::write(&path, v4_text).unwrap();
+        let lf = LockFile::load(&path).unwrap();
+        assert_eq!(lf.schema_version, MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION);
+        assert_eq!(lf.packages.len(), 1);
+        assert!(lf.packages[0].skill.is_none());
     }
 }

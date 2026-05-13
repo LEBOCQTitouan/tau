@@ -405,6 +405,7 @@ pub fn install_with_options(
                 source: source.clone(),
                 installed_versions: vec![new_locked_version.clone()],
                 plugin: locked_plugin.clone(),
+                skill: None,
             },
         };
 
@@ -871,6 +872,7 @@ mod tests {
             source: "https://x.com/y.git".parse().unwrap(),
             installed_versions: vec![fixture_locked_version("1.0.0")],
             plugin: None,
+            skill: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &installed_version)).unwrap();
@@ -900,6 +902,7 @@ mod tests {
                 fixture_locked_version("2.0.0"),
             ],
             plugin: None,
+            skill: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
@@ -932,6 +935,7 @@ mod tests {
                 fixture_locked_version("3.0.0"),
             ],
             plugin: None,
+            skill: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
@@ -971,6 +975,7 @@ mod tests {
                 fixture_locked_version("2.0.0"),
             ],
             plugin: None,
+            skill: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();

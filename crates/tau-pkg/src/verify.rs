@@ -249,6 +249,7 @@ mod tests {
                 installed_at: SystemTime::now(),
             }],
             plugin: None,
+            skill: None,
         };
         lf.packages.push(pkg);
         lf.save(&scope.lockfile_path()).unwrap();
