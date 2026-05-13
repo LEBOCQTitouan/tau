@@ -1,0 +1,7 @@
+---
+source: crates/tau-cli/tests/cmd_skill_list.rs
+assertion_line: 134
+expression: stdout
+---
+no skills installed.
+hint: install one with `tau install <git-url>`

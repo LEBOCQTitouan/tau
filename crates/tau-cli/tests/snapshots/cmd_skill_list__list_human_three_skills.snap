@@ -1,0 +1,9 @@
+---
+source: crates/tau-cli/tests/cmd_skill_list.rs
+assertion_line: 117
+expression: stdout
+---
+NAME        VERSION  DESCRIPTION
+critic      0.1.0    Reviews drafts for quality.
+fact-check  0.2.0    Verifies factual claims.
+proofread   1.0.0    Proofreads prose for grammar.
