@@ -89,6 +89,20 @@ jobs:
           with-sccache: true
           with-mold: true
       - run: cargo nextest run --workspace --all-targets
+
+  doc-tests:
+    name: doc-tests / linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: stable
+          shared-key: linux-stable
+          with-sccache: true
+          with-mold: true
+      # Doctests are serial-per-binary in cargo and don't exercise
+      # OS-specific paths in this workspace. Linux-only run is enough.
       - run: cargo test --workspace --doc
 
   msrv-check:
@@ -327,6 +341,7 @@ jobs:
       - clippy
       - cargo-deny
       - test-stable
+      - doc-tests
       - msrv-check
       - test-fixtures-ports
       - feature-flag-matrix
