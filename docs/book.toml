@@ -27,13 +27,14 @@ boost-paragraph = 1
 expand = true
 heading-split-level = 3
 
-# mdbook-linkcheck disabled for v1.
-#
-# Activating it surfaces ~50 pre-existing issues from older ADRs:
-# `[ignore]` reference-link false positives in prose, dead refs to
-# spec/plan files that were never committed, and `../` links outside
-# the docs/ root (e.g. CLAUDE.md). Cleaning these up is its own PR,
-# tracked as a follow-up after this pipeline ships.
-#
-# To re-enable, restore an `[output.linkcheck]` section here AND
-# re-install `mdbook-linkcheck` in both `.github/workflows/docs-*.yml`.
+[output.linkcheck]
+follow-web-links = false
+warning-policy = "error"
+traverse-parent-directories = true
+# Process artifacts (specs, plans, retrospectives) live in the repo
+# but are not part of the published book. Skip linkcheck for any link
+# whose URL points into those trees so we don't drag them into SUMMARY.
+exclude = [
+  "superpowers/.*",
+  "retrospectives/.*",
+]
