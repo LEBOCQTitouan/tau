@@ -533,6 +533,12 @@ impl UncheckedManifest {
                 }
             }
         }
+        // Skills-2: kind = "skill" rejects [plugin] block.
+        if matches!(&self.kind, PackageKind::Custom { kind } if kind == kinds::SKILL)
+            && self.plugin.is_some()
+        {
+            return Err(PackageManifestError::SkillCannotHavePluginBlock);
+        }
         Ok(PackageManifest::from_checked(self))
     }
 }
@@ -707,5 +713,35 @@ capabilities = []
         let manifest = u.validate().expect("validate");
         assert!(manifest.skill().is_some());
         assert_eq!(manifest.skill().unwrap().content, "SKILL.md");
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn skill_kind_with_plugin_block_is_rejected() {
+        // Skills-2: cross-field validation — a package declaring kind = "skill"
+        // must NOT also carry a [plugin] table.
+        let toml_src = r#"
+name = "critic"
+version = "0.1.0"
+description = "Reviews drafts."
+authors = []
+source = "https://example.com/critic.git"
+kind = "skill"
+dependencies = []
+capabilities = []
+
+[plugin]
+provides = "tool"
+kind = "rust-cargo"
+bin = "critic"
+
+[skill]
+"#;
+        let u: UncheckedManifest = toml::from_str(toml_src).expect("parse");
+        let err = u.validate().unwrap_err();
+        assert!(
+            matches!(err, PackageManifestError::SkillCannotHavePluginBlock),
+            "expected SkillCannotHavePluginBlock, got {err:?}"
+        );
     }
 }

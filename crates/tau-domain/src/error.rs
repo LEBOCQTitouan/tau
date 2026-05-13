@@ -174,6 +174,13 @@ pub enum PackageManifestError {
         /// 0-based index of the offending capability.
         index: usize,
     },
+    /// A package declaring `kind = "skill"` must not also carry a
+    /// `[plugin]` table. Plugins and skills are mutually exclusive
+    /// package kinds — a "tool that ships its own usage doc as a skill"
+    /// is a future Skills-5 concern (composable manifests); v1 keeps
+    /// the two kinds separate.
+    #[error("kind = \"skill\" packages cannot have a [plugin] block")]
+    SkillCannotHavePluginBlock,
 }
 
 /// Validation errors for [`crate::package::PortKind::from_str`].

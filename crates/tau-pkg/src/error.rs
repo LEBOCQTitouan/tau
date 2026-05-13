@@ -229,6 +229,52 @@ pub enum InstallError {
         /// Human-readable description of the cross-check failure.
         message: String,
     },
+    /// Skills-2: `kind = "skill"` package's `SKILL.md` is absent at install time.
+    ///
+    /// Path comes from `manifest.skill().unwrap().content` (default
+    /// `"SKILL.md"`) joined with the install directory.
+    #[error("skill {name:?}: SKILL.md not found at {expected_path:?}")]
+    SkillContentMissing {
+        /// Skill package name (for human-readable error).
+        name: String,
+        /// Absolute path the install pipeline tried to read.
+        expected_path: std::path::PathBuf,
+    },
+
+    /// Skills-2: SKILL.md frontmatter's `name` field does not match the
+    /// package's tau.toml `name`. Both must equal.
+    #[error(
+        "skill name mismatch: tau.toml says {tau_toml:?}, SKILL.md frontmatter says {skill_md:?}"
+    )]
+    SkillNameMismatch {
+        /// `name` field from tau.toml.
+        tau_toml: String,
+        /// `name` field from SKILL.md frontmatter.
+        skill_md: String,
+    },
+
+    /// Skills-2: SKILL.md frontmatter failed to parse, or is missing
+    /// the required `name` / `description` fields.
+    #[error("skill frontmatter invalid: {detail}")]
+    SkillFrontmatterInvalid {
+        /// Human-readable reason (e.g. "missing required field `name`",
+        /// "YAML parse error: ...").
+        detail: String,
+    },
+
+    /// Skills-2: SKILL.md body contains `${SKILL_DIR}/<rel-path>`
+    /// references but no `[[capabilities]] kind = "fs.read"` glob
+    /// covers the path. Hard-fail because runtime would fail with a
+    /// confusing capability-denied error mid-task; install time is
+    /// the right gate.
+    #[error("skill references {reference:?} but no fs.read capability covers it (declared paths: {declared_paths:?})")]
+    SkillReferenceWithoutCapability {
+        /// The offending `${SKILL_DIR}/<path>` reference found in the body.
+        reference: String,
+        /// `fs.read` glob entries declared in the manifest at install time
+        /// (so the user can see what to extend).
+        declared_paths: Vec<String>,
+    },
     /// Catch-all for install lifecycle failures not yet covered by typed variants.
     /// Use this only when the failure cannot be reported as `Git`, `Manifest`,
     /// `Registry`, `Scope`, `SourceManifestMismatch`, or `Locked`.

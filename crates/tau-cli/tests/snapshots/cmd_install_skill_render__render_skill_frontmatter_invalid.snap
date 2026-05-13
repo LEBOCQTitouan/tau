@@ -1,0 +1,15 @@
+---
+source: crates/tau-cli/tests/cmd_install_skill_render.rs
+assertion_line: 33
+expression: render_install_error(&err)
+---
+error: skill SKILL.md frontmatter is invalid
+
+  missing required field `name`
+
+  SKILL.md must begin with a YAML frontmatter block:
+    ---
+    name: <skill-name>
+    description: <short description>
+    ---
+    <markdown body>

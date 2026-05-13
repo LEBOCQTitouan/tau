@@ -36,7 +36,9 @@ use tau_domain::{kinds, Capability, PackageName, PackageSource, PluginKind, Vers
 
 use crate::error::{InstallError, UninstallError};
 use crate::git::Git;
-use crate::lockfile::{LockFile, LockedPackage, LockedPlugin, LockedVersion};
+use crate::lockfile::{
+    LockFile, LockedPackage, LockedPlugin, LockedSkill, LockedVersion, SkillFrontmatterSnapshot,
+};
 use crate::manifest::read_manifest;
 use crate::scope::Scope;
 
@@ -364,7 +366,53 @@ pub fn install_with_options(
                     })?;
                 lp.required_shapes = shapes;
             }
+
+            // Skills-2 cross-check: validates SKILL.md content + frontmatter +
+            // reference lint. Hard-fails on missing capabilities.
+            // Skills have no plugin process to spawn; no tokio runtime needed.
+            if manifest.skill().is_some() {
+                crate::skill_check::cross_check_skill_package(&target, &manifest)?;
+            }
         }
+
+        // Step 8.8: for skill packages, compute SHA-256 of the SKILL.md bytes
+        // and snapshot the frontmatter into a LockedSkill for the lockfile.
+        let locked_skill: Option<LockedSkill> = if manifest.skill().is_some() {
+            let content_path = target.join(&manifest.skill().unwrap().content);
+            let bytes = std::fs::read(&content_path).map_err(|e| InstallError::Internal {
+                message: format!("reading SKILL.md for sha256 at {content_path:?}: {e}"),
+            })?;
+            let content_sha256 = {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(&bytes);
+                format!("{:x}", hasher.finalize())
+            };
+
+            // Re-parse for the frontmatter snapshot. cross_check_skill_package
+            // already validated; re-parsing here is a small cost to keep the
+            // two concerns (validation vs snapshot) cleanly separated.
+            let body_text = std::str::from_utf8(&bytes).map_err(|e| InstallError::Internal {
+                message: format!("SKILL.md is not UTF-8 at {content_path:?}: {e}"),
+            })?;
+            let parsed = tau_domain::parse_skill_md(body_text).map_err(|e| {
+                // Should be unreachable — cross_check just validated — but
+                // surface as Internal if it fires.
+                InstallError::Internal {
+                    message: format!("post-validation SKILL.md re-parse failed: {e}"),
+                }
+            })?;
+
+            Some(LockedSkill::new(
+                content_sha256,
+                SkillFrontmatterSnapshot {
+                    name: parsed.frontmatter.name,
+                    description: parsed.frontmatter.description,
+                },
+            ))
+        } else {
+            None
+        };
 
         // Step 9: update lockfile.
         let now = SystemTime::now();
@@ -393,6 +441,7 @@ pub fn install_with_options(
                 existing.active_version = manifest.version().clone();
                 existing.source = source.clone();
                 existing.plugin = locked_plugin.clone();
+                existing.skill = locked_skill.clone();
                 // Sort installed_versions for deterministic lockfile diffs.
                 existing
                     .installed_versions
@@ -405,6 +454,7 @@ pub fn install_with_options(
                 source: source.clone(),
                 installed_versions: vec![new_locked_version.clone()],
                 plugin: locked_plugin.clone(),
+                skill: locked_skill,
             },
         };
 
@@ -871,6 +921,7 @@ mod tests {
             source: "https://x.com/y.git".parse().unwrap(),
             installed_versions: vec![fixture_locked_version("1.0.0")],
             plugin: None,
+            skill: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &installed_version)).unwrap();
@@ -900,6 +951,7 @@ mod tests {
                 fixture_locked_version("2.0.0"),
             ],
             plugin: None,
+            skill: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
@@ -932,6 +984,7 @@ mod tests {
                 fixture_locked_version("3.0.0"),
             ],
             plugin: None,
+            skill: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
@@ -971,6 +1024,7 @@ mod tests {
                 fixture_locked_version("2.0.0"),
             ],
             plugin: None,
+            skill: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
