@@ -71,7 +71,12 @@ pub async fn run(args: &SkillListArgs, _output: &mut Output) -> anyhow::Result<(
     // Column layout: NAME (auto), VERSION (auto), DESCRIPTION (truncated to 60).
     const DESC_MAX: usize = 60;
     let name_w = items.iter().map(|i| i.name.len()).max().unwrap_or(4).max(4);
-    let ver_w = items.iter().map(|i| i.version.len()).max().unwrap_or(7).max(7);
+    let ver_w = items
+        .iter()
+        .map(|i| i.version.len())
+        .max()
+        .unwrap_or(7)
+        .max(7);
 
     println!(
         "{:<name_w$}  {:<ver_w$}  DESCRIPTION",

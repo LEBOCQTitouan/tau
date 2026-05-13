@@ -205,8 +205,12 @@ fn show_json_no_body() {
     assert_eq!(parsed["name"], Value::String("critic".into()));
     assert_eq!(parsed["version"], Value::String("0.1.0".into()));
 
-    let caps = parsed["capabilities"].as_array().expect("capabilities is array");
-    let has_fs_read = caps.iter().any(|c| c["kind"] == Value::String("fs.read".into()));
+    let caps = parsed["capabilities"]
+        .as_array()
+        .expect("capabilities is array");
+    let has_fs_read = caps
+        .iter()
+        .any(|c| c["kind"] == Value::String("fs.read".into()));
     assert!(has_fs_read, "expected fs.read capability; got {caps:?}");
 
     // body should be absent (null or missing) when --body is not passed.

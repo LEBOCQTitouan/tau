@@ -156,10 +156,10 @@ pub async fn run(args: &SkillShowArgs, _output: &mut Output) -> anyhow::Result<(
             install_path
         );
     }
-    let toml_text = std::fs::read_to_string(&toml_path)
-        .with_context(|| format!("reading {toml_path:?}"))?;
-    let unchecked: tau_domain::UncheckedManifest = toml::from_str(&toml_text)
-        .with_context(|| format!("parsing {toml_path:?}"))?;
+    let toml_text =
+        std::fs::read_to_string(&toml_path).with_context(|| format!("reading {toml_path:?}"))?;
+    let unchecked: tau_domain::UncheckedManifest =
+        toml::from_str(&toml_text).with_context(|| format!("parsing {toml_path:?}"))?;
     let manifest = unchecked
         .validate()
         .with_context(|| format!("validating {toml_path:?}"))?;
@@ -178,11 +178,7 @@ pub async fn run(args: &SkillShowArgs, _output: &mut Output) -> anyhow::Result<(
     };
 
     if args.json {
-        let caps: Vec<CapabilityJson> = manifest
-            .capabilities()
-            .iter()
-            .map(cap_to_json)
-            .collect();
+        let caps: Vec<CapabilityJson> = manifest.capabilities().iter().map(cap_to_json).collect();
         let skill_block = manifest.skill().expect("skill kind verified");
         let json_obj = SkillShowJson {
             name: pkg.name.as_str().to_string(),
@@ -209,8 +205,7 @@ pub async fn run(args: &SkillShowArgs, _output: &mut Output) -> anyhow::Result<(
                 .collect(),
             body: body_raw,
         };
-        let json = serde_json::to_string_pretty(&json_obj)
-            .context("serializing show to JSON")?;
+        let json = serde_json::to_string_pretty(&json_obj).context("serializing show to JSON")?;
         println!("{json}");
         return Ok(());
     }
@@ -249,22 +244,14 @@ pub async fn run(args: &SkillShowArgs, _output: &mut Output) -> anyhow::Result<(
         println!();
         println!("requires tools");
         for d in &skill_block.requires_tools {
-            println!(
-                "  {:<12} {}",
-                d.name.as_str(),
-                d.version_req
-            );
+            println!("  {:<12} {}", d.name.as_str(), d.version_req);
         }
     }
     if !skill_block.requires_skills.is_empty() {
         println!();
         println!("requires skills");
         for d in &skill_block.requires_skills {
-            println!(
-                "  {:<12} {}",
-                d.name.as_str(),
-                d.version_req
-            );
+            println!("  {:<12} {}", d.name.as_str(), d.version_req);
         }
     }
 
@@ -287,11 +274,7 @@ pub async fn run(args: &SkillShowArgs, _output: &mut Output) -> anyhow::Result<(
 }
 
 /// Emit the unknown-name error + suggestions, then bail with exit 2.
-fn emit_unknown_name(
-    name: &str,
-    json: bool,
-    installed: &[String],
-) -> anyhow::Result<()> {
+fn emit_unknown_name(name: &str, json: bool, installed: &[String]) -> anyhow::Result<()> {
     let suggestion = levenshtein::closest_match(name, installed, 2);
     if json {
         let body = if let Some(s) = suggestion {
