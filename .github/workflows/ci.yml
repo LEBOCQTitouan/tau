@@ -225,19 +225,9 @@ jobs:
           with-nextest: true
           with-sccache: true
           with-mold: true
-      - name: Download fixture binaries
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/place-fixture-binaries
         with:
-          name: linux-fixture-binaries
-          path: ./prebuilt
-      - name: Place plugin binaries
-        run: |
-          mkdir -p target/release
-          mv ./prebuilt/anthropic-plugin ./prebuilt/ollama-plugin ./prebuilt/openai-plugin \
-             target/release/
-          # actions/upload-artifact strips executable bits; restore them.
-          chmod +x target/release/anthropic-plugin target/release/ollama-plugin target/release/openai-plugin
-          touch target/release/anthropic-plugin target/release/ollama-plugin target/release/openai-plugin
+          binaries: "anthropic-plugin ollama-plugin openai-plugin"
       - name: Run conformance suite against all 3 plugins
         run: |
           cargo nextest run -p anthropic --test conformance --no-capture
@@ -261,29 +251,9 @@ jobs:
           shared-key: linux-stable
           with-nextest: true
           with-mold: true
-      - name: Download fixture binaries
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/place-fixture-binaries
         with:
-          name: linux-fixture-binaries
-          path: ./prebuilt
-      - name: Place binaries at cargo-expected paths
-        run: |
-          mkdir -p target/release
-          mv ./prebuilt/anthropic-plugin ./prebuilt/ollama-plugin ./prebuilt/openai-plugin \
-             ./prebuilt/fs-read-plugin ./prebuilt/shell-plugin \
-             ./prebuilt/echo-llm ./prebuilt/echo-tool \
-             ./prebuilt/tau \
-             target/release/
-          mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
-          mv ./prebuilt/tau-controlled-env \
-             crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
-          # actions/upload-artifact strips executable bits; restore them.
-          chmod +x target/release/* \
-                   crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
-          # Touch to bump mtime above source files so cargo's freshness
-          # check doesn't decide to rebuild.
-          touch target/release/* \
-                crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+          binaries: "all"
       - name: Build tau binary (debug)
         # Layer 3 tests at crates/tau-plugin-compat/tests/layer3_check_sandbox.rs
         # hardcode the debug binary path (target/debug/tau). Build it here;
@@ -318,19 +288,9 @@ jobs:
           shared-key: linux-stable
           with-nextest: true
           with-mold: true
-      - name: Download fixture binaries
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/place-fixture-binaries
         with:
-          name: linux-fixture-binaries
-          path: ./prebuilt
-      - name: Place controlled-env binary
-        run: |
-          mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
-          mv ./prebuilt/tau-controlled-env \
-             crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
-          # actions/upload-artifact strips executable bits; restore them.
-          chmod +x crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
-          touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+          binaries: "tau-controlled-env"
       - name: Test tau-sandbox-native e2e
         # strict_net_filter tests were replaced by strict_proxy tests (sub-project H,
         # ADR-0020). The proxy pattern needs no CAP_NET_ADMIN; all integration tests
@@ -348,19 +308,9 @@ jobs:
           shared-key: linux-stable
           with-nextest: true
           with-mold: true
-      - name: Download fixture binaries
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/place-fixture-binaries
         with:
-          name: linux-fixture-binaries
-          path: ./prebuilt
-      - name: Place controlled-env binary
-        run: |
-          mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
-          mv ./prebuilt/tau-controlled-env \
-             crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
-          # actions/upload-artifact strips executable bits; restore them.
-          chmod +x crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
-          touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+          binaries: "tau-controlled-env"
       - name: Test tau-runtime e2e
         run: cargo nextest run -p tau-runtime --features integration-tests --tests --verbose
 

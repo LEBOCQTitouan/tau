@@ -1,0 +1,74 @@
+name: Place fixture binaries
+description: |
+  Download the `linux-fixture-binaries` artifact produced by the
+  build-fixtures-linux job and place each binary at the path cargo
+  expects. Restore executable bits (upload-artifact strips them)
+  and bump mtime above source files so cargo's freshness check does
+  not decide to rebuild.
+
+inputs:
+  binaries:
+    description: |
+      Which binaries to place. Either "all" or a space-separated
+      subset of names from the artifact (e.g. "tau-controlled-env"
+      or "anthropic-plugin ollama-plugin openai-plugin").
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Download fixture binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: linux-fixture-binaries
+        path: ./prebuilt
+
+    - name: Place binaries at cargo-expected paths
+      shell: bash
+      env:
+        BINARIES: ${{ inputs.binaries }}
+      run: |
+        set -euo pipefail
+        mkdir -p target/release
+        mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
+
+        place() {
+          local name="$1"
+          local src="./prebuilt/$name"
+          if [[ ! -f "$src" ]]; then
+            echo "::error::expected binary not present in artifact: $name"
+            exit 1
+          fi
+          if [[ "$name" == "tau-controlled-env" ]]; then
+            mv "$src" crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
+          else
+            mv "$src" target/release/
+          fi
+        }
+
+        if [[ "$BINARIES" == "all" ]]; then
+          # All binary names that build-fixtures-linux stages into
+          # _artifacts/ — keep this list in sync with the workflow's
+          # 'Stage binaries into flat _artifacts directory' step.
+          for name in anthropic-plugin ollama-plugin openai-plugin \
+                      fs-read-plugin shell-plugin echo-llm echo-tool tau \
+                      tau-controlled-env; do
+            place "$name"
+          done
+        else
+          for name in $BINARIES; do
+            place "$name"
+          done
+        fi
+
+        # Restore executable bits (upload-artifact@v4 strips them).
+        if compgen -G "target/release/*" >/dev/null; then
+          chmod +x target/release/*
+          # Bump mtime above source files so cargo's freshness check
+          # does not rebuild what we just placed.
+          touch target/release/*
+        fi
+        if [[ -f crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env ]]; then
+          chmod +x crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+          touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+        fi
