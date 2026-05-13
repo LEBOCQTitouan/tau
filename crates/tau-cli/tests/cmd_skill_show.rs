@@ -124,15 +124,19 @@ fn run_skill_show(scope_root: &Path, name: &str, extra_args: &[&str]) -> std::pr
 /// On macOS, `tempfile::TempDir` paths go through `/var/folders/...` but
 /// the binary may resolve symlinks and output `/private/var/folders/...`.
 /// We replace the canonical (longer) form first to avoid partial replacement.
+///
+/// On Windows, `Path::display()` emits backslashes (`C:\Users\...`). After
+/// replacing the scope root, we also normalize remaining backslashes in the
+/// install_path line so the snapshot matches the forward-slash form used
+/// on Unix-style platforms. This is safe because the only paths in the
+/// output that follow the scope root are tau-controlled (`packages/<name>/<ver>`).
 fn normalize_paths(s: &str, scope_root: &Path) -> String {
     let p = scope_root.to_str().unwrap();
-    // Try canonical form (resolves /var → /private/var on macOS).
-    // Replace the canonical (longer) form first, then the shorter form.
+    // Replace canonical form first if it differs (macOS /var → /private/var).
     let canonical = scope_root.canonicalize().ok();
-    let result = if let Some(canon) = canonical {
+    let mut result = if let Some(canon) = canonical {
         let c = canon.to_str().unwrap();
         if c != p {
-            // Replace canonical path first (it's longer), then the short form.
             s.replace(c, "[SCOPE]").replace(p, "[SCOPE]")
         } else {
             s.replace(p, "[SCOPE]")
@@ -140,6 +144,20 @@ fn normalize_paths(s: &str, scope_root: &Path) -> String {
     } else {
         s.replace(p, "[SCOPE]")
     };
+    // Also normalize the Windows path-separator form that may appear
+    // immediately after our [SCOPE] sentinel (e.g. "[SCOPE]\\packages\\...").
+    if std::path::MAIN_SEPARATOR == '\\' {
+        result = result.replace("[SCOPE]\\", "[SCOPE]/");
+        result = result.replace("\\packages\\", "/packages/");
+        // Also normalize any other tau-controlled directories that may
+        // appear in show output (defensive — keep generic in case install
+        // path layouts grow). The `/` form is the snapshot canonical.
+        result = result
+            .replace("\\.tau\\", "/.tau/")
+            .replace("\\references\\", "/references/")
+            .replace("\\templates\\", "/templates/")
+            .replace("\\prompts\\", "/prompts/");
+    }
     result
 }
 
