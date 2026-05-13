@@ -9,6 +9,8 @@ use tau_ports::fixtures::{make_completion_response, make_token_usage, MockLlmBac
 use tau_ports::StopReason;
 use tau_runtime::{RunOptions, RunOutcome, Runtime};
 
+use assert_matches::assert_matches;
+
 #[tokio::test]
 async fn run_completes_with_text_response() {
     // 1. Canned LLM response: a single text block, no tool_uses, EndTurn.
@@ -38,26 +40,29 @@ async fn run_completes_with_text_response() {
         .expect("run succeeded");
 
     // 5. Assert the happy-path shape.
-    let RunOutcome::Completed {
-        final_message,
-        all_messages,
-        total_turns,
-        token_usage,
-        ..
-    } = outcome
-    else {
-        panic!("expected Completed, got Failed");
-    };
-    assert_eq!(total_turns, 1, "single LLM call, no tool_uses");
-    assert_eq!(
-        all_messages.len(),
-        2,
-        "initial user msg + assistant text response"
+    assert_matches!(
+        outcome,
+        RunOutcome::Completed {
+            final_message,
+            all_messages,
+            total_turns,
+            token_usage,
+            ..
+        } => {
+            assert_eq!(total_turns, 1, "single LLM call, no tool_uses");
+            assert_eq!(
+                all_messages.len(),
+                2,
+                "initial user msg + assistant text response"
+            );
+            assert_matches!(
+                &final_message.payload,
+                MessagePayload::Text { content } => {
+                    assert_eq!(content, "hello world");
+                }
+            );
+            assert_eq!(token_usage.input_tokens, 5);
+            assert_eq!(token_usage.output_tokens, 10);
+        }
     );
-    match &final_message.payload {
-        MessagePayload::Text { content } => assert_eq!(content, "hello world"),
-        other => panic!("expected Text payload, got {other:?}"),
-    }
-    assert_eq!(token_usage.input_tokens, 5);
-    assert_eq!(token_usage.output_tokens, 10);
 }

@@ -15,6 +15,8 @@ use tau_ports::{
 };
 use tau_runtime::{RunOptions, RunOutcome, Runtime};
 
+use assert_matches::assert_matches;
+
 /// LLM mock with a per-call response queue. `MockLlmBackend` returns a
 /// single canned response for every `complete()` call, which doesn't
 /// fit a multi-turn scenario where turn 1 emits a `tool_use` and turn
@@ -113,6 +115,8 @@ async fn run_with_tool_calls_across_two_turns() {
         .await
         .expect("run succeeded");
 
+    // kept as let-else: many independent assertions follow, a block-form
+    // assert_matches! would bury them inside a single match arm.
     let RunOutcome::Completed {
         final_message,
         all_messages,
@@ -121,7 +125,7 @@ async fn run_with_tool_calls_across_two_turns() {
         ..
     } = outcome
     else {
-        panic!("expected Completed, got {outcome:?}");
+        panic!("expected RunOutcome::Completed, got {outcome:?}");
     };
 
     assert_eq!(total_turns, 2, "tool-use turn + final text turn");
@@ -146,10 +150,12 @@ async fn run_with_tool_calls_across_two_turns() {
     // [1] agent → tool: ToolCall { args = "hi" }
     assert!(matches!(all_messages[1].sender, Address::Agent(_)));
     assert_eq!(all_messages[1].recipient, Address::Tool("echo".into()));
-    let MessagePayload::ToolCall { args } = &all_messages[1].payload else {
-        panic!("expected ToolCall, got {:?}", all_messages[1].payload);
-    };
-    assert_eq!(*args, Value::String("hi".into()));
+    assert_matches!(
+        &all_messages[1].payload,
+        MessagePayload::ToolCall { args } => {
+            assert_eq!(*args, Value::String("hi".into()));
+        }
+    );
 
     // [2] tool → agent: ToolResult { body = ... }
     assert_eq!(all_messages[2].sender, Address::Tool("echo".into()));
