@@ -79,11 +79,12 @@ fn require_docker() -> Result<(), String> {
     Ok(())
 }
 
-/// Skip the test gracefully if the per-plugin image isn't built locally.
+/// Assert the per-plugin container image is built locally.
 ///
-/// Returns `true` if the image is present, `false` (with an eprintln SKIP
-/// message) if not. Tests should early-return when this returns `false`.
-fn image_present_or_skip(bin_name: &str) -> bool {
+/// Panics if neither podman nor docker can inspect the image — tests
+/// using this helper are gated with `#[ignore = "..."]` so they only
+/// run when the image-build prerequisite has been satisfied.
+fn require_image_present(bin_name: &str) {
     let tag = format!("tau-plugin-{bin_name}:dev");
     // Probe podman first, then docker (matching ContainerRuntime::Auto).
     for runtime in ["podman", "docker"] {
@@ -93,13 +94,13 @@ fn image_present_or_skip(bin_name: &str) -> bool {
             .stderr(std::process::Stdio::null())
             .status();
         if matches!(out, Ok(s) if s.success()) {
-            return true;
+            return;
         }
     }
-    eprintln!(
-        "SKIP: {tag} not present locally; run `cargo xtask build-plugin-images --name {bin_name}` first"
+    panic!(
+        "container image {tag} not present locally; \
+         run `cargo xtask build-plugin-images --name {bin_name}` first"
     );
-    false
 }
 
 /// Locate the pre-built plugin binary.
@@ -150,25 +151,20 @@ fn make_session_context_with_caps(caps: Vec<Capability>) -> SessionContext {
         .with_granted_capabilities(caps)
 }
 
-/// Resolve the container sandbox adapter or skip the test.
+/// Resolve the container sandbox adapter, panicking if unavailable.
 ///
-/// Returns `None` (and prints skip message) if the container adapter is
-/// unavailable on this host (e.g. Docker not installed/running).
-async fn resolve_container_or_skip() -> Option<tau_runtime::sandbox::SandboxAdapter> {
-    match resolve_adapter_forced(RegistryKind::Container).await {
-        Ok(adapter) => {
-            if matches!(adapter.probe().await, SandboxProbe::Unavailable { .. }) {
-                eprintln!("SKIP: container adapter probe returned Unavailable");
-                None
-            } else {
-                Some(adapter)
-            }
-        }
-        Err(e) => {
-            eprintln!("SKIP: container adapter unavailable: {e}");
-            None
-        }
-    }
+/// Tests using this helper are gated with `#[ignore = "..."]` so they
+/// only run in environments where Docker/Podman is expected to be
+/// available. A probe failure is a real test failure when explicitly run.
+async fn resolve_container_adapter() -> tau_runtime::sandbox::SandboxAdapter {
+    let adapter = resolve_adapter_forced(RegistryKind::Container)
+        .await
+        .expect("container adapter must resolve (requires Docker or Podman)");
+    assert!(
+        !matches!(adapter.probe().await, SandboxProbe::Unavailable { .. }),
+        "container adapter probe returned Unavailable (requires Docker or Podman)"
+    );
+    adapter
 }
 
 /// Construct a `LockedPlugin` for an LLM-backend plugin.
@@ -279,32 +275,23 @@ fn base64_encode(input: &[u8]) -> String {
 /// Skips cleanly if Docker is not available or container adapter probe
 /// returns Unavailable.
 #[tokio::test]
+#[ignore = "requires Docker/Podman daemon + tau-plugin-shell-plugin:dev image + pre-built shell-plugin binary"]
 async fn shell_layer4_container_runs_echo_hello() {
     // 1. Require Docker — without a running daemon, Container adapter is a no-op.
-    if let Err(reason) = require_docker() {
-        eprintln!("SKIP: {reason}");
-        return;
-    }
-    if !image_present_or_skip("shell-plugin") {
-        return;
-    }
+    require_docker().expect("docker daemon required for container layer 4 test");
+    require_image_present("shell-plugin");
 
     // 2. Locate the pre-built shell plugin binary.
     let bin_path = locate_plugin_bin("shell-plugin");
-    if !bin_path.exists() {
-        eprintln!(
-            "SKIP: shell-plugin binary not found at {}; \
-             run `cargo build -p tau-plugins-shell --release` first",
-            bin_path.display()
-        );
-        return;
-    }
+    assert!(
+        bin_path.exists(),
+        "shell-plugin binary not found at {}; \
+         run `cargo build -p tau-plugins-shell --release` first",
+        bin_path.display()
+    );
 
-    // 3. Resolve the container sandbox adapter, skip gracefully if unavailable.
-    let adapter = match resolve_container_or_skip().await {
-        Some(a) => a,
-        None => return,
-    };
+    // 3. Resolve the container sandbox adapter (Docker/Podman required).
+    let adapter = resolve_container_adapter().await;
 
     // 4. Build the SandboxPlan. Shell plugin needs process.spawn capability.
     let spawn_cap: Capability = domain_fixtures::cap_process_spawn(&["echo"]);
@@ -373,32 +360,23 @@ async fn shell_layer4_container_runs_echo_hello() {
 /// Skips cleanly if Docker is not available or container adapter probe
 /// returns Unavailable.
 #[tokio::test]
+#[ignore = "requires Docker/Podman daemon + tau-plugin-fs-read-plugin:dev image + pre-built fs-read-plugin binary"]
 async fn fs_read_layer4_container_reads_data_file() {
     // 1. Require Docker.
-    if let Err(reason) = require_docker() {
-        eprintln!("SKIP: {reason}");
-        return;
-    }
-    if !image_present_or_skip("fs-read-plugin") {
-        return;
-    }
+    require_docker().expect("docker daemon required for container layer 4 test");
+    require_image_present("fs-read-plugin");
 
     // 2. Locate the pre-built fs-read-plugin binary.
     let bin_path = locate_plugin_bin("fs-read-plugin");
-    if !bin_path.exists() {
-        eprintln!(
-            "SKIP: fs-read-plugin binary not found at {}; \
-             run `cargo build -p tau-plugins-fs-read --release` first",
-            bin_path.display()
-        );
-        return;
-    }
+    assert!(
+        bin_path.exists(),
+        "fs-read-plugin binary not found at {}; \
+         run `cargo build -p tau-plugins-fs-read --release` first",
+        bin_path.display()
+    );
 
-    // 3. Resolve the container sandbox adapter, skip gracefully if unavailable.
-    let adapter = match resolve_container_or_skip().await {
-        Some(a) => a,
-        None => return,
-    };
+    // 3. Resolve the container sandbox adapter (Docker/Podman required).
+    let adapter = resolve_container_adapter().await;
 
     // 4. Write the data fixture into a tempdir.
     let scope = TempDir::new().expect("tempdir creation must succeed");
@@ -497,32 +475,23 @@ async fn fs_read_layer4_container_reads_data_file() {
 ///
 /// Skips if: (a) Docker not available, (b) anthropic-plugin binary not built.
 #[tokio::test]
+#[ignore = "requires Docker/Podman daemon + tau-plugin-anthropic-plugin:dev image + pre-built anthropic-plugin binary"]
 async fn anthropic_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
-    if let Err(reason) = require_docker() {
-        eprintln!("SKIP: {reason}");
-        return;
-    }
-    if !image_present_or_skip("anthropic-plugin") {
-        return;
-    }
+    require_docker().expect("docker daemon required for container layer 4 test");
+    require_image_present("anthropic-plugin");
 
     // 2. Locate the pre-built anthropic plugin binary.
     let bin_path = locate_plugin_bin("anthropic-plugin");
-    if !bin_path.exists() {
-        eprintln!(
-            "SKIP: anthropic-plugin binary not found at {}; \
-             run `cargo build -p tau-plugins-anthropic --release` first",
-            bin_path.display()
-        );
-        return;
-    }
+    assert!(
+        bin_path.exists(),
+        "anthropic-plugin binary not found at {}; \
+         run `cargo build -p tau-plugins-anthropic --release` first",
+        bin_path.display()
+    );
 
-    // 3. Resolve the container sandbox adapter, skip gracefully if unavailable.
-    let adapter = match resolve_container_or_skip().await {
-        Some(a) => a,
-        None => return,
-    };
+    // 3. Resolve the container sandbox adapter (Docker/Podman required).
+    let adapter = resolve_container_adapter().await;
 
     // 4. Start a cassette-replay HTTP server from the anthropic happy-path
     //    cassette.  The server binds to 0.0.0.0:<random_port> on the host,
@@ -598,32 +567,23 @@ async fn anthropic_layer4_container_completes_via_cassette() {
 ///
 /// Skips if: (a) Docker not available, (b) ollama-plugin binary not built.
 #[tokio::test]
+#[ignore = "requires Docker/Podman daemon + tau-plugin-ollama-plugin:dev image + pre-built ollama-plugin binary"]
 async fn ollama_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
-    if let Err(reason) = require_docker() {
-        eprintln!("SKIP: {reason}");
-        return;
-    }
-    if !image_present_or_skip("ollama-plugin") {
-        return;
-    }
+    require_docker().expect("docker daemon required for container layer 4 test");
+    require_image_present("ollama-plugin");
 
     // 2. Locate the pre-built ollama plugin binary.
     let bin_path = locate_plugin_bin("ollama-plugin");
-    if !bin_path.exists() {
-        eprintln!(
-            "SKIP: ollama-plugin binary not found at {}; \
-             run `cargo build -p tau-plugins-ollama --release` first",
-            bin_path.display()
-        );
-        return;
-    }
+    assert!(
+        bin_path.exists(),
+        "ollama-plugin binary not found at {}; \
+         run `cargo build -p tau-plugins-ollama --release` first",
+        bin_path.display()
+    );
 
-    // 3. Resolve the container sandbox adapter.
-    let adapter = match resolve_container_or_skip().await {
-        Some(a) => a,
-        None => return,
-    };
+    // 3. Resolve the container sandbox adapter (Docker/Podman required).
+    let adapter = resolve_container_adapter().await;
 
     // 4. Start the cassette-replay server.
     let cassette_path =
@@ -690,32 +650,23 @@ async fn ollama_layer4_container_completes_via_cassette() {
 ///
 /// Skips if: (a) Docker not available, (b) openai-plugin binary not built.
 #[tokio::test]
+#[ignore = "requires Docker/Podman daemon + tau-plugin-openai-plugin:dev image + pre-built openai-plugin binary"]
 async fn openai_layer4_container_completes_via_cassette() {
     // 1. Require Docker.
-    if let Err(reason) = require_docker() {
-        eprintln!("SKIP: {reason}");
-        return;
-    }
-    if !image_present_or_skip("openai-plugin") {
-        return;
-    }
+    require_docker().expect("docker daemon required for container layer 4 test");
+    require_image_present("openai-plugin");
 
     // 2. Locate the pre-built openai plugin binary.
     let bin_path = locate_plugin_bin("openai-plugin");
-    if !bin_path.exists() {
-        eprintln!(
-            "SKIP: openai-plugin binary not found at {}; \
-             run `cargo build -p tau-plugins-openai --release` first",
-            bin_path.display()
-        );
-        return;
-    }
+    assert!(
+        bin_path.exists(),
+        "openai-plugin binary not found at {}; \
+         run `cargo build -p tau-plugins-openai --release` first",
+        bin_path.display()
+    );
 
-    // 3. Resolve the container sandbox adapter.
-    let adapter = match resolve_container_or_skip().await {
-        Some(a) => a,
-        None => return,
-    };
+    // 3. Resolve the container sandbox adapter (Docker/Podman required).
+    let adapter = resolve_container_adapter().await;
 
     // 4. Start the cassette-replay server.
     let cassette_path =
