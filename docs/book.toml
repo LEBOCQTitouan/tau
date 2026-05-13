@@ -27,13 +27,13 @@ boost-paragraph = 1
 expand = true
 heading-split-level = 3
 
-[output.linkcheck]
-follow-web-links = false
-# v1 ships with warn-only because existing ADRs contain pre-existing
-# link debt: `[ignore]` reference-link false positives in prose, dead
-# refs to spec/plan files that were never committed, and `../` links
-# outside the docs/ root (e.g. CLAUDE.md). Linkcheck still runs and
-# surfaces those in CI logs; tightening to "error" is a follow-up
-# after the link debt is cleaned up.
-warning-policy = "warn"
-traverse-parent-directories = true
+# mdbook-linkcheck disabled for v1.
+#
+# Activating it surfaces ~50 pre-existing issues from older ADRs:
+# `[ignore]` reference-link false positives in prose, dead refs to
+# spec/plan files that were never committed, and `../` links outside
+# the docs/ root (e.g. CLAUDE.md). Cleaning these up is its own PR,
+# tracked as a follow-up after this pipeline ships.
+#
+# To re-enable, restore an `[output.linkcheck]` section here AND
+# re-install `mdbook-linkcheck` in both `.github/workflows/docs-*.yml`.
