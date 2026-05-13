@@ -235,7 +235,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if ! gh api "repos/${{ github.repository }}/branches/gh-pages" >/dev/null 2>&1; then
-            echo "::error::gh-pages branch does not exist. One-time setup required: see ADR-0027 'Manual one-time user steps' (in spec). Create the branch with:"
+            echo "::error::gh-pages branch does not exist. One-time setup required: see ADR-0028 'Manual one-time user steps' (in spec). Create the branch with:"
             echo "  git switch --orphan gh-pages && git commit --allow-empty -m 'init gh-pages' && git push -u origin gh-pages"
             exit 1
           fi

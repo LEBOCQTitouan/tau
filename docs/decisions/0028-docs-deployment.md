@@ -1,4 +1,4 @@
-# ADR-0027 — Docs deployment (GitHub Pages auto-CD)
+# ADR-0028 — Docs deployment (GitHub Pages auto-CD)
 
 **Status:** Accepted 2026-05-13.
 **Branch / PR:** `feat/docs-publish` (PR pending).
