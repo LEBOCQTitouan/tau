@@ -42,6 +42,20 @@ pub enum VerifyStatus {
     /// Lockfile entry has empty sha256 (v2-leftover). Informational;
     /// not drift.
     Unverified,
+
+    /// A skill package's `SKILL.md` content hash differs from the
+    /// install-time snapshot recorded in the lockfile. Parallel to
+    /// `BinaryDrift` for plugin binaries.
+    ///
+    /// Remediation: re-run `tau install <skill>` to refresh.
+    SkillContentDrift {
+        /// Package name.
+        name: String,
+        /// Expected SHA-256 (hex; from the lockfile).
+        expected: String,
+        /// Actual SHA-256 (hex; from re-hashing the on-disk file).
+        got: String,
+    },
 }
 
 impl VerifyStatus {
@@ -52,6 +66,7 @@ impl VerifyStatus {
             VerifyStatus::TreeDrift { .. }
                 | VerifyStatus::BinaryDrift { .. }
                 | VerifyStatus::Missing { .. }
+                | VerifyStatus::SkillContentDrift { .. }
         )
     }
 }
@@ -103,6 +118,52 @@ pub enum VerifyError {
         #[from]
         source: TreeHashError,
     },
+}
+
+/// Re-hash a skill package's `SKILL.md` and compare against the
+/// `content_sha256` recorded in the lockfile. Returns `Ok(())` on
+/// match; `Err(VerifyReport::SkillContentDrift { ... })` on mismatch.
+///
+/// Used by `tau verify` to detect post-install drift on skill
+/// packages, parallel to how `binary_sha256` is checked for plugin
+/// binaries.
+///
+/// `install_dir` is the absolute path of the installed skill
+/// directory (i.e. where `SKILL.md` lives). `name` is the package
+/// name (carried into the error for human-readable display).
+pub fn verify_skill_content(
+    install_dir: &std::path::Path,
+    name: &str,
+    locked: &crate::lockfile::LockedSkill,
+) -> Result<(), VerifyStatus> {
+    let path = install_dir.join("SKILL.md");
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(_) => {
+            // SKILL.md missing on disk despite being recorded → drift.
+            // We could surface this as a separate variant
+            // (`SkillContentMissing`), but the user remediation is the
+            // same: re-install. Keep one variant.
+            return Err(VerifyStatus::SkillContentDrift {
+                name: name.to_string(),
+                expected: locked.content_sha256.clone(),
+                got: "<missing>".to_string(),
+            });
+        }
+    };
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(&bytes);
+    let got = format!("{:x}", h.finalize());
+    if got == locked.content_sha256 {
+        Ok(())
+    } else {
+        Err(VerifyStatus::SkillContentDrift {
+            name: name.to_string(),
+            expected: locked.content_sha256.clone(),
+            got,
+        })
+    }
 }
 
 /// Verify a single (package, version) pair.
@@ -173,6 +234,17 @@ pub fn verify(
                     },
                 });
             }
+        }
+    }
+
+    // Skill content check (if applicable).
+    if let Some(locked_skill) = pkg.skill.as_ref() {
+        if let Err(drift_status) = verify_skill_content(&install_dir, name.as_str(), locked_skill) {
+            return Ok(VerifyReport {
+                name: name.clone(),
+                version: version.clone(),
+                status: drift_status,
+            });
         }
     }
 
@@ -311,5 +383,68 @@ mod tests {
         let reports = verify_all(&scope).unwrap();
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].status, VerifyStatus::Ok);
+    }
+}
+
+#[cfg(test)]
+mod skill_drift_tests {
+    use super::*;
+    use crate::lockfile::{LockedSkill, SkillFrontmatterSnapshot};
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn write_skill_md(dir: &std::path::Path, body: &str) -> String {
+        // Returns the SHA-256 of the body.
+        let path = dir.join("SKILL.md");
+        fs::write(&path, body).unwrap();
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(body.as_bytes());
+        format!("{:x}", h.finalize())
+    }
+
+    #[test]
+    fn ok_when_skill_md_matches_locked_hash() {
+        let dir = tempdir().unwrap();
+        let body = "---\nname: critic\ndescription: x\n---\nbody\n";
+        let sha = write_skill_md(dir.path(), body);
+        let locked = LockedSkill::new(
+            sha,
+            SkillFrontmatterSnapshot {
+                name: "critic".into(),
+                description: "x".into(),
+            },
+        );
+        let result = verify_skill_content(dir.path(), "critic", &locked);
+        assert!(matches!(result, Ok(())), "expected Ok, got {result:?}");
+    }
+
+    #[test]
+    fn drift_when_skill_md_modified_after_install() {
+        let dir = tempdir().unwrap();
+        let body = "---\nname: critic\ndescription: x\n---\nbody\n";
+        let original_sha = write_skill_md(dir.path(), body);
+        // Mutate SKILL.md after recording the snapshot.
+        fs::write(
+            dir.path().join("SKILL.md"),
+            "---\nname: critic\ndescription: x\n---\nMUTATED\n",
+        )
+        .unwrap();
+        let locked = LockedSkill::new(
+            original_sha.clone(),
+            SkillFrontmatterSnapshot {
+                name: "critic".into(),
+                description: "x".into(),
+            },
+        );
+        let result = verify_skill_content(dir.path(), "critic", &locked);
+        match result {
+            Err(VerifyStatus::SkillContentDrift { name, expected, got }) => {
+                assert_eq!(name, "critic");
+                assert_eq!(expected, original_sha);
+                assert_ne!(expected, got);
+            }
+            other => panic!("expected SkillContentDrift, got {other:?}"),
+        }
     }
 }
