@@ -1,0 +1,12 @@
+---
+source: crates/tau-cli/tests/cmd_install_skill_render.rs
+assertion_line: 16
+expression: render_install_error(&err)
+---
+error: skill "critic" failed install validation
+
+  SKILL.md not found at:
+    /scope/.tau/skills/critic/SKILL.md
+
+  The package declares kind = "skill" but no SKILL.md was found at the path specified by [skill] content.
+  Verify the package source contains SKILL.md, or update the [skill] content field in tau.toml.

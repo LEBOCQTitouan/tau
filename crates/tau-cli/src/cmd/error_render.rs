@@ -1,11 +1,12 @@
-//! Guided multi-option error renderer for sandbox resolution failures
-//! and Layer 2 install-time cross-check errors.
+//! Guided multi-option error renderer for sandbox resolution failures,
+//! Layer 2 install-time cross-check errors, and Skills-2 install errors.
 //!
 //! Spec §6 of 2026-05-04-sandbox-activation-design.md.
 
 use std::fmt::Write as _;
 
 use tau_pkg::sandbox_check::CrossCheckError;
+use tau_pkg::InstallError;
 use tau_runtime::sandbox::{ResolutionError, ResolutionRejection};
 
 /// Render a [`ResolutionError`] as a guided multi-option error message.
@@ -216,6 +217,70 @@ pub fn render_cross_check_error(err: &CrossCheckError) -> String {
     }
 
     out
+}
+
+/// Render an [`InstallError`] as a guided, human-readable error message.
+///
+/// Covers the four Skills-2 variants introduced in T2. Other variants
+/// fall back to the `Display` impl.
+///
+/// # Skills-2 Task 8
+pub fn render_install_error(err: &InstallError) -> String {
+    match err {
+        InstallError::SkillContentMissing { name, expected_path } => {
+            format!(
+                "error: skill {name:?} failed install validation\n\n  \
+                 SKILL.md not found at:\n    {}\n\n  \
+                 The package declares kind = \"skill\" but no SKILL.md \
+                 was found at the path specified by [skill] content.\n  \
+                 Verify the package source contains SKILL.md, or update \
+                 the [skill] content field in tau.toml.\n",
+                expected_path.display()
+            )
+        }
+        InstallError::SkillNameMismatch { tau_toml, skill_md } => {
+            format!(
+                "error: skill name mismatch\n\n  \
+                 tau.toml declares name = {tau_toml:?}\n  \
+                 SKILL.md frontmatter declares name = {skill_md:?}\n\n  \
+                 Both must match. Fix the name field in one of:\n    \
+                 tau.toml (top-level `name`)\n    \
+                 SKILL.md (YAML frontmatter `name`)\n"
+            )
+        }
+        InstallError::SkillFrontmatterInvalid { detail } => {
+            format!(
+                "error: skill SKILL.md frontmatter is invalid\n\n  \
+                 {detail}\n\n  \
+                 SKILL.md must begin with a YAML frontmatter block:\n    \
+                 ---\n    name: <skill-name>\n    description: <short description>\n    \
+                 ---\n    <markdown body>\n"
+            )
+        }
+        InstallError::SkillReferenceWithoutCapability {
+            reference,
+            declared_paths,
+        } => {
+            let declared_block = if declared_paths.is_empty() {
+                "    (no fs.read capabilities declared)".to_string()
+            } else {
+                declared_paths
+                    .iter()
+                    .map(|p| format!("    {p}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            format!(
+                "error: SKILL.md references a file the skill cannot read\n\n  \
+                 Reference: {reference}\n\n  \
+                 Declared fs.read paths:\n{declared_block}\n\n  \
+                 Add an `fs.read` capability whose paths glob covers the \
+                 reference, or remove the reference from SKILL.md.\n"
+            )
+        }
+        // Catch-all for other InstallError variants.
+        other => format!("install error: {other}\n"),
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,13 @@
+---
+source: crates/tau-cli/tests/cmd_install_skill_render.rs
+assertion_line: 42
+expression: render_install_error(&err)
+---
+error: SKILL.md references a file the skill cannot read
+
+  Reference: ${SKILL_DIR}/references/foo.md
+
+  Declared fs.read paths:
+    ${SKILL_DIR}/templates/**
+
+  Add an `fs.read` capability whose paths glob covers the reference, or remove the reference from SKILL.md.

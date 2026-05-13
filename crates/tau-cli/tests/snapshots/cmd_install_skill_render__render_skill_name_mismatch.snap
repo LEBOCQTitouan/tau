@@ -1,0 +1,13 @@
+---
+source: crates/tau-cli/tests/cmd_install_skill_render.rs
+assertion_line: 25
+expression: render_install_error(&err)
+---
+error: skill name mismatch
+
+  tau.toml declares name = "critic"
+  SKILL.md frontmatter declares name = "kritic"
+
+  Both must match. Fix the name field in one of:
+    tau.toml (top-level `name`)
+    SKILL.md (YAML frontmatter `name`)
