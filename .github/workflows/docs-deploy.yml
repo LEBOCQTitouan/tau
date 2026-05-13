@@ -3,8 +3,8 @@ name: docs-deploy
 on:
   push:
     tags:
-      - 'v[0-9]+.0.0'
-      - 'v0.[0-9]+.0'
+      - 'v[0-9]*.0.0'
+      - 'v0.[0-9]*.0'
     branches:
       - main
   pull_request:
@@ -269,15 +269,29 @@ jobs:
           HTML
           fi
 
-          # For /latest/ and /preview/* targets we want the destination wiped
-          # before deploy. peaceiris does not expose a "delete then overlay"
-          # mode, so we use a sentinel: pre-fetch gh-pages, remove the target,
-          # commit, and let peaceiris overlay on top.
-          if [[ "$MODE" == "latest" || "$MODE" == "preview" ]]; then
+          # Release also publishes /latest/ as a copy of this build.
+          # We populate payload/latest/ and wipe gh-pages/latest/ before overlay.
+          if [[ "$MODE" == "release" ]]; then
+            mkdir -p payload/latest
+            cp -R site/. payload/latest/
+          fi
+
+          # For /latest/ (mode=latest or mode=release) and /preview/*
+          # (mode=preview) we wipe the destination on gh-pages before
+          # deploy so removed files do not persist. peaceiris/keep_files: true
+          # overlays, does not replace. /vX/ is write-once so it is not
+          # wiped here (only the release branch above adds /vX/, and the
+          # wipe below targets /latest/ for release).
+          if [[ "$MODE" == "latest" || "$MODE" == "preview" || "$MODE" == "release" ]]; then
+            if [[ "$MODE" == "release" ]]; then
+              WIPE_DIR=latest
+            else
+              WIPE_DIR="$DEST"
+            fi
             git clone --depth=1 --branch=gh-pages "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ghp
-            (cd ghp && rm -rf "$DEST")
+            (cd ghp && rm -rf "$WIPE_DIR")
             (cd ghp && git add -A && git -c user.email=docs@tau.local -c user.name="docs-deploy" \
-               commit -m "chore(docs): clear ${DEST} before overlay" --allow-empty && \
+               commit -m "chore(docs): clear ${WIPE_DIR} before overlay" --allow-empty && \
                git push origin gh-pages)
           fi
 
