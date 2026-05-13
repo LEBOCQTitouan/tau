@@ -191,8 +191,8 @@ jobs:
           retention-days: 1
           path: _artifacts/
 
-  build-tau-plugin-test-support:
-    name: build (tau-plugin-test-support)
+  build-checks-linux:
+    name: build-checks / linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -206,19 +206,12 @@ jobs:
         run: cargo build -p tau-plugin-test-support
       - name: Test tau-plugin-test-support
         run: cargo nextest run -p tau-plugin-test-support --all-targets
-
-  build-tau-plugin-conformance:
-    name: build (tau-plugin-conformance)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-sccache: true
-          with-mold: true
       - name: Build tau-plugin-conformance
         run: cargo build -p tau-plugin-conformance
+      - name: Build tau-plugin-compat
+        run: cargo build -p tau-plugin-compat
+      - name: Build tau-plugin-compat (integration-tests feature)
+        run: cargo build -p tau-plugin-compat --features integration-tests --tests
 
   test-conformance:
     name: test (conformance)
@@ -250,21 +243,6 @@ jobs:
           cargo nextest run -p anthropic --test conformance --no-capture
           cargo nextest run -p ollama    --test conformance --no-capture
           cargo nextest run -p openai    --test conformance --no-capture
-
-  build-tau-plugin-compat:
-    name: build (tau-plugin-compat)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-sccache: true
-          with-mold: true
-      - name: Build tau-plugin-compat
-        run: cargo build -p tau-plugin-compat
-      - name: Build tau-plugin-compat (integration-tests feature)
-        run: cargo build -p tau-plugin-compat --features integration-tests --tests
 
   test-tau-plugin-compat:
     name: test (tau-plugin-compat / linux)
@@ -403,10 +381,8 @@ jobs:
       - test-fixtures-ports
       - feature-flag-matrix
       - build-fixtures-linux
-      - build-tau-plugin-test-support
-      - build-tau-plugin-conformance
+      - build-checks-linux
       - test-conformance
-      - build-tau-plugin-compat
       - test-tau-plugin-compat
       - test-tau-sandbox-native-e2e
       - test-tau-runtime-e2e
