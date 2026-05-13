@@ -22,6 +22,12 @@ changes bump the minor (`0.X.Y` → `0.(X+1).0`) per QG11.
   ×  stable + MSRV 1.91.
 - Imported `CONSTITUTION.md` and `GUIDELINES_CHEATSHEET.md` as the
   project's source of truth.
+- Versioned mdBook documentation site published to GitHub Pages.
+  Auto-deploys on major-equivalent version tags (`v[0-9]+.0.0` or
+  `v0.[0-9]+.0`). Force-publish escape hatches: `[publish-docs]`
+  commit-message marker on `main` republishes `/latest/`; the
+  `docs:publish` PR label publishes an ephemeral preview to
+  `/preview/pr-NNN/`. See ADR-0027.
 
 ### Changed
 
