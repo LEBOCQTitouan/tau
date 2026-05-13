@@ -20,6 +20,7 @@ Commands:
   session    Session management (list, show, delete, export)
   sandbox    Sandbox configuration and diagnostics
   workflow   Workflow subcommand group (list, run, log, resume)
+  skill      Inspect installed skill packages (list, show)
   help       Print this message or the help of the given subcommand(s)
 
 Options:
