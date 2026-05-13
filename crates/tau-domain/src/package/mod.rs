@@ -4,6 +4,7 @@ pub mod capability;
 pub mod manifest;
 pub mod plugin;
 pub mod sandbox;
+pub mod skill;
 pub mod source;
 
 pub use capability::{
