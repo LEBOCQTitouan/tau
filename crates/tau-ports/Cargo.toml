@@ -15,11 +15,12 @@ futures-core = { workspace = true }
 uuid         = { workspace = true }
 serde        = { workspace = true, optional = true }
 chrono       = { workspace = true }
+tempfile     = { workspace = true, optional = true }
 
 [features]
 default       = []
 serde         = ["dep:serde", "tau-domain/serde", "uuid/serde"]
-test-fixtures = []
+test-fixtures = ["dep:tempfile"]
 
 [dev-dependencies]
 tokio        = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
@@ -27,3 +28,4 @@ futures      = "0.3"
 proptest     = { workspace = true }
 serde_json   = "1"
 tau-domain   = { workspace = true, features = ["serde", "test-fixtures"] }
+tempfile     = { workspace = true }
