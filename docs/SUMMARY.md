@@ -63,7 +63,8 @@
 - [ADR-0024 — Multi-agent orchestration](decisions/0024-multi-agent-orchestration.md)
 - [ADR-0025 — Skills foundation](decisions/0025-skills-foundation.md)
 - [ADR-0026 — Skills install pipeline](decisions/0026-skills-install-pipeline.md)
-- [ADR-0027 — Docs deployment](decisions/0027-docs-deployment.md)
+- [ADR-0027 — Skills discovery](decisions/0027-skills-discovery.md)
+- [ADR-0028 — Docs deployment](decisions/0028-docs-deployment.md)
 
 # Project artifacts
 

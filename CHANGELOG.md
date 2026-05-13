@@ -27,7 +27,7 @@ changes bump the minor (`0.X.Y` → `0.(X+1).0`) per QG11.
   `v0.[0-9]+.0`). Force-publish escape hatches: `[publish-docs]`
   commit-message marker on `main` republishes `/latest/`; the
   `docs:publish` PR label publishes an ephemeral preview to
-  `/preview/pr-NNN/`. See ADR-0027.
+  `/preview/pr-NNN/`. See ADR-0028.
 
 ### Changed
 
