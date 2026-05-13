@@ -232,6 +232,14 @@ pub struct UncheckedManifest {
     /// tier floor; auto-derived shapes). See [`PluginSandboxRequirements`].
     #[cfg_attr(feature = "serde", serde(default))]
     pub sandbox: crate::package::sandbox::PluginSandboxRequirements,
+    /// Skill manifest declared via the `[skill]` table.
+    ///
+    /// `None` for non-skill packages (no skill table). `Some` for skill
+    /// packages — `tau-pkg::skill_check` (Skills-2) uses this to gate
+    /// SKILL.md validation during install. See ROADMAP §16 and
+    /// `docs/decisions/0025-skills-foundation.md`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub skill: Option<crate::package::skill::SkillManifest>,
 }
 
 /// Validated package manifest. By construction, satisfies all cross-field
@@ -303,6 +311,14 @@ impl PackageManifest {
         &self.0.sandbox
     }
 
+    /// Skill manifest from the `[skill]` table, if any.
+    ///
+    /// `None` for non-skill packages; `Some` for `kind = "skill"`
+    /// packages. Surfaced verbatim from the `[skill]` TOML table.
+    pub fn skill(&self) -> Option<&crate::package::skill::SkillManifest> {
+        self.0.skill.as_ref()
+    }
+
     /// Wrap a checked `UncheckedManifest` without re-running validation.
     /// Internal use only — public API must go through
     /// [`UncheckedManifest::validate`].
@@ -363,6 +379,7 @@ mod manifest_tests {
             capabilities: vec![],
             plugin: None,
             sandbox: crate::package::sandbox::PluginSandboxRequirements::default(),
+            skill: None,
         }
     }
 
@@ -541,6 +558,7 @@ mod validation_tests {
             capabilities: vec![],
             plugin: None,
             sandbox: crate::package::sandbox::PluginSandboxRequirements::default(),
+            skill: None,
         }
     }
 
