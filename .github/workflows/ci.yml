@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
+    # Skip the full Rust matrix on pure-docs PRs. Branch protection
+    # should require the ci-summary job (defined at the end of this
+    # file), which reports success when all real jobs pass OR when
+    # they all skip (the docs-only case). Docs-only PRs still get the
+    # docs-check workflow as a gate.
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.github/workflows/docs-*.yml'
 
 # Cancel superseded runs on the same ref.
 concurrency:
@@ -376,3 +385,39 @@ jobs:
           touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
       - name: Test tau-runtime e2e
         run: cargo nextest run -p tau-runtime --features integration-tests --tests --verbose
+
+  # Aggregate gate. Required by branch protection in place of the
+  # per-job entries. Reports success when every dep passes OR when
+  # every dep is skipped (the docs-only `paths-ignore` case). A
+  # failure or cancellation in any dep fails this job.
+  ci-summary:
+    name: ci-summary
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      - fmt
+      - clippy
+      - cargo-deny
+      - test-stable
+      - msrv-check
+      - test-fixtures-ports
+      - feature-flag-matrix
+      - build-fixtures-linux
+      - build-tau-plugin-test-support
+      - build-tau-plugin-conformance
+      - test-conformance
+      - build-tau-plugin-compat
+      - test-tau-plugin-compat
+      - test-tau-sandbox-native-e2e
+      - test-tau-runtime-e2e
+    steps:
+      - name: Verify all required jobs passed or skipped
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS_JSON"
+          if echo "$NEEDS_JSON" | jq -e 'to_entries | map(select(.value.result != "success" and .value.result != "skipped")) | length > 0' >/dev/null; then
+            echo "::error::One or more required jobs failed or were cancelled"
+            exit 1
+          fi
+          echo "All required jobs passed or were skipped (docs-only PR)."
