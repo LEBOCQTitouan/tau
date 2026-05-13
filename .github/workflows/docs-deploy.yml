@@ -1,0 +1,344 @@
+name: docs-deploy
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.0.0'
+      - 'v0.[0-9]+.0'
+    branches:
+      - main
+  pull_request:
+    types: [labeled, synchronize, unlabeled, closed]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Deploy target'
+        required: true
+        type: choice
+        options: [latest, version, preview]
+        default: latest
+      version:
+        description: 'Version slug (used if target=version, e.g. v0.6 or v1)'
+        required: false
+        type: string
+      preview_id:
+        description: 'Preview slug (used if target=preview, e.g. pr-123 or manual-test)'
+        required: false
+        type: string
+
+concurrency:
+  group: docs-deploy-${{ github.ref }}
+  cancel-in-progress: false  # serialize to avoid gh-pages push races
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  decide:
+    name: decide deploy target
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.d.outputs.should_deploy }}
+      mode: ${{ steps.d.outputs.mode }}           # one of: release | latest | preview | cleanup | skip
+      destination: ${{ steps.d.outputs.destination }}  # the gh-pages subdir, e.g. v0.5, latest, preview/pr-123
+      version_slug: ${{ steps.d.outputs.version_slug }} # for release only, e.g. v0.5 or v1
+      pr_number: ${{ steps.d.outputs.pr_number }}      # for preview and cleanup
+    steps:
+      - name: Decide
+        id: d
+        env:
+          GH_EVENT: ${{ github.event_name }}
+          GH_REF: ${{ github.ref }}
+          GH_REF_NAME: ${{ github.ref_name }}
+          GH_HEAD_COMMIT_MSG: ${{ github.event.head_commit.message }}
+          GH_PR_ACTION: ${{ github.event.action }}
+          GH_PR_LABEL_NAME: ${{ github.event.label.name }}
+          GH_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_PR_HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'docs:publish') }}
+          INPUT_TARGET: ${{ github.event.inputs.target }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_PREVIEW_ID: ${{ github.event.inputs.preview_id }}
+        run: |
+          set -euo pipefail
+          should_deploy=false
+          mode=skip
+          destination=
+          version_slug=
+          pr_number=
+
+          case "$GH_EVENT" in
+            push)
+              if [[ "$GH_REF" == refs/tags/* ]]; then
+                # Release tag. Strip 'refs/tags/v' prefix.
+                tag="${GH_REF_NAME}"          # e.g. v0.6.0 or v1.0.0
+                bare="${tag#v}"               # 0.6.0 or 1.0.0
+                major="${bare%%.*}"
+                rest="${bare#*.}"
+                minor="${rest%%.*}"
+                if [[ "$major" == "0" ]]; then
+                  version_slug="v0.${minor}"
+                else
+                  version_slug="v${major}"
+                fi
+                mode=release
+                destination="$version_slug"
+                should_deploy=true
+              elif [[ "$GH_REF" == refs/heads/main ]]; then
+                if echo "$GH_HEAD_COMMIT_MSG" | grep -q '\[publish-docs\]'; then
+                  mode=latest
+                  destination=latest
+                  should_deploy=true
+                fi
+              fi
+              ;;
+            pull_request)
+              pr_number="$GH_PR_NUMBER"
+              case "$GH_PR_ACTION" in
+                labeled)
+                  if [[ "$GH_PR_LABEL_NAME" == "docs:publish" ]]; then
+                    mode=preview
+                    destination="preview/pr-${pr_number}"
+                    should_deploy=true
+                  fi
+                  ;;
+                synchronize)
+                  if [[ "$GH_PR_HAS_LABEL" == "true" ]]; then
+                    mode=preview
+                    destination="preview/pr-${pr_number}"
+                    should_deploy=true
+                  fi
+                  ;;
+                unlabeled)
+                  if [[ "$GH_PR_LABEL_NAME" == "docs:publish" ]]; then
+                    mode=cleanup
+                    destination="preview/pr-${pr_number}"
+                    should_deploy=true
+                  fi
+                  ;;
+                closed)
+                  if [[ "$GH_PR_HAS_LABEL" == "true" ]]; then
+                    mode=cleanup
+                    destination="preview/pr-${pr_number}"
+                    should_deploy=true
+                  fi
+                  ;;
+              esac
+              ;;
+            workflow_dispatch)
+              case "$INPUT_TARGET" in
+                latest)
+                  mode=latest
+                  destination=latest
+                  should_deploy=true
+                  ;;
+                version)
+                  if [[ -z "$INPUT_VERSION" ]]; then
+                    echo "::error::version input required when target=version"; exit 1
+                  fi
+                  mode=release
+                  destination="$INPUT_VERSION"
+                  version_slug="$INPUT_VERSION"
+                  should_deploy=true
+                  ;;
+                preview)
+                  if [[ -z "$INPUT_PREVIEW_ID" ]]; then
+                    echo "::error::preview_id input required when target=preview"; exit 1
+                  fi
+                  mode=preview
+                  destination="preview/${INPUT_PREVIEW_ID}"
+                  should_deploy=true
+                  ;;
+              esac
+              ;;
+          esac
+
+          echo "should_deploy=$should_deploy" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode"                   >> "$GITHUB_OUTPUT"
+          echo "destination=$destination"     >> "$GITHUB_OUTPUT"
+          echo "version_slug=$version_slug"   >> "$GITHUB_OUTPUT"
+          echo "pr_number=$pr_number"         >> "$GITHUB_OUTPUT"
+          echo "Decided: mode=$mode destination=$destination should_deploy=$should_deploy"
+
+  build:
+    name: build
+    needs: decide
+    if: needs.decide.outputs.should_deploy == 'true' && needs.decide.outputs.mode != 'cleanup'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # mdbook git-repository-url edit-url links resolve cleanly
+
+      - name: Cache mdBook binaries
+        id: cache-mdbook
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/mdbook
+            ~/.cargo/bin/mdbook-linkcheck
+          key: mdbook-${{ runner.os }}-mdbook-0.4-linkcheck-0.7
+
+      - name: Install mdBook
+        if: steps.cache-mdbook.outputs.cache-hit != 'true'
+        run: |
+          cargo install mdbook --locked --version ^0.4
+          cargo install mdbook-linkcheck --locked --version ^0.7
+
+      - name: Build docs
+        working-directory: docs
+        run: mdbook build
+
+      - name: Write versions.json (release only)
+        if: needs.decide.outputs.mode == 'release'
+        env:
+          NEW_SLUG: ${{ needs.decide.outputs.version_slug }}
+        run: |
+          set -euo pipefail
+          # Fetch existing gh-pages list to enumerate prior versions.
+          # If gh-pages does not exist yet we synthesize a single-entry list.
+          git fetch origin gh-pages --depth=1 2>/dev/null || true
+          if git show-ref --quiet refs/remotes/origin/gh-pages; then
+            git worktree add /tmp/ghp origin/gh-pages
+            mapfile -t existing < <(ls /tmp/ghp 2>/dev/null | grep -E '^v[0-9]+(\.[0-9]+)?$' || true)
+            git worktree remove --force /tmp/ghp
+          else
+            existing=()
+          fi
+          # Append new slug if not present.
+          present=false
+          for v in "${existing[@]}"; do
+            [[ "$v" == "$NEW_SLUG" ]] && present=true
+          done
+          if ! $present; then existing+=("$NEW_SLUG"); fi
+          # Emit JSON sorted descending (newest first).
+          printf '%s\n' "${existing[@]}" | sort -Vr | jq -R -s -c '
+            split("\n") | map(select(length > 0)) | map({version: ., url: ("/" + . + "/")})
+          ' > docs/book/html/versions.json
+          cat docs/book/html/versions.json
+
+      - name: Upload built site
+        uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: docs/book/html
+          retention-days: 7
+
+  deploy-overlay:
+    name: deploy (overlay)
+    needs: [decide, build]
+    if: needs.decide.outputs.should_deploy == 'true' && needs.decide.outputs.mode != 'cleanup'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify gh-pages branch exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh api "repos/${{ github.repository }}/branches/gh-pages" >/dev/null 2>&1; then
+            echo "::error::gh-pages branch does not exist. One-time setup required: see ADR-0027 'Manual one-time user steps' (in spec). Create the branch with:"
+            echo "  git switch --orphan gh-pages && git commit --allow-empty -m 'init gh-pages' && git push -u origin gh-pages"
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: site
+
+      # For /latest/ and /preview/* we wipe the destination first so removed
+      # files do not persist (peaceiris/keep_files: true overlays, does not
+      # replace). For /vX/ we never wipe — the dir is write-once.
+      - name: Prepare overlay payload
+        env:
+          MODE: ${{ needs.decide.outputs.mode }}
+          DEST: ${{ needs.decide.outputs.destination }}
+        run: |
+          set -euo pipefail
+          rm -rf payload
+          mkdir -p "payload/${DEST}"
+          cp -R site/. "payload/${DEST}/"
+
+          # Root-level meta-refresh (only on release/latest deploys).
+          if [[ "$MODE" == "release" || "$MODE" == "latest" ]]; then
+            cat > payload/index.html <<'HTML'
+          <!doctype html>
+          <meta http-equiv="refresh" content="0; url=./latest/">
+          <link rel="canonical" href="./latest/">
+          <title>tau docs</title>
+          <p>Redirecting to <a href="./latest/">/latest/</a>.</p>
+          HTML
+          fi
+
+          # For /latest/ and /preview/* targets we want the destination wiped
+          # before deploy. peaceiris does not expose a "delete then overlay"
+          # mode, so we use a sentinel: pre-fetch gh-pages, remove the target,
+          # commit, and let peaceiris overlay on top.
+          if [[ "$MODE" == "latest" || "$MODE" == "preview" ]]; then
+            git clone --depth=1 --branch=gh-pages "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ghp
+            (cd ghp && rm -rf "$DEST")
+            (cd ghp && git add -A && git -c user.email=docs@tau.local -c user.name="docs-deploy" \
+               commit -m "chore(docs): clear ${DEST} before overlay" --allow-empty && \
+               git push origin gh-pages)
+          fi
+
+      - name: Deploy via peaceiris/actions-gh-pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./payload
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: 'docs: deploy ${{ needs.decide.outputs.mode }} → ${{ needs.decide.outputs.destination }} (${{ github.sha }})'
+          user_name: 'docs-deploy[bot]'
+          user_email: 'docs-deploy@users.noreply.github.com'
+
+      - name: Comment preview URL on PR
+        if: needs.decide.outputs.mode == 'preview'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.decide.outputs.pr_number }}
+          DEST: ${{ needs.decide.outputs.destination }}
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          URL="https://${OWNER}.github.io/${REPO}/${DEST}/"
+          gh pr comment "$PR" --body "📖 Docs preview deployed: <$URL>"
+
+  cleanup-preview:
+    name: cleanup preview
+    needs: decide
+    if: needs.decide.outputs.should_deploy == 'true' && needs.decide.outputs.mode == 'cleanup'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify gh-pages exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/branches/gh-pages" >/dev/null
+
+      - name: Remove preview directory
+        env:
+          DEST: ${{ needs.decide.outputs.destination }}
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch=gh-pages "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ghp
+          cd ghp
+          if [[ -d "$DEST" ]]; then
+            rm -rf "$DEST"
+            git -c user.email=docs@tau.local -c user.name="docs-deploy" \
+              add -A
+            git -c user.email=docs@tau.local -c user.name="docs-deploy" \
+              commit -m "chore(docs): cleanup preview $DEST"
+            git push origin gh-pages
+          else
+            echo "Preview directory $DEST not present; nothing to clean."
+          fi
+
+      - name: Comment cleanup on PR
+        if: needs.decide.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.decide.outputs.pr_number }}
+          DEST: ${{ needs.decide.outputs.destination }}
+        run: |
+          gh pr comment "$PR" --body "🧹 Docs preview \`${DEST}\` cleaned up." || true
