@@ -232,6 +232,14 @@ pub struct UncheckedManifest {
     /// tier floor; auto-derived shapes). See [`PluginSandboxRequirements`].
     #[cfg_attr(feature = "serde", serde(default))]
     pub sandbox: crate::package::sandbox::PluginSandboxRequirements,
+    /// Skill manifest declared via the `[skill]` table.
+    ///
+    /// `None` for non-skill packages (no skill table). `Some` for skill
+    /// packages — `tau-pkg::skill_check` (Skills-2) uses this to gate
+    /// SKILL.md validation during install. See ROADMAP §16 and
+    /// `docs/decisions/0025-skills-foundation.md`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub skill: Option<crate::package::skill::SkillManifest>,
 }
 
 /// Validated package manifest. By construction, satisfies all cross-field
@@ -303,6 +311,14 @@ impl PackageManifest {
         &self.0.sandbox
     }
 
+    /// Skill manifest from the `[skill]` table, if any.
+    ///
+    /// `None` for non-skill packages; `Some` for `kind = "skill"`
+    /// packages. Surfaced verbatim from the `[skill]` TOML table.
+    pub fn skill(&self) -> Option<&crate::package::skill::SkillManifest> {
+        self.0.skill.as_ref()
+    }
+
     /// Wrap a checked `UncheckedManifest` without re-running validation.
     /// Internal use only — public API must go through
     /// [`UncheckedManifest::validate`].
@@ -363,6 +379,7 @@ mod manifest_tests {
             capabilities: vec![],
             plugin: None,
             sandbox: crate::package::sandbox::PluginSandboxRequirements::default(),
+            skill: None,
         }
     }
 
@@ -541,6 +558,7 @@ mod validation_tests {
             capabilities: vec![],
             plugin: None,
             sandbox: crate::package::sandbox::PluginSandboxRequirements::default(),
+            skill: None,
         }
     }
 
@@ -592,5 +610,102 @@ mod validation_tests {
     fn plugin_absent_validates_as_none() {
         let m = good().validate().unwrap();
         assert!(m.plugin().is_none());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn skill_block_minimal_round_trips_through_toml() {
+        let toml_src = r#"
+name = "critic"
+version = "0.1.0"
+description = "Reviews drafts."
+authors = []
+source = "https://example.com/critic.git"
+kind = "skill"
+dependencies = []
+capabilities = []
+
+[skill]
+"#;
+        let u: UncheckedManifest = toml::from_str(toml_src).expect("parse");
+        let skill = u.skill.as_ref().expect("skill present");
+        // Defaults applied.
+        assert_eq!(skill.content, "SKILL.md");
+        assert!(skill.requires_tools.is_empty());
+        assert!(skill.requires_skills.is_empty());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn skill_block_full_round_trips_through_toml() {
+        let toml_src = r#"
+name = "critic"
+version = "0.1.0"
+description = "Reviews drafts."
+authors = []
+source = "https://example.com/critic.git"
+kind = "skill"
+dependencies = []
+capabilities = []
+
+[skill]
+content = "skills/critic.md"
+
+[[skill.requires_tools]]
+name = "fs-read"
+version_req = "^0.1"
+
+[[skill.requires_skills]]
+name = "fact-checker"
+version_req = "^0.1"
+"#;
+        let u: UncheckedManifest = toml::from_str(toml_src).expect("parse");
+        let skill = u.skill.as_ref().expect("skill present");
+        assert_eq!(skill.content, "skills/critic.md");
+        assert_eq!(skill.requires_tools.len(), 1);
+        assert_eq!(skill.requires_tools[0].name.as_str(), "fs-read");
+        assert_eq!(skill.requires_skills.len(), 1);
+        assert_eq!(skill.requires_skills[0].name.as_str(), "fact-checker");
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn manifest_without_skill_block_parses_with_skill_none() {
+        let toml_src = r#"
+name = "regular-tool"
+version = "0.1.0"
+description = "A tool, not a skill."
+authors = []
+source = "https://example.com/tool.git"
+kind = "tool"
+dependencies = []
+capabilities = []
+"#;
+        let u: UncheckedManifest = toml::from_str(toml_src).expect("parse");
+        assert!(u.skill.is_none());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn manifest_with_skill_round_trips_through_validate() {
+        // Validate() succeeds for skill packages with the [skill] block;
+        // skill-vs-plugin cross-field validation is Skills-2's job, so
+        // for now the validator accepts the block as-is.
+        let toml_src = r#"
+name = "critic"
+version = "0.1.0"
+description = "Reviews drafts."
+authors = []
+source = "https://example.com/critic.git"
+kind = "skill"
+dependencies = []
+capabilities = []
+
+[skill]
+"#;
+        let u: UncheckedManifest = toml::from_str(toml_src).expect("parse");
+        let manifest = u.validate().expect("validate");
+        assert!(manifest.skill().is_some());
+        assert_eq!(manifest.skill().unwrap().content, "SKILL.md");
     }
 }

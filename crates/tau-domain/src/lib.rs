@@ -16,6 +16,11 @@ pub mod version;
 #[cfg(any(test, feature = "test-fixtures"))]
 pub mod fixtures;
 
+#[cfg(feature = "serde")]
+pub use crate::package::skill::parse_skill_md;
+pub use crate::package::skill::{
+    SkillContent, SkillContentError, SkillFrontmatter, SkillManifest, SKILL_DIR_VAR,
+};
 pub use agent::{AgentDefinition, AgentStatus, FailureKind};
 pub use error::{
     AgentIdError, PackageKindError, PackageManifestError, PackageNameError, PackageSourceError,

@@ -58,6 +58,7 @@ pub fn any_unchecked_manifest() -> UncheckedManifest {
         capabilities: vec![],
         plugin: None,
         sandbox: crate::package::sandbox::PluginSandboxRequirements::default(),
+        skill: None,
     }
 }
 
