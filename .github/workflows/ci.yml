@@ -88,7 +88,7 @@ jobs:
           with-nextest: true
           with-sccache: true
           with-mold: true
-      - run: cargo nextest run --workspace --all-targets
+      - run: cargo nextest run --profile ci --workspace --all-targets
 
   doc-tests:
     name: doc-tests / linux
@@ -134,7 +134,7 @@ jobs:
           with-sccache: true
           with-mold: true
       - name: Test tau-ports (test-fixtures feature only)
-        run: cargo nextest run -p tau-ports --features test-fixtures
+        run: cargo nextest run --profile ci -p tau-ports --features test-fixtures
       - name: Doctests tau-ports (test-fixtures feature only)
         # Workspace-level `cargo test --workspace --doc` (test-stable job)
         # runs doctests without features; the fixtures module is gated
@@ -219,7 +219,7 @@ jobs:
       - name: Build tau-plugin-test-support
         run: cargo build -p tau-plugin-test-support
       - name: Test tau-plugin-test-support
-        run: cargo nextest run -p tau-plugin-test-support --all-targets
+        run: cargo nextest run --profile ci -p tau-plugin-test-support --all-targets
       - name: Build tau-plugin-conformance
         run: cargo build -p tau-plugin-conformance
       - name: Build tau-plugin-compat
@@ -244,9 +244,9 @@ jobs:
           binaries: "anthropic-plugin ollama-plugin openai-plugin"
       - name: Run conformance suite against all 3 plugins
         run: |
-          cargo nextest run -p anthropic --test conformance --no-capture
-          cargo nextest run -p ollama    --test conformance --no-capture
-          cargo nextest run -p openai    --test conformance --no-capture
+          cargo nextest run --profile ci -p anthropic --test conformance --no-capture
+          cargo nextest run --profile ci -p ollama    --test conformance --no-capture
+          cargo nextest run --profile ci -p openai    --test conformance --no-capture
 
   test-tau-plugin-compat:
     name: test (tau-plugin-compat / linux)
@@ -289,7 +289,7 @@ jobs:
           BUILDKIT_PROGRESS: plain
           DOCKER_BUILDKIT: "1"
       - name: Test tau-plugin-compat (integration-tests feature)
-        run: cargo nextest run -p tau-plugin-compat --features integration-tests --tests --verbose
+        run: cargo nextest run --profile ci -p tau-plugin-compat --features integration-tests --tests --verbose
 
   test-tau-sandbox-native-e2e:
     name: test (tau-sandbox-native e2e / linux)
@@ -309,7 +309,7 @@ jobs:
         # strict_net_filter tests were replaced by strict_proxy tests (sub-project H,
         # ADR-0020). The proxy pattern needs no CAP_NET_ADMIN; all integration tests
         # run on this stock ubuntu-latest runner.
-        run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests --verbose
+        run: cargo nextest run --profile ci -p tau-sandbox-native --features integration-tests --tests --verbose
 
   test-tau-runtime-e2e:
     name: test (tau-runtime e2e / linux)
@@ -326,7 +326,7 @@ jobs:
         with:
           binaries: "tau-controlled-env"
       - name: Test tau-runtime e2e
-        run: cargo nextest run -p tau-runtime --features integration-tests --tests --verbose
+        run: cargo nextest run --profile ci -p tau-runtime --features integration-tests --tests --verbose
 
   # Aggregate gate. Required by branch protection in place of the
   # per-job entries. Reports success when every dep passes OR when
