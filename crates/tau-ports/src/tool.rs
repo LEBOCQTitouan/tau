@@ -24,18 +24,17 @@ use crate::llm::ToolSpec;
 ///
 /// # Example
 ///
-/// ```ignore
-/// // `SessionContext` is `#[non_exhaustive]`. The example here is
-/// // illustrative only.
+/// ```
 /// use tau_domain::AgentInstanceId;
 /// use tau_ports::tool::SessionContext;
 /// use uuid::Uuid;
 ///
 /// let ctx = SessionContext::new(
 ///     AgentInstanceId::new(),
-///     Uuid::new_v4(),
+///     Uuid::now_v7(),
 ///     None,
 /// );
+/// # let _ = ctx;
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -121,15 +120,14 @@ impl SessionContext {
 ///
 /// # Example
 ///
-/// ```ignore
-/// // `DenyEntry` is `#[non_exhaustive]`. The example here is illustrative
-/// // only — external callers must use `DenyEntry::new`.
+/// ```
 /// use tau_ports::tool::DenyEntry;
 ///
 /// let entry = DenyEntry::new(
 ///     "fs.read".to_string(),
 ///     vec!["${PROJECT}/.env".to_string()],
 /// );
+/// # let _ = entry;
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -169,16 +167,16 @@ impl DenyEntry {
 ///
 /// # Example
 ///
-/// ```ignore
-/// // Illustrative; `ToolResult` is `#[non_exhaustive]` so external
-/// // callers must build it via the data-types builder added alongside
-/// // `Tool` in T9.
+/// ```
 /// use tau_ports::tool::{ToolContent, ToolResult};
 ///
-/// let ok = ToolResult {
-///     content: vec![ToolContent::Text { text: "done".into() }],
-///     is_error: false,
-/// };
+/// // External callers cannot use struct-literal syntax because `ToolResult`
+/// // is `#[non_exhaustive]` — use `ToolResult::new`.
+/// let ok = ToolResult::new(
+///     vec![ToolContent::Text { text: "done".into() }],
+///     false,
+/// );
+/// # let _ = ok;
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -210,10 +208,7 @@ impl ToolResult {
 ///
 /// # Example
 ///
-/// ```ignore
-/// // Illustrative; `ToolContent` is `#[non_exhaustive]` so external
-/// // callers must build it via the data-types builder added alongside
-/// // `Tool` in T9.
+/// ```
 /// use tau_domain::Value;
 /// use tau_ports::tool::ToolContent;
 ///
@@ -221,6 +216,7 @@ impl ToolResult {
 ///     ToolContent::Text { text: "hello".into() },
 ///     ToolContent::Json { data: Value::String("world".into()) },
 /// ];
+/// # let _ = blocks;
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -275,7 +271,7 @@ pub trait Tool: Send + Sync {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
     /// // `Capability` is `#[non_exhaustive]`; declared via the manifest path.
     /// use tau_domain::Capability;
     /// use tau_ports::Tool;
@@ -332,7 +328,7 @@ pub trait StatelessTool: Send + Sync {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// // StatelessAdapter wraps a StatelessTool to give it a Session lifecycle.
 /// // Plugin author writes:
 /// // let tool = StatelessAdapter(MyTool);

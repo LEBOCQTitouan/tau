@@ -144,9 +144,7 @@ pub fn make_session_context(
 ///
 /// # Example
 ///
-/// ```ignore
-/// // Illustrative; depends on `#[non_exhaustive]` types so external
-/// // doctests cannot construct them via struct-literal syntax.
+/// ```
 /// use tau_ports::fixtures::MockLlmBackend;
 ///
 /// let backend = MockLlmBackend::new("mock-llm");
@@ -281,9 +279,10 @@ impl futures_core::Stream for VecChunkStream {
 ///
 /// # Example
 ///
-/// ```ignore
-/// // Illustrative; depends on `#[non_exhaustive]` types so external
-/// // doctests cannot construct them via struct-literal syntax.
+/// ```text
+/// // Illustrative; `ToolSpec` is `#[non_exhaustive]` so external doctests
+/// // cannot construct it via struct-literal syntax. Use
+/// // `tau_ports::fixtures::make_tool_spec` from the `test-fixtures` feature.
 /// use tau_ports::fixtures::MockTool;
 /// use tau_ports::llm::ToolSpec;
 /// use tau_domain::Value;
@@ -403,12 +402,12 @@ impl Tool for MockTool {
 ///
 /// # Example
 ///
-/// ```ignore
-/// // Illustrative; uses async + non-doctest-friendly setup.
+/// ```
 /// use tau_ports::fixtures::MockStorage;
 ///
 /// let storage = MockStorage::new("mem");
 /// // ... drive storage.put(...) / storage.get(...) ...
+/// # let _ = storage;
 /// ```
 pub struct MockStorage {
     name: String,
