@@ -128,17 +128,17 @@ fn install_writes_current_schema_version_lockfile() {
     install(&source, &scope).unwrap();
 
     // Check the on-disk TOML file directly — this confirms schema_version is
-    // written as 4 (not still 3 from a default that was never bumped).
+    // written as 5 (not still an older value from a default that was never bumped).
     let disk_content = std::fs::read_to_string(scope.lockfile_path()).unwrap();
     assert!(
-        disk_content.contains("schema_version = 4"),
-        "lockfile on disk should contain schema_version = 4 after fresh install;\ngot:\n{disk_content}"
+        disk_content.contains("schema_version = 5"),
+        "lockfile on disk should contain schema_version = 5 after fresh install;\ngot:\n{disk_content}"
     );
 
     let lf = LockFile::load(&scope.lockfile_path()).unwrap();
     assert_eq!(
-        lf.schema_version, 4,
-        "LockFile::load should return schema_version = 4"
+        lf.schema_version, 5,
+        "LockFile::load should return schema_version = 5"
     );
 }
 
