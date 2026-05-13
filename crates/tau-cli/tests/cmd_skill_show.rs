@@ -144,19 +144,19 @@ fn normalize_paths(s: &str, scope_root: &Path) -> String {
     } else {
         s.replace(p, "[SCOPE]")
     };
-    // Also normalize the Windows path-separator form that may appear
-    // immediately after our [SCOPE] sentinel (e.g. "[SCOPE]\\packages\\...").
+    // On Windows, Path::display emits backslashes (e.g. "C:\Users\...\packages\critic\0.1.0").
+    // After [SCOPE] replacement, the install_path line still contains backslashes
+    // around the dynamic <name>/<version> segments. Static replacements can't
+    // cover the unknown package name + version, so we normalize all remaining
+    // backslashes globally to forward slashes.
+    //
+    // Safe because: (a) the only paths in show output are tau-controlled
+    // package layouts; (b) the SKILL.md fixture content used in these tests
+    // contains no legitimate backslashes (markdown headers, prose, bullets);
+    // (c) `${SKILL_DIR}` and other interpolation tokens use `/` separators
+    // in both their declared form and snapshot expectations.
     if std::path::MAIN_SEPARATOR == '\\' {
-        result = result.replace("[SCOPE]\\", "[SCOPE]/");
-        result = result.replace("\\packages\\", "/packages/");
-        // Also normalize any other tau-controlled directories that may
-        // appear in show output (defensive — keep generic in case install
-        // path layouts grow). The `/` form is the snapshot canonical.
-        result = result
-            .replace("\\.tau\\", "/.tau/")
-            .replace("\\references\\", "/references/")
-            .replace("\\templates\\", "/templates/")
-            .replace("\\prompts\\", "/prompts/");
+        result = result.replace('\\', "/");
     }
     result
 }
