@@ -139,9 +139,136 @@ pub enum SkillContentError {
 /// Markdown body...
 /// ```
 ///
-/// The body is everything after the closing `---` (with one leading
-/// newline trimmed if present).
-pub fn parse_skill_md(_input: &str) -> Result<SkillContent, SkillContentError> {
-    // Implementation lands in Task 2.
-    Err(SkillContentError::MissingFrontmatterOpener)
+/// The body is everything after the closing `---` line.
+#[cfg(feature = "serde")]
+pub fn parse_skill_md(input: &str) -> Result<SkillContent, SkillContentError> {
+    // Helper: strip an optional trailing `\r` from a line slice.
+    fn trim_cr(s: &str) -> &str {
+        s.strip_suffix('\r').unwrap_or(s)
+    }
+
+    let mut lines = input.split_inclusive('\n');
+
+    // First line must be `---` (with optional whitespace + CR).
+    let first = lines.next().ok_or(SkillContentError::MissingFrontmatterOpener)?;
+    let first_stripped = first.strip_suffix('\n').unwrap_or(first);
+    let first_stripped = trim_cr(first_stripped);
+    if first_stripped.trim() != "---" {
+        return Err(SkillContentError::MissingFrontmatterOpener);
+    }
+
+    // Collect lines until the closing `---`.
+    let mut yaml_buf = String::new();
+    let mut closer_found = false;
+    let mut consumed = first.len();
+    for line in lines.by_ref() {
+        consumed += line.len();
+        let line_stripped = line.strip_suffix('\n').unwrap_or(line);
+        let line_stripped = trim_cr(line_stripped);
+        if line_stripped.trim() == "---" {
+            closer_found = true;
+            break;
+        }
+        yaml_buf.push_str(line);
+    }
+    if !closer_found {
+        return Err(SkillContentError::MissingFrontmatterCloser);
+    }
+
+    // Parse YAML body into a generic map first so we can produce
+    // field-specific errors before serde_yaml's generic missing-field
+    // message.
+    let map: serde_yaml::Mapping = serde_yaml::from_str(&yaml_buf)
+        .map_err(|e| SkillContentError::YamlParse(e.to_string()))?;
+
+    let name = map
+        .get(serde_yaml::Value::String("name".into()))
+        .and_then(|v| v.as_str().map(String::from))
+        .ok_or(SkillContentError::MissingName)?;
+    let description = map
+        .get(serde_yaml::Value::String("description".into()))
+        .and_then(|v| v.as_str().map(String::from))
+        .ok_or(SkillContentError::MissingDescription)?;
+
+    let frontmatter = SkillFrontmatter { name, description };
+
+    // Body is everything after the closing `---` line.
+    let body = input[consumed..].to_string();
+
+    Ok(SkillContent { frontmatter, body })
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod parse_tests {
+    use super::*;
+
+    #[test]
+    fn parses_valid_skill_md() {
+        let input = "---\nname: critic\ndescription: Reviews drafts.\n---\n\nYou are a strict editor.\n";
+        let parsed = parse_skill_md(input).unwrap();
+        assert_eq!(parsed.frontmatter.name, "critic");
+        assert_eq!(parsed.frontmatter.description, "Reviews drafts.");
+        assert_eq!(parsed.body, "\nYou are a strict editor.\n");
+    }
+
+    #[test]
+    fn rejects_missing_opener() {
+        let input = "no frontmatter here\nname: critic\n";
+        assert_eq!(
+            parse_skill_md(input).unwrap_err(),
+            SkillContentError::MissingFrontmatterOpener
+        );
+    }
+
+    #[test]
+    fn rejects_missing_closer() {
+        let input = "---\nname: critic\ndescription: stuck\n";
+        assert_eq!(
+            parse_skill_md(input).unwrap_err(),
+            SkillContentError::MissingFrontmatterCloser
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_yaml() {
+        let input = "---\nname: critic\ndescription: : :\n  - bad indent\n---\nbody\n";
+        let err = parse_skill_md(input).unwrap_err();
+        assert!(
+            matches!(err, SkillContentError::YamlParse(_)),
+            "expected YamlParse, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_missing_name() {
+        let input = "---\ndescription: Reviews drafts.\n---\nbody\n";
+        assert_eq!(
+            parse_skill_md(input).unwrap_err(),
+            SkillContentError::MissingName
+        );
+    }
+
+    #[test]
+    fn rejects_missing_description() {
+        let input = "---\nname: critic\n---\nbody\n";
+        assert_eq!(
+            parse_skill_md(input).unwrap_err(),
+            SkillContentError::MissingDescription
+        );
+    }
+
+    #[test]
+    fn tolerates_extra_frontmatter_fields() {
+        // Future-compat: extra YAML keys are accepted and ignored.
+        let input = "---\nname: critic\ndescription: x\ntags: [editing]\nversion: 0.1\n---\nbody\n";
+        let parsed = parse_skill_md(input).unwrap();
+        assert_eq!(parsed.frontmatter.name, "critic");
+    }
+
+    #[test]
+    fn tolerates_crlf_line_endings() {
+        let input = "---\r\nname: critic\r\ndescription: x\r\n---\r\nbody\r\n";
+        let parsed = parse_skill_md(input).unwrap();
+        assert_eq!(parsed.frontmatter.name, "critic");
+    }
 }
