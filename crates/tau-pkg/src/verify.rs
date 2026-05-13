@@ -439,7 +439,11 @@ mod skill_drift_tests {
         );
         let result = verify_skill_content(dir.path(), "critic", &locked);
         match result {
-            Err(VerifyStatus::SkillContentDrift { name, expected, got }) => {
+            Err(VerifyStatus::SkillContentDrift {
+                name,
+                expected,
+                got,
+            }) => {
                 assert_eq!(name, "critic");
                 assert_eq!(expected, original_sha);
                 assert_ne!(expected, got);

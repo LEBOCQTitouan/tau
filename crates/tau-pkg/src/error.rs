@@ -243,7 +243,9 @@ pub enum InstallError {
 
     /// Skills-2: SKILL.md frontmatter's `name` field does not match the
     /// package's tau.toml `name`. Both must equal.
-    #[error("skill name mismatch: tau.toml says {tau_toml:?}, SKILL.md frontmatter says {skill_md:?}")]
+    #[error(
+        "skill name mismatch: tau.toml says {tau_toml:?}, SKILL.md frontmatter says {skill_md:?}"
+    )]
     SkillNameMismatch {
         /// `name` field from tau.toml.
         tau_toml: String,

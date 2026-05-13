@@ -36,8 +36,9 @@ use tau_domain::{kinds, Capability, PackageName, PackageSource, PluginKind, Vers
 
 use crate::error::{InstallError, UninstallError};
 use crate::git::Git;
-use crate::lockfile::{LockFile, LockedPackage, LockedPlugin, LockedSkill, LockedVersion,
-    SkillFrontmatterSnapshot};
+use crate::lockfile::{
+    LockFile, LockedPackage, LockedPlugin, LockedSkill, LockedVersion, SkillFrontmatterSnapshot,
+};
 use crate::manifest::read_manifest;
 use crate::scope::Scope;
 

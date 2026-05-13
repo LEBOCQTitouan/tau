@@ -42,9 +42,9 @@ pub fn cross_check_skill_package(
     install_dir: &Path,
     manifest: &PackageManifest,
 ) -> Result<(), InstallError> {
-    let skill = manifest
-        .skill()
-        .expect("cross_check_skill_package called on non-skill package — caller must dispatch on kind");
+    let skill = manifest.skill().expect(
+        "cross_check_skill_package called on non-skill package — caller must dispatch on kind",
+    );
 
     // Step 1: read SKILL.md
     let content_path = install_dir.join(&skill.content);
@@ -296,7 +296,10 @@ paths = ["${SKILL_DIR}/templates/**"]
                 declared_paths,
             } => {
                 assert!(reference.contains("refs/foo.md"));
-                assert_eq!(declared_paths, vec!["${SKILL_DIR}/templates/**".to_string()]);
+                assert_eq!(
+                    declared_paths,
+                    vec!["${SKILL_DIR}/templates/**".to_string()]
+                );
             }
             other => panic!("expected SkillReferenceWithoutCapability, got {other:?}"),
         }

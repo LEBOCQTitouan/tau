@@ -3009,6 +3009,7 @@ name = "tau-pkg"
 version = "0.0.0"
 dependencies = [
  "fs4",
+ "globset",
  "humantime-serde",
  "proptest",
  "rmp-serde",

@@ -227,7 +227,10 @@ pub fn render_cross_check_error(err: &CrossCheckError) -> String {
 /// # Skills-2 Task 8
 pub fn render_install_error(err: &InstallError) -> String {
     match err {
-        InstallError::SkillContentMissing { name, expected_path } => {
+        InstallError::SkillContentMissing {
+            name,
+            expected_path,
+        } => {
             format!(
                 "error: skill {name:?} failed install validation\n\n  \
                  SKILL.md not found at:\n    {}\n\n  \
