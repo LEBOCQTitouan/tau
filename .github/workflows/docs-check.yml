@@ -1,0 +1,59 @@
+name: docs-check
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs-check.yml'
+      - '.github/workflows/docs-deploy.yml'
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'ROADMAP.md'
+      - 'CONSTITUTION.md'
+      - 'GUIDELINES_CHEATSHEET.md'
+      - 'GOVERNANCE.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'CODE_OF_CONDUCT.md'
+
+concurrency:
+  group: docs-check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: mdbook build + linkcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache mdBook binaries
+        id: cache-mdbook
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/mdbook
+            ~/.cargo/bin/mdbook-linkcheck
+          key: mdbook-${{ runner.os }}-mdbook-0.4-linkcheck-0.7
+
+      - name: Install mdBook
+        if: steps.cache-mdbook.outputs.cache-hit != 'true'
+        run: |
+          cargo install mdbook --locked --version ^0.4
+          cargo install mdbook-linkcheck --locked --version ^0.7
+
+      - name: Build docs
+        working-directory: docs
+        run: mdbook build
+
+      - name: Upload built site as artifact (debugging)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-build-failed
+          path: docs/book/
+          if-no-files-found: ignore
+          retention-days: 7
