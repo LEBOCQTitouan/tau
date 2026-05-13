@@ -71,6 +71,41 @@ fn ensure_bridge_path() {
     }
 }
 
+/// Polls `temp_dir` until none of `names` remain, or the deadline expires.
+/// Replaces a fixed sleep that previously waited "a beat" for the kernel
+/// to unlink proxy sockets on handle drop; that sleep was flake-prone on
+/// loaded CI.
+async fn wait_for_paths_removed(
+    temp_dir: &std::path::Path,
+    names: &[std::ffi::OsString],
+    deadline: std::time::Duration,
+) -> Result<(), String> {
+    let start = std::time::Instant::now();
+    loop {
+        let current: std::collections::HashSet<_> = std::fs::read_dir(temp_dir)
+            .map_err(|e| format!("read_dir {}: {e}", temp_dir.display()))?
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .collect();
+        let still_present: Vec<_> = names.iter().filter(|n| current.contains(*n)).collect();
+        if still_present.is_empty() {
+            return Ok(());
+        }
+        if start.elapsed() > deadline {
+            return Err(format!(
+                "after {:?}, still present in {}: {:?}",
+                deadline,
+                temp_dir.display(),
+                still_present
+                    .iter()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>(),
+            ));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -158,26 +193,17 @@ async fn proxy_handle_drop_cleans_up_temp_socket() {
     );
 
     drop(handle);
-    // Give the OS a beat to unlink.
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-    let final_files: std::collections::HashSet<_> = std::fs::read_dir(&temp_dir)
-        .expect("read temp dir")
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_string_lossy().starts_with("tau-proxy-"))
-        .map(|e| e.file_name())
-        .collect();
-
-    // Each socket this test introduced must be gone after handle drop.
-    // We don't assert about OTHER tests' sockets (they have their own
-    // lifetime); that's why we diff against the baseline.
-    for name in &new_files {
-        assert!(
-            !final_files.contains(name),
-            "expected proxy socket {} to be unlinked on handle drop",
-            name.to_string_lossy()
-        );
-    }
+    // Poll for unlink instead of sleeping a fixed duration; the OS
+    // unlinks asynchronously after the proxy process exits, and a fixed
+    // 100ms wait was flake-prone on loaded CI. 2s deadline is generous
+    // enough for heavy contention, short enough to fail fast on real bugs.
+    //
+    // This also subsumes the post-sleep re-read + assertion: the helper
+    // only returns Ok once every entry in `new_files` is gone from
+    // `temp_dir`, which is the property the test wants to enforce.
+    wait_for_paths_removed(&temp_dir, &new_files, std::time::Duration::from_secs(2))
+        .await
+        .expect("proxy sockets not unlinked after handle drop");
 }
 
 // ---------------------------------------------------------------------------
