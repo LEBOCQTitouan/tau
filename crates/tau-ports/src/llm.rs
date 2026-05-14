@@ -46,7 +46,7 @@ use crate::error::LlmError;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// // Struct-literal construction is forbidden externally because
 /// // `CompletionRequest` is `#[non_exhaustive]`. The example here is
 /// // illustrative; real callers use the builder added in T6.
@@ -414,7 +414,7 @@ pub trait LlmBackend: Send + Sync {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// // Illustrative; `CompletionResponse` is `#[non_exhaustive]` so external
 /// // callers must build it via the data-types builder added in T5.
 /// let resp = /* CompletionResponse */;
@@ -477,7 +477,7 @@ where
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// // Illustrative; building a `CompletionStream` requires constructing
 /// // `#[non_exhaustive]` types via the data-types builder added in T5.
 /// let stream: tau_ports::CompletionStream = /* ... */;
@@ -531,9 +531,7 @@ pub async fn stream_to_batch(mut stream: CompletionStream) -> Result<CompletionR
 ///
 /// # Example
 ///
-/// ```ignore
-/// // Illustrative; depends on `serde_json` (a tau-ports dev-dep, not a
-/// // runtime dep), so this doctest is `ignore`-marked.
+/// ```
 /// use tau_ports::ToolUseAccumulator;
 ///
 /// let mut acc = ToolUseAccumulator::new("toolu_01".into(), "search".into());
