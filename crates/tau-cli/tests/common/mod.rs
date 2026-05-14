@@ -28,7 +28,7 @@
 //! `--test <foo>` builds compile without warnings — different `cmd_*.rs`
 //! files use different subsets.
 
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)]
 
 pub mod echo_plugins;
 pub mod mock_llm;
