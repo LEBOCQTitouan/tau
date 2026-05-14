@@ -122,15 +122,30 @@ fn locate_target_dir() -> PathBuf {
 fn pick_binary(release_dir: &std::path::Path, bin_name: &str) -> PathBuf {
     let bare = release_dir.join(bin_name);
     if bare.exists() {
-        return bare;
+        return canonicalize(&bare);
     }
     let with_exe = release_dir.join(format!("{bin_name}.exe"));
     if with_exe.exists() {
-        return with_exe;
+        return canonicalize(&with_exe);
     }
     panic!(
         "expected built binary at {} (or {}); did `cargo build --release` succeed?",
         bare.display(),
         with_exe.display()
     );
+}
+
+/// Resolve to an absolute, symlink-free path. The lockfile that
+/// `setup_echo_project` writes carries this string verbatim, and the
+/// `tau` subprocess that consumes it runs with `current_dir` set to a
+/// per-test tempdir — so a *relative* binary path here resolves
+/// against the tempdir at spawn time and fails with `ENOENT`. The
+/// failure was previously hidden by `CARGO_TARGET_DIR` not being set
+/// in CI (default workspace target dir is absolute) but surfaces on
+/// any dev machine running tests with a relative `CARGO_TARGET_DIR`
+/// (and intermittently on macOS CI runners depending on directory
+/// resolution).
+fn canonicalize(p: &std::path::Path) -> PathBuf {
+    std::fs::canonicalize(p)
+        .unwrap_or_else(|e| panic!("canonicalize {}: {e}", p.display()))
 }
