@@ -687,6 +687,8 @@ pub(crate) fn capability_kind_str(cap: &Capability) -> String {
         Capability::Network(NetCapability::Http { .. }) => "net.http".into(),
         Capability::Process(ProcessCapability::Spawn { .. }) => "process.spawn".into(),
         Capability::Agent(AgentCapability::Spawn { .. }) => "agent.spawn".into(),
+        Capability::TaskList { .. } => "task_list".into(),
+        Capability::Plan { .. } => "plan".into(),
         Capability::Custom { name, .. } => name.clone(),
         // `Capability` is `#[non_exhaustive]`; future variants degrade
         // to a generic tag — additive evolution must not silently
@@ -866,6 +868,45 @@ paths = ["**"]
             params,
         };
         assert_eq!(capability_kind_str(&cap), "mcp.tool.use");
+    }
+
+    #[test]
+    fn capability_kind_str_for_task_list() {
+        // Round-trip a `task_list` capability through the manifest wire
+        // form. Orchestration grants flow through `capability_kind_str`
+        // in `CapabilityDenial::required_kind`; this test pins the
+        // projection so future denial events tag the namespace
+        // correctly rather than landing in the `"unknown"` fallback.
+        #[derive(serde::Deserialize)]
+        struct CapWrapper {
+            cap: Capability,
+        }
+        let cap = toml::from_str::<CapWrapper>(
+            r#"[cap]
+kind = "task_list"
+mode = "write"
+"#,
+        )
+        .expect("test task_list capability TOML must parse")
+        .cap;
+        assert_eq!(capability_kind_str(&cap), "task_list");
+    }
+
+    #[test]
+    fn capability_kind_str_for_plan() {
+        #[derive(serde::Deserialize)]
+        struct CapWrapper {
+            cap: Capability,
+        }
+        let cap = toml::from_str::<CapWrapper>(
+            r#"[cap]
+kind = "plan"
+mode = "read"
+"#,
+        )
+        .expect("test plan capability TOML must parse")
+        .cap;
+        assert_eq!(capability_kind_str(&cap), "plan");
     }
 
     // -------------------- invoke_tool --------------------
