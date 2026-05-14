@@ -177,6 +177,8 @@ fn capability_kind_str(cap: &Capability) -> String {
         Capability::Network(NetCapability::Http { .. }) => "net.http".into(),
         Capability::Process(ProcessCapability::Spawn { .. }) => "process.spawn".into(),
         Capability::Agent(AgentCapability::Spawn { .. }) => "agent.spawn".into(),
+        Capability::TaskList { .. } => "task_list".into(),
+        Capability::Plan { .. } => "plan".into(),
         Capability::Custom { name, .. } => name.clone(),
         // Forward-compat: future typed variants fall back to debug.
         other => format!("{other:?}"),
