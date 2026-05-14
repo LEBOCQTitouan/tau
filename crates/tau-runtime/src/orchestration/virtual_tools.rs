@@ -30,6 +30,11 @@ pub fn is_virtual(tool_name: &str) -> bool {
             | "run.note"
             | "run.plan"
     ) || (tool_name.starts_with("agent.") && tool_name.ends_with(".spawn"))
+        || tool_name
+            .strip_prefix("skill.")
+            .and_then(|s| s.strip_suffix(".spawn"))
+            .map(|name| !name.is_empty())
+            .unwrap_or(false)
 }
 
 /// Capability requirement for a given virtual tool. Used by the dispatch
@@ -59,6 +64,16 @@ pub fn required_capability(tool_name: &str) -> Capability {
             serde_json::from_value(serde_json::json!({"kind": "agent.spawn", "allowed_kinds": []}))
                 .unwrap_or(Capability::Custom {
                     name: "agent.spawn".into(),
+                    params: Default::default(),
+                })
+        }
+        s if s.starts_with("skill.") && s.ends_with(".spawn") => {
+            // The Spawn capability's allowed_skills list is checked in
+            // validate_skill_spawn, not here.
+            // Use serde round-trip to construct because SkillCapability::Spawn is #[non_exhaustive].
+            serde_json::from_value(serde_json::json!({"kind": "skill.spawn", "allowed_skills": []}))
+                .unwrap_or(Capability::Custom {
+                    name: "skill.spawn".into(),
                     params: Default::default(),
                 })
         }
@@ -428,6 +443,72 @@ pub fn validate_agent_spawn(
     })
 }
 
+// ─── skill.<name>.spawn validation ─────────────────────────────────────────
+
+/// Validate a `skill.<name>.spawn` virtual tool call.
+///
+/// 1. Parses `name` from the tool name.
+/// 2. Parses args (`message`, optional `system_prompt`, optional `scope_paths`).
+/// 3. Checks spawn authorization (parent's
+///    `Capability::Skill(SkillCapability::Spawn { allowed_skills })` must
+///    include `name`).
+/// 4. Looks up the installed skill + substitutes `${SKILL_DIR}` +
+///    applies `scope_paths` + verifies capability subset law via
+///    [`crate::orchestration::resolve_skill_for_spawn`].
+///
+/// Returns a fully validated [`crate::orchestration::SkillSpawnRequest`]
+/// the kernel uses to invoke a recursive `Runtime::run`.
+pub fn validate_skill_spawn(
+    tool_name: &str,
+    args: &Value,
+    parent: &AgentId,
+    parent_grant: &[Capability],
+    scope: &tau_pkg::Scope,
+) -> Result<crate::orchestration::SkillSpawnRequest, OrchestrationError> {
+    let name = tool_name
+        .strip_prefix("skill.")
+        .and_then(|s| s.strip_suffix(".spawn"))
+        .ok_or_else(|| OrchestrationError::ArgError {
+            tool: tool_name.into(),
+            detail: "malformed skill.<name>.spawn tool name".into(),
+        })?;
+
+    #[derive(serde::Deserialize)]
+    struct SkillSpawnArgsRaw {
+        message: String,
+        #[serde(default)]
+        system_prompt: Option<String>,
+        #[serde(default)]
+        scope_paths: Option<Vec<String>>,
+    }
+    let a: SkillSpawnArgsRaw =
+        serde_json::from_value(args.clone()).map_err(|e| OrchestrationError::ArgError {
+            tool: tool_name.into(),
+            detail: format!("skill.<name>.spawn args: {e}"),
+        })?;
+
+    // Spawn authorization: parent must have Skill(Spawn) granting `name`.
+    let allowed = parent_grant.iter().any(|c| match c {
+        Capability::Skill(tau_domain::SkillCapability::Spawn { allowed_skills, .. }) => {
+            allowed_skills.iter().any(|s| s == name)
+        }
+        _ => false,
+    });
+    if !allowed {
+        return Err(OrchestrationError::SkillSpawnNotAuthorized {
+            parent: parent.clone(),
+            name: name.into(),
+        });
+    }
+
+    let spawn_args = crate::orchestration::SkillSpawnArgs {
+        message: a.message,
+        system_prompt: a.system_prompt,
+        scope_paths: a.scope_paths,
+    };
+    crate::orchestration::resolve_skill_for_spawn(name, &spawn_args, parent_grant, scope)
+}
+
 // ─── tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -633,5 +714,26 @@ mod tests {
             mode: "read".into(),
         }];
         check_capability_subset(&parent, &child).unwrap();
+    }
+
+    // ── Task 5: skill.<name>.spawn classification + required_capability ──────
+
+    #[test]
+    fn is_virtual_recognizes_skill_spawn() {
+        assert!(is_virtual("skill.critic.spawn"));
+        assert!(is_virtual("skill.fact-checker.spawn"));
+        // Malformed: missing name segment
+        assert!(!is_virtual("skill.spawn"));
+        // Malformed: missing .spawn suffix
+        assert!(!is_virtual("skill.critic"));
+    }
+
+    #[test]
+    fn required_capability_for_skill_spawn_is_skill_variant() {
+        let cap = required_capability("skill.critic.spawn");
+        assert!(matches!(
+            cap,
+            Capability::Skill(tau_domain::SkillCapability::Spawn { .. })
+        ));
     }
 }
