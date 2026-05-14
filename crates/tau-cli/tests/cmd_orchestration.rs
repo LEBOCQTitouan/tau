@@ -113,8 +113,12 @@ async fn pattern_a_linear_pipeline() {
     );
 
     let manifest = manifest_with_agent_spawn(r#""researcher""#);
-    let agent_def =
-        common::agent_def("orchestrator", "Orchestrator", "orchestrator@0.1.0", "test-llm");
+    let agent_def = common::agent_def(
+        "orchestrator",
+        "Orchestrator",
+        "orchestrator@0.1.0",
+        "test-llm",
+    );
     let initial = common::user_message("start the research pipeline");
 
     let snapshot = runtime
@@ -299,8 +303,7 @@ async fn pattern_c_supervisor_critic() {
     );
 
     let manifest = manifest_with_agent_spawn(r#""researcher", "critic""#);
-    let agent_def =
-        common::agent_def("supervisor", "Supervisor", "orchestrator@0.1.0", "test-llm");
+    let agent_def = common::agent_def("supervisor", "Supervisor", "orchestrator@0.1.0", "test-llm");
     let initial = common::user_message("start the supervisor-critic loop");
 
     let snapshot = runtime
@@ -492,8 +495,12 @@ async fn pattern_e_plan_revise_loop() {
     );
 
     let manifest = manifest_with_agent_spawn(r#""worker""#);
-    let agent_def =
-        common::agent_def("orchestrator", "Orchestrator", "orchestrator@0.1.0", "test-llm");
+    let agent_def = common::agent_def(
+        "orchestrator",
+        "Orchestrator",
+        "orchestrator@0.1.0",
+        "test-llm",
+    );
     let initial = common::user_message("start the plan-revise loop");
 
     let snapshot = runtime
