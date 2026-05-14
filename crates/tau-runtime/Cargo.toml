@@ -93,6 +93,7 @@ tau-ports          = { workspace = true, features = ["test-fixtures", "serde"] }
 tau-plugin-protocol = { workspace = true, features = ["test-support"] }
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 proptest           = { workspace = true }
+assert_matches     = { workspace = true }
 serde              = { workspace = true }
 toml               = { workspace = true }
 # `StreamExt` for the stream_router unit tests + the streaming

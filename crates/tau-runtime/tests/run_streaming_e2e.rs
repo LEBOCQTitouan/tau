@@ -24,6 +24,8 @@ use tau_ports::{
 };
 use tau_runtime::{builder::DynTool, RunEvent, RunOptions, RunOutcome, Runtime};
 
+use assert_matches::assert_matches;
+
 // ---------------------------------------------------------------------------
 // InProcessFsRead: DynTool adapter bridging FsReadSession → ()
 // (verbatim from tool_plugin_e2e.rs — see module-level rationale there)
@@ -371,24 +373,28 @@ paths = ["{glob}"]
     );
 
     // ToolCallCompleted must carry Ok result (successful dispatch).
-    let RunEvent::ToolCallCompleted { result, name, .. } = &events[completed_idx] else {
-        panic!("expected ToolCallCompleted");
-    };
-    assert_eq!(name, "fs-read");
-    assert!(
-        result.is_ok(),
-        "expected ToolCallCompleted with Ok result; got {:?}",
-        result
+    assert_matches!(
+        &events[completed_idx],
+        RunEvent::ToolCallCompleted { result, name, .. } => {
+            assert_eq!(name, "fs-read");
+            assert!(
+                result.is_ok(),
+                "expected ToolCallCompleted with Ok result; got {:?}",
+                result
+            );
+        }
     );
 
     // Final event: RunCompleted { Completed }.
-    let RunEvent::RunCompleted { outcome } = &events[run_completed_idx] else {
-        panic!("expected RunCompleted");
-    };
-    assert!(
-        matches!(outcome, RunOutcome::Completed { .. }),
-        "expected RunOutcome::Completed, got {:?}",
-        outcome
+    assert_matches!(
+        &events[run_completed_idx],
+        RunEvent::RunCompleted { outcome } => {
+            assert!(
+                matches!(outcome, RunOutcome::Completed { .. }),
+                "expected RunOutcome::Completed, got {:?}",
+                outcome
+            );
+        }
     );
 }
 
@@ -456,25 +462,28 @@ async fn schema_validation_failure_emits_tool_call_completed_with_err() {
     );
 
     // ToolCallCompleted carries an Err(reason).
-    let RunEvent::ToolCallCompleted { result, .. } = &events[completed_idx] else {
-        panic!("expected ToolCallCompleted");
-    };
-    let Err(reason) = result else {
-        panic!("expected Err result for validation failure; got Ok");
-    };
-
-    // MANDATORY-rule substrings from tool_args::validate_tool_args (priority 6).
-    assert!(
-        reason.contains("You sent:"),
-        "MANDATORY: reason must contain 'You sent:'; got: {reason}"
-    );
-    assert!(
-        reason.contains("Expected (input_schema):"),
-        "MANDATORY: reason must contain 'Expected (input_schema):'; got: {reason}"
-    );
-    assert!(
-        reason.contains("Specific issue"),
-        "MANDATORY: reason must contain 'Specific issue'; got: {reason}"
+    assert_matches!(
+        &events[completed_idx],
+        RunEvent::ToolCallCompleted { result, .. } => {
+            assert_matches!(
+                result,
+                Err(reason) => {
+                    // MANDATORY-rule substrings from tool_args::validate_tool_args (priority 6).
+                    assert!(
+                        reason.contains("You sent:"),
+                        "MANDATORY: reason must contain 'You sent:'; got: {reason}"
+                    );
+                    assert!(
+                        reason.contains("Expected (input_schema):"),
+                        "MANDATORY: reason must contain 'Expected (input_schema):'; got: {reason}"
+                    );
+                    assert!(
+                        reason.contains("Specific issue"),
+                        "MANDATORY: reason must contain 'Specific issue'; got: {reason}"
+                    );
+                }
+            );
+        }
     );
 
     // Run terminates with RunCompleted { Completed } (self-correction).
@@ -482,13 +491,15 @@ async fn schema_validation_failure_emits_tool_call_completed_with_err() {
         .iter()
         .find(|e| matches!(e, RunEvent::RunCompleted { .. }))
         .expect("must have RunCompleted");
-    let RunEvent::RunCompleted { outcome } = run_completed else {
-        panic!("expected RunCompleted");
-    };
-    assert!(
-        matches!(outcome, RunOutcome::Completed { .. }),
-        "expected RunOutcome::Completed after self-correction; got {:?}",
-        outcome
+    assert_matches!(
+        run_completed,
+        RunEvent::RunCompleted { outcome } => {
+            assert!(
+                matches!(outcome, RunOutcome::Completed { .. }),
+                "expected RunOutcome::Completed after self-correction; got {:?}",
+                outcome
+            );
+        }
     );
 }
 
@@ -560,20 +571,21 @@ async fn capability_denial_terminates_run() {
         "ToolCallStarted ({started_idx}) must precede RunCompleted ({run_completed_idx})"
     );
 
-    let RunEvent::RunCompleted { outcome } = &events[run_completed_idx] else {
-        panic!("expected RunCompleted");
-    };
-    let RunOutcome::Failed { status, .. } = outcome else {
-        panic!("expected RunOutcome::Failed, got {:?}", outcome);
-    };
-    let AgentStatus::Failed { kind, .. } = status else {
-        panic!("expected AgentStatus::Failed, got {:?}", status);
-    };
-    assert_eq!(
-        *kind,
-        FailureKind::PolicyDenied,
-        "capability denial must yield PolicyDenied; got {:?}",
-        kind
+    assert_matches!(
+        &events[run_completed_idx],
+        RunEvent::RunCompleted {
+            outcome: RunOutcome::Failed {
+                status: AgentStatus::Failed { kind, .. },
+                ..
+            },
+        } => {
+            assert_eq!(
+                *kind,
+                FailureKind::PolicyDenied,
+                "capability denial must yield PolicyDenied; got {:?}",
+                kind
+            );
+        }
     );
 }
 
@@ -664,19 +676,20 @@ paths = ["{glob}"]
         .find(|e| matches!(e, RunEvent::RunCompleted { .. }))
         .expect("must have RunCompleted");
 
-    let RunEvent::RunCompleted { outcome } = run_completed else {
-        panic!("expected RunCompleted");
-    };
-    let RunOutcome::Failed { status, .. } = outcome else {
-        panic!("expected RunOutcome::Failed, got {:?}", outcome);
-    };
-    let AgentStatus::Failed { kind, .. } = status else {
-        panic!("expected AgentStatus::Failed, got {:?}", status);
-    };
-    assert_eq!(
-        *kind,
-        FailureKind::OutOfResources,
-        "max_turns reached must yield OutOfResources; got {:?}",
-        kind
+    assert_matches!(
+        run_completed,
+        RunEvent::RunCompleted {
+            outcome: RunOutcome::Failed {
+                status: AgentStatus::Failed { kind, .. },
+                ..
+            },
+        } => {
+            assert_eq!(
+                *kind,
+                FailureKind::OutOfResources,
+                "max_turns reached must yield OutOfResources; got {:?}",
+                kind
+            );
+        }
     );
 }

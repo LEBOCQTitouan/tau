@@ -23,6 +23,8 @@ use tau_ports::{
 };
 use tau_runtime::{RunOptions, Runtime, RuntimeError};
 
+use assert_matches::assert_matches;
+
 /// Single-shot LLM (re-used across the tests in this file).
 struct OneShotLlm {
     name: String,
@@ -60,17 +62,16 @@ async fn llm_backend_not_registered() {
         .run(agent_def, manifest, initial, RunOptions::default())
         .await;
 
-    let Err(err) = result else {
-        panic!("expected Err(LlmBackendNotRegistered), got Ok");
-    };
-    let RuntimeError::LlmBackendNotRegistered {
-        agent_id, backend, ..
-    } = err
-    else {
-        panic!("expected LlmBackendNotRegistered, got {err:?}");
-    };
-    assert_eq!(agent_id, "agent-1");
-    assert_eq!(backend, "missing-backend");
+    let err = result.unwrap_err();
+    assert_matches!(
+        err,
+        RuntimeError::LlmBackendNotRegistered {
+            agent_id, backend, ..
+        } => {
+            assert_eq!(agent_id, "agent-1");
+            assert_eq!(backend, "missing-backend");
+        }
+    );
 }
 
 #[tokio::test]
@@ -105,21 +106,20 @@ async fn tool_not_registered() {
         .run(agent_def, manifest, initial, RunOptions::default())
         .await;
 
-    let Err(err) = result else {
-        panic!("expected Err(ToolNotRegistered), got Ok");
-    };
-    let RuntimeError::ToolNotRegistered {
-        tool_name,
-        registered,
-        ..
-    } = err
-    else {
-        panic!("expected ToolNotRegistered, got {err:?}");
-    };
-    assert_eq!(tool_name, "nonexistent");
-    assert!(
-        registered.is_empty(),
-        "no tools registered; got {registered:?}"
+    let err = result.unwrap_err();
+    assert_matches!(
+        err,
+        RuntimeError::ToolNotRegistered {
+            tool_name,
+            registered,
+            ..
+        } => {
+            assert_eq!(tool_name, "nonexistent");
+            assert!(
+                registered.is_empty(),
+                "no tools registered; got {registered:?}"
+            );
+        }
     );
 }
 

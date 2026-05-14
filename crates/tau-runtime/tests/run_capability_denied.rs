@@ -18,6 +18,8 @@ use tau_ports::{
 };
 use tau_runtime::{RunOptions, RunOutcome, Runtime};
 
+use assert_matches::assert_matches;
+
 /// Single-shot LLM that always emits the same canned response.
 struct OneShotLlm {
     name: String,
@@ -143,33 +145,30 @@ async fn capability_denied_returns_policy_denied_failure() {
         .await
         .expect("agent-level failures flow through Ok(RunOutcome::Failed)");
 
-    let RunOutcome::Failed {
-        status,
-        total_turns,
-        all_messages,
-        ..
-    } = outcome
-    else {
-        panic!("expected Failed, got Completed");
-    };
+    assert_matches!(
+        outcome,
+        RunOutcome::Failed {
+            status: AgentStatus::Failed { kind, detail, .. },
+            total_turns,
+            all_messages,
+            ..
+        } => {
+            assert_eq!(kind, FailureKind::PolicyDenied);
 
-    let AgentStatus::Failed { kind, detail, .. } = status else {
-        panic!("expected AgentStatus::Failed");
-    };
-    assert_eq!(kind, FailureKind::PolicyDenied);
+            // The denial detail is `CapabilityDenial`'s `Display`; assert it
+            // mentions the missing capability.
+            let detail = detail.expect("detail should be set");
+            assert!(
+                detail.contains("/etc/passwd") || detail.contains("fs.read"),
+                "detail should mention the denied capability; got {detail:?}"
+            );
 
-    // The denial detail is `CapabilityDenial`'s `Display`; assert it
-    // mentions the missing capability.
-    let detail = detail.expect("detail should be set");
-    assert!(
-        detail.contains("/etc/passwd") || detail.contains("fs.read"),
-        "detail should mention the denied capability; got {detail:?}"
+            // The denial happens during turn 1, so total_turns >= 1. Conversation
+            // history retains the initial user message at minimum.
+            assert!(total_turns >= 1, "got total_turns = {total_turns}");
+            assert!(!all_messages.is_empty(), "conversation history preserved");
+        }
     );
-
-    // The denial happens during turn 1, so total_turns >= 1. Conversation
-    // history retains the initial user message at minimum.
-    assert!(total_turns >= 1, "got total_turns = {total_turns}");
-    assert!(!all_messages.is_empty(), "conversation history preserved");
 
     // Critical: the tool's `invoke` was NEVER reached.
     assert_eq!(

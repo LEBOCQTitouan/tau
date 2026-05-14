@@ -45,6 +45,8 @@ use tau_ports::{
 };
 use tau_runtime::{builder::DynTool, error::RuntimeError, RunOptions, RunOutcome, Runtime};
 
+use assert_matches::assert_matches;
+
 // ---------------------------------------------------------------------------
 // InProcessFsRead: DynTool adapter bridging FsReadSession → ()
 // ---------------------------------------------------------------------------
@@ -248,21 +250,23 @@ async fn gap_1_kernel_denies_when_agent_has_no_fs_read_capability() {
         .await
         .expect("agent-level failures flow through Ok(RunOutcome::Failed)");
 
-    let RunOutcome::Failed { status, .. } = outcome else {
-        panic!("expected RunOutcome::Failed, got Completed");
-    };
-    let AgentStatus::Failed { kind, detail, .. } = status else {
-        panic!("expected AgentStatus::Failed");
-    };
-    assert_eq!(
-        kind,
-        FailureKind::PolicyDenied,
-        "Gap 1: kernel must deny via PolicyDenied"
-    );
-    let detail = detail.expect("denial detail must be set");
-    assert!(
-        detail.contains("fs.read") || detail.contains("fs"),
-        "detail should mention the denied capability; got {detail:?}"
+    assert_matches!(
+        outcome,
+        RunOutcome::Failed {
+            status: AgentStatus::Failed { kind, detail, .. },
+            ..
+        } => {
+            assert_eq!(
+                kind,
+                FailureKind::PolicyDenied,
+                "Gap 1: kernel must deny via PolicyDenied"
+            );
+            let detail = detail.expect("denial detail must be set");
+            assert!(
+                detail.contains("fs.read") || detail.contains("fs"),
+                "detail should mention the denied capability; got {detail:?}"
+            );
+        }
     );
 }
 
@@ -315,12 +319,14 @@ paths = ["/var/definitely-not-the-tmpfile-dir/**"]
         .await
         .expect_err("plugin scope check must surface as Err(RuntimeError)");
 
-    let RuntimeError::Tool(ToolError::BadArgs { reason }) = err else {
-        panic!("expected Err(RuntimeError::Tool(ToolError::BadArgs {{ .. }})), got: {err:?}");
-    };
-    assert!(
-        reason.contains("not in capability scope"),
-        "Gap 2: plugin must reject with scope-violation message; got {reason:?}"
+    assert_matches!(
+        err,
+        RuntimeError::Tool(ToolError::BadArgs { reason }) => {
+            assert!(
+                reason.contains("not in capability scope"),
+                "Gap 2: plugin must reject with scope-violation message; got {reason:?}"
+            );
+        }
     );
 }
 
@@ -378,35 +384,36 @@ paths = ["{glob}"]
         .await
         .expect("run succeeded");
 
-    let RunOutcome::Completed { all_messages, .. } = outcome else {
-        panic!("expected RunOutcome::Completed, got {outcome:?}");
-    };
+    assert_matches!(
+        outcome,
+        RunOutcome::Completed { all_messages, .. } => {
+            // Find the ToolResult message.
+            let tool_result_msg = all_messages
+                .iter()
+                .find(|m| matches!(&m.payload, MessagePayload::ToolResult { .. }));
+            let Some(msg) = tool_result_msg else {
+                panic!("no ToolResult in conversation; messages: {all_messages:?}");
+            };
 
-    // Find the ToolResult message.
-    let tool_result_msg = all_messages
-        .iter()
-        .find(|m| matches!(&m.payload, MessagePayload::ToolResult { .. }));
-    let Some(msg) = tool_result_msg else {
-        panic!("no ToolResult in conversation; messages: {all_messages:?}");
-    };
+            let MessagePayload::ToolResult { body } = &msg.payload else {
+                unreachable!("just matched above")
+            };
 
-    let MessagePayload::ToolResult { body } = &msg.payload else {
-        unreachable!("just matched above")
-    };
+            // The plugin wraps its output as `{ "contents": "<base64>", "size": N }`.
+            let contents_b64 = body
+                .as_object()
+                .and_then(|o| o.get("contents"))
+                .and_then(Value::as_string)
+                .expect("ToolResult body must contain a `contents` base64 string");
 
-    // The plugin wraps its output as `{ "contents": "<base64>", "size": N }`.
-    let contents_b64 = body
-        .as_object()
-        .and_then(|o| o.get("contents"))
-        .and_then(Value::as_string)
-        .expect("ToolResult body must contain a `contents` base64 string");
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(contents_b64)
+                .expect("contents must be valid base64");
 
-    let decoded = base64::engine::general_purpose::STANDARD
-        .decode(contents_b64)
-        .expect("contents must be valid base64");
-
-    assert_eq!(
-        decoded, content,
-        "decoded file contents must match what was written"
+            assert_eq!(
+                decoded, content,
+                "decoded file contents must match what was written"
+            );
+        }
     );
 }
