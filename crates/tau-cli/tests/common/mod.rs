@@ -31,11 +31,59 @@
 #![allow(dead_code)]
 
 pub mod echo_plugins;
+pub mod mock_llm;
+pub use mock_llm::MockLlmBackend;
 
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::str::FromStr;
 
 use tempfile::TempDir;
+
+// ---- orchestration test helpers (T9: pattern tests) -------------------------
+
+/// Build a minimal `AgentDefinition` for orchestration pattern tests.
+pub fn agent_def(
+    id: &str,
+    display_name: &str,
+    package_id: &str,
+    llm_backend_name: &str,
+) -> tau_domain::AgentDefinition {
+    let (name, version) = package_id
+        .split_once('@')
+        .expect("package id must use <name>@<version> form");
+    let package = tau_domain::PackageId::new(
+        tau_domain::PackageName::from_str(name).expect("valid package name"),
+        tau_domain::Version::parse(version).expect("valid version"),
+    );
+    tau_domain::AgentDefinition::new(
+        tau_domain::AgentId::from_str(id).expect("valid agent id"),
+        display_name.to_string(),
+        package,
+        tau_domain::PackageName::from_str(llm_backend_name).expect("valid llm backend name"),
+    )
+}
+
+/// Parse a TOML manifest body into a validated `PackageManifest`.
+/// Panics on failure — test fixtures are author-controlled.
+pub fn manifest_from_toml(toml_body: &str) -> tau_domain::PackageManifest {
+    let unchecked: tau_domain::UncheckedManifest =
+        toml::from_str(toml_body).expect("test manifest TOML must parse");
+    unchecked
+        .validate()
+        .expect("test manifest must satisfy validation")
+}
+
+/// Build a fresh user-authored `Message` with the given text payload.
+pub fn user_message(content: &str) -> tau_domain::Message {
+    tau_domain::Message::new(
+        tau_domain::Address::User,
+        tau_domain::Address::User, // overwritten by runtime
+        tau_domain::MessagePayload::Text {
+            content: content.to_string(),
+        },
+    )
+}
 
 // ---- minimal cwd helpers ----------------------------------------------------
 
