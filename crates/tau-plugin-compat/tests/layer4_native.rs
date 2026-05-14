@@ -148,29 +148,22 @@ fn locate_bridge_bin() -> Option<PathBuf> {
 }
 
 /// Ensure `TAU_NET_BRIDGE_PATH` is set, locating the binary on disk.
-/// Returns `false` (and logs a SKIP message) if the bridge binary is
-/// not present — the caller should `return` to skip the test.
-fn ensure_bridge_path_or_skip() -> bool {
+/// Panics if the bridge binary is not present — caller should ensure the
+/// build step ran first. Tests gated with `#[ignore]` document this
+/// requirement in their ignore-reason string.
+fn ensure_bridge_path() {
     if std::env::var_os("TAU_NET_BRIDGE_PATH").is_some() {
-        return true;
+        return;
     }
-    match locate_bridge_bin() {
-        Some(path) => {
-            // SAFETY: `std::env::set_var` is sound on Rust 2021;
-            // nextest's per-test process isolation (and our serialized
-            // resolve-adapter cell) means racing env writes are not a
-            // concern here.
-            std::env::set_var("TAU_NET_BRIDGE_PATH", path);
-            true
-        }
-        None => {
-            eprintln!(
-                "SKIP: tau-net-bridge binary not found; \
-                 run `cargo build -p tau-sandbox-native --bin tau-net-bridge --release` first"
-            );
-            false
-        }
-    }
+    let path = locate_bridge_bin().expect(
+        "tau-net-bridge binary not found; \
+         run `cargo build -p tau-sandbox-native --bin tau-net-bridge --release` first",
+    );
+    // SAFETY: `std::env::set_var` is sound on Rust 2021;
+    // nextest's per-test process isolation (and our serialized
+    // resolve-adapter cell) means racing env writes are not a
+    // concern here.
+    std::env::set_var("TAU_NET_BRIDGE_PATH", path);
 }
 
 /// Construct a `LockedPlugin` pointing at the given binary path.
@@ -205,25 +198,21 @@ fn make_session_context_with_caps(caps: Vec<Capability>) -> SessionContext {
         .with_granted_capabilities(caps)
 }
 
-/// Resolve the native sandbox adapter or skip the test.
+/// Resolve the native sandbox adapter, panicking if unavailable.
 ///
-/// Returns `None` (and prints skip message) if the native adapter is
-/// unavailable on this host (e.g. kernel < 5.13 without landlock).
-async fn resolve_native_or_skip() -> Option<tau_runtime::sandbox::SandboxAdapter> {
-    match resolve_adapter_forced(RegistryKind::Native).await {
-        Ok(adapter) => {
-            if matches!(adapter.probe().await, SandboxProbe::Unavailable { .. }) {
-                eprintln!("SKIP: native adapter probe returned Unavailable");
-                None
-            } else {
-                Some(adapter)
-            }
-        }
-        Err(e) => {
-            eprintln!("SKIP: native adapter unavailable: {e}");
-            None
-        }
-    }
+/// Tests using this helper are gated with `#[ignore = "..."]` so they
+/// only run in environments where the native adapter is expected to be
+/// available (Linux with landlock/seccomp). A probe failure is a real
+/// test failure when the test is explicitly run.
+async fn resolve_native_adapter() -> tau_runtime::sandbox::SandboxAdapter {
+    let adapter = resolve_adapter_forced(RegistryKind::Native)
+        .await
+        .expect("native adapter must resolve (requires Linux + landlock/seccomp)");
+    assert!(
+        !matches!(adapter.probe().await, SandboxProbe::Unavailable { .. }),
+        "native adapter probe returned Unavailable (requires Linux + landlock/seccomp)"
+    );
+    adapter
 }
 
 // ---------------------------------------------------------------------------
@@ -243,25 +232,20 @@ async fn resolve_native_or_skip() -> Option<tau_runtime::sandbox::SandboxAdapter
 /// - The shell plugin's `SessionContext.granted_capabilities` path
 ///   admission check (process.spawn allow-list)
 #[tokio::test]
+#[ignore = "requires Linux + landlock/seccomp + pre-built shell-plugin (cargo build -p tau-plugins-shell --release)"]
 async fn shell_layer4_native_runs_echo_hello() {
     // 1. Locate the pre-built shell plugin binary.  The CI workflow must
     //    have compiled it beforehand.
     let bin_path = locate_shell_bin();
-    if !bin_path.exists() {
-        eprintln!(
-            "SKIP: shell-plugin binary not found at {}; \
-             run `cargo build -p tau-plugins-shell --release` first",
-            bin_path.display()
-        );
-        return;
-    }
+    assert!(
+        bin_path.exists(),
+        "shell-plugin binary not found at {}; \
+         run `cargo build -p tau-plugins-shell --release` first",
+        bin_path.display()
+    );
 
-    // 2. Resolve the native sandbox adapter, skip gracefully on hosts without
-    //    landlock/seccomp (macOS, old kernels).
-    let adapter = match resolve_native_or_skip().await {
-        Some(a) => a,
-        None => return,
-    };
+    // 2. Resolve the native sandbox adapter (Linux + landlock/seccomp required).
+    let adapter = resolve_native_adapter().await;
 
     // 3. Build the SandboxPlan.  Shell plugin needs process.spawn capability
     //    so the native adapter allows exec(echo). The tempdir itself doesn't
@@ -339,23 +323,19 @@ async fn shell_layer4_native_runs_echo_hello() {
 /// - Task 3's symlink-resolution fix: `/tmp` may be a symlink on Ubuntu.
 /// - The fs-read plugin's glob-based path admission check.
 #[tokio::test]
+#[ignore = "requires Linux + landlock/seccomp + pre-built fs-read-plugin (cargo build -p tau-plugins-fs-read --release)"]
 async fn fs_read_layer4_native_reads_data_file() {
     // 1. Locate the pre-built fs-read-plugin binary.
     let bin_path = locate_fs_read_bin();
-    if !bin_path.exists() {
-        eprintln!(
-            "SKIP: fs-read-plugin binary not found at {}; \
-             run `cargo build -p tau-plugins-fs-read --release` first",
-            bin_path.display()
-        );
-        return;
-    }
+    assert!(
+        bin_path.exists(),
+        "fs-read-plugin binary not found at {}; \
+         run `cargo build -p tau-plugins-fs-read --release` first",
+        bin_path.display()
+    );
 
-    // 2. Resolve the native sandbox adapter, skip gracefully.
-    let adapter = match resolve_native_or_skip().await {
-        Some(a) => a,
-        None => return,
-    };
+    // 2. Resolve the native sandbox adapter (Linux + landlock/seccomp required).
+    let adapter = resolve_native_adapter().await;
 
     // 3. Write the data fixture into a tempdir.
     let scope = scratch_dir("l4-native-fs-read");
@@ -534,31 +514,24 @@ fn make_net_http_localhost_cap() -> Capability {
 /// Skips if: (a) landlock/native adapter unavailable, (b) anthropic-plugin
 /// binary not yet built.
 #[tokio::test]
+#[ignore = "requires Linux + landlock/seccomp + pre-built anthropic-plugin + tau-net-bridge"]
 async fn anthropic_layer4_native_completes_via_cassette() {
     // 1. Locate the pre-built anthropic plugin binary.
     let bin_path = locate_plugin_bin("anthropic-plugin");
-    if !bin_path.exists() {
-        eprintln!(
-            "SKIP: anthropic-plugin binary not found at {}; \
-             run `cargo build -p tau-plugins-anthropic --release` first",
-            bin_path.display()
-        );
-        return;
-    }
+    assert!(
+        bin_path.exists(),
+        "anthropic-plugin binary not found at {}; \
+         run `cargo build -p tau-plugins-anthropic --release` first",
+        bin_path.display()
+    );
 
     // 1b. Locate tau-net-bridge and export TAU_NET_BRIDGE_PATH (read by
     //     tau_sandbox_native::strict::wrap_spawn when the plan has
     //     Network(Http)).
-    if !ensure_bridge_path_or_skip() {
-        return;
-    }
+    ensure_bridge_path();
 
-    // 2. Resolve the native sandbox adapter, skip gracefully on hosts without
-    //    landlock/seccomp (macOS, old kernels).
-    let adapter = match resolve_native_or_skip().await {
-        Some(a) => a,
-        None => return,
-    };
+    // 2. Resolve the native sandbox adapter (Linux + landlock/seccomp required).
+    let adapter = resolve_native_adapter().await;
 
     // 3. Start a cassette-replay HTTP server from the anthropic happy-path
     //    cassette.  The server binds to 127.0.0.1:<random_port>.
@@ -637,30 +610,24 @@ async fn anthropic_layer4_native_completes_via_cassette() {
 /// Skips if: (a) landlock/native adapter unavailable, (b) ollama-plugin
 /// binary not yet built.
 #[tokio::test]
+#[ignore = "requires Linux + landlock/seccomp + pre-built ollama-plugin + tau-net-bridge"]
 async fn ollama_layer4_native_completes_via_cassette() {
     // 1. Locate the pre-built ollama plugin binary.
     let bin_path = locate_plugin_bin("ollama-plugin");
-    if !bin_path.exists() {
-        eprintln!(
-            "SKIP: ollama-plugin binary not found at {}; \
-             run `cargo build -p tau-plugins-ollama --release` first",
-            bin_path.display()
-        );
-        return;
-    }
+    assert!(
+        bin_path.exists(),
+        "ollama-plugin binary not found at {}; \
+         run `cargo build -p tau-plugins-ollama --release` first",
+        bin_path.display()
+    );
 
     // 1b. Locate tau-net-bridge and export TAU_NET_BRIDGE_PATH (read by
     //     tau_sandbox_native::strict::wrap_spawn when the plan has
     //     Network(Http)).
-    if !ensure_bridge_path_or_skip() {
-        return;
-    }
+    ensure_bridge_path();
 
-    // 2. Resolve the native sandbox adapter.
-    let adapter = match resolve_native_or_skip().await {
-        Some(a) => a,
-        None => return,
-    };
+    // 2. Resolve the native sandbox adapter (Linux + landlock/seccomp required).
+    let adapter = resolve_native_adapter().await;
 
     // 3. Start the cassette-replay server.
     let cassette_path =
@@ -733,30 +700,24 @@ async fn ollama_layer4_native_completes_via_cassette() {
 /// Skips if: (a) landlock/native adapter unavailable, (b) openai-plugin
 /// binary not yet built.
 #[tokio::test]
+#[ignore = "requires Linux + landlock/seccomp + pre-built openai-plugin + tau-net-bridge"]
 async fn openai_layer4_native_completes_via_cassette() {
     // 1. Locate the pre-built openai plugin binary.
     let bin_path = locate_plugin_bin("openai-plugin");
-    if !bin_path.exists() {
-        eprintln!(
-            "SKIP: openai-plugin binary not found at {}; \
-             run `cargo build -p tau-plugins-openai --release` first",
-            bin_path.display()
-        );
-        return;
-    }
+    assert!(
+        bin_path.exists(),
+        "openai-plugin binary not found at {}; \
+         run `cargo build -p tau-plugins-openai --release` first",
+        bin_path.display()
+    );
 
     // 1b. Locate tau-net-bridge and export TAU_NET_BRIDGE_PATH (read by
     //     tau_sandbox_native::strict::wrap_spawn when the plan has
     //     Network(Http)).
-    if !ensure_bridge_path_or_skip() {
-        return;
-    }
+    ensure_bridge_path();
 
-    // 2. Resolve the native sandbox adapter.
-    let adapter = match resolve_native_or_skip().await {
-        Some(a) => a,
-        None => return,
-    };
+    // 2. Resolve the native sandbox adapter (Linux + landlock/seccomp required).
+    let adapter = resolve_native_adapter().await;
 
     // 3. Start the cassette-replay server.
     let cassette_path =
