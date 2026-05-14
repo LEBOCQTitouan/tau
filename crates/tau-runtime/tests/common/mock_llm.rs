@@ -25,11 +25,11 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use tau_domain::Value;
+use tau_ports::fixtures::{make_completion_response, make_token_usage};
 use tau_ports::{
     batch_to_stream, CompletionRequest, CompletionResponse, CompletionStream, LlmBackend, LlmError,
     StopReason, ToolUse,
 };
-use tau_ports::fixtures::{make_completion_response, make_token_usage};
 
 /// A scripted turn for `MockLlmBackend`.
 ///
