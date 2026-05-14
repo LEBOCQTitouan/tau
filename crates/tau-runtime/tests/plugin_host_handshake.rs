@@ -17,6 +17,8 @@ use tau_runtime::error::HandshakeFailureReason;
 use tau_runtime::plugin_host::__internals::drive_handshake;
 use tau_runtime::RuntimeError;
 
+use assert_matches::assert_matches;
+
 fn trace_context() -> TraceContext {
     TraceContext::new(
         "run-1".to_string(),
@@ -107,16 +109,18 @@ async fn protocol_version_mismatch_surfaces_typed_reason() {
 
     let result = task.await.unwrap();
     let err = result.expect_err("handshake should fail");
-    let RuntimeError::PluginHandshakeFailed { plugin, reason } = err else {
-        panic!("expected PluginHandshakeFailed, got {err:?}");
-    };
-    assert_eq!(plugin, "echo-llm");
-    assert!(
-        matches!(
-            reason,
-            HandshakeFailureReason::ProtocolVersionMismatch { .. }
-        ),
-        "expected ProtocolVersionMismatch, got {reason:?}"
+    assert_matches!(
+        err,
+        RuntimeError::PluginHandshakeFailed { plugin, reason } => {
+            assert_eq!(plugin, "echo-llm");
+            assert!(
+                matches!(
+                    reason,
+                    HandshakeFailureReason::ProtocolVersionMismatch { .. }
+                ),
+                "expected ProtocolVersionMismatch, got {reason:?}"
+            );
+        }
     );
 }
 
@@ -152,18 +156,19 @@ async fn provides_mismatch_surfaces_typed_reason() {
 
     let result = task.await.unwrap();
     let err = result.expect_err("handshake should fail");
-    let RuntimeError::PluginHandshakeFailed { reason, .. } = err else {
-        panic!("expected PluginHandshakeFailed, got {err:?}");
-    };
-    let HandshakeFailureReason::ProvidesMismatch {
-        manifest,
-        plugin_advertised,
-    } = reason
-    else {
-        panic!("expected ProvidesMismatch, got {reason:?}");
-    };
-    assert_eq!(manifest, PortKind::LlmBackend);
-    assert_eq!(plugin_advertised, PortKind::Tool);
+    assert_matches!(
+        err,
+        RuntimeError::PluginHandshakeFailed {
+            reason: HandshakeFailureReason::ProvidesMismatch {
+                manifest,
+                plugin_advertised,
+            },
+            ..
+        } => {
+            assert_eq!(manifest, PortKind::LlmBackend);
+            assert_eq!(plugin_advertised, PortKind::Tool);
+        }
+    );
 }
 
 #[tokio::test]
@@ -198,13 +203,15 @@ async fn missing_required_method_surfaces_typed_reason() {
 
     let result = task.await.unwrap();
     let err = result.expect_err("handshake should fail");
-    let RuntimeError::PluginHandshakeFailed { reason, .. } = err else {
-        panic!("expected PluginHandshakeFailed, got {err:?}");
-    };
-    let HandshakeFailureReason::MissingRequiredMethod { method } = reason else {
-        panic!("expected MissingRequiredMethod, got {reason:?}");
-    };
-    assert_eq!(method, "llm.stream");
+    assert_matches!(
+        err,
+        RuntimeError::PluginHandshakeFailed {
+            reason: HandshakeFailureReason::MissingRequiredMethod { method },
+            ..
+        } => {
+            assert_eq!(method, "llm.stream");
+        }
+    );
 }
 
 #[tokio::test]
@@ -234,12 +241,14 @@ async fn timeout_surfaces_typed_reason() {
 
     let result = task.await.unwrap();
     let err = result.expect_err("handshake should fail");
-    let RuntimeError::PluginHandshakeFailed { reason, .. } = err else {
-        panic!("expected PluginHandshakeFailed, got {err:?}");
-    };
-    assert!(
-        matches!(reason, HandshakeFailureReason::Timeout),
-        "expected Timeout, got {reason:?}"
+    assert_matches!(
+        err,
+        RuntimeError::PluginHandshakeFailed { reason, .. } => {
+            assert!(
+                matches!(reason, HandshakeFailureReason::Timeout),
+                "expected Timeout, got {reason:?}"
+            );
+        }
     );
     // Keep peer alive until after the assertion.
     drop(peer);
@@ -271,15 +280,17 @@ async fn eof_before_response_surfaces_malformed() {
 
     let result = task.await.unwrap();
     let err = result.expect_err("handshake should fail");
-    let RuntimeError::PluginHandshakeFailed { reason, .. } = err else {
-        panic!("expected PluginHandshakeFailed, got {err:?}");
-    };
-    let HandshakeFailureReason::Malformed { detail } = reason else {
-        panic!("expected Malformed, got {reason:?}");
-    };
-    assert!(
-        detail.contains("EOF") || detail.contains("eof"),
-        "expected EOF detail, got: {detail}"
+    assert_matches!(
+        err,
+        RuntimeError::PluginHandshakeFailed {
+            reason: HandshakeFailureReason::Malformed { detail },
+            ..
+        } => {
+            assert!(
+                detail.contains("EOF") || detail.contains("eof"),
+                "expected EOF detail, got: {detail}"
+            );
+        }
     );
 }
 
@@ -312,15 +323,17 @@ async fn plugin_error_envelope_surfaces_malformed() {
 
     let result = task.await.unwrap();
     let err = result.expect_err("handshake should fail");
-    let RuntimeError::PluginHandshakeFailed { reason, .. } = err else {
-        panic!("expected PluginHandshakeFailed, got {err:?}");
-    };
-    let HandshakeFailureReason::Malformed { detail } = reason else {
-        panic!("expected Malformed, got {reason:?}");
-    };
-    assert!(
-        detail.contains("error envelope"),
-        "expected error-envelope detail, got: {detail}"
+    assert_matches!(
+        err,
+        RuntimeError::PluginHandshakeFailed {
+            reason: HandshakeFailureReason::Malformed { detail },
+            ..
+        } => {
+            assert!(
+                detail.contains("error envelope"),
+                "expected error-envelope detail, got: {detail}"
+            );
+        }
     );
 }
 
