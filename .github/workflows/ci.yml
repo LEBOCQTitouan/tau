@@ -109,6 +109,11 @@ jobs:
           with-mold: true
       - name: Test tau-ports (test-fixtures feature only)
         run: cargo nextest run -p tau-ports --features test-fixtures
+      - name: Doctests tau-ports (test-fixtures feature only)
+        # Workspace-level `cargo test --workspace --doc` (test-stable job)
+        # runs doctests without features; the fixtures module is gated
+        # behind `test-fixtures`, so its doctests only compile here.
+        run: cargo test --doc -p tau-ports --features test-fixtures
 
   feature-flag-matrix:
     name: feature-flag-matrix / linux
