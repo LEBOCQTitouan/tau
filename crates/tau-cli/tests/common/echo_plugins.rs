@@ -146,6 +146,5 @@ fn pick_binary(release_dir: &std::path::Path, bin_name: &str) -> PathBuf {
 /// (and intermittently on macOS CI runners depending on directory
 /// resolution).
 fn canonicalize(p: &std::path::Path) -> PathBuf {
-    std::fs::canonicalize(p)
-        .unwrap_or_else(|e| panic!("canonicalize {}: {e}", p.display()))
+    std::fs::canonicalize(p).unwrap_or_else(|e| panic!("canonicalize {}: {e}", p.display()))
 }
