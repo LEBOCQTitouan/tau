@@ -67,7 +67,9 @@ pub fn substitute_skill_dir(caps: &[Capability], install_path: &Path) -> Vec<Cap
                 }))
                 .unwrap_or_else(|_| c.clone())
             }
-            Capability::Filesystem(FsCapability::Write { paths, max_bytes, .. }) => {
+            Capability::Filesystem(FsCapability::Write {
+                paths, max_bytes, ..
+            }) => {
                 let mut v = serde_json::json!({
                     "kind": "fs.write",
                     "paths": subst(paths)
@@ -159,7 +161,9 @@ pub fn apply_scope_paths(
                     }
                 }
             }
-            Capability::Filesystem(FsCapability::Write { paths, max_bytes, .. }) => {
+            Capability::Filesystem(FsCapability::Write {
+                paths, max_bytes, ..
+            }) => {
                 let narrowed = intersect(&paths);
                 if !narrowed.is_empty() {
                     let mut v = serde_json::json!({
@@ -271,8 +275,10 @@ mod tests {
     use tau_domain::NetCapability;
 
     fn fs_read(paths: Vec<&str>) -> Capability {
-        let paths_json: Vec<serde_json::Value> =
-            paths.iter().map(|p| serde_json::Value::String(p.to_string())).collect();
+        let paths_json: Vec<serde_json::Value> = paths
+            .iter()
+            .map(|p| serde_json::Value::String(p.to_string()))
+            .collect();
         serde_json::from_value(serde_json::json!({
             "kind": "fs.read",
             "paths": paths_json
@@ -281,8 +287,10 @@ mod tests {
     }
 
     fn fs_write(paths: Vec<&str>) -> Capability {
-        let paths_json: Vec<serde_json::Value> =
-            paths.iter().map(|p| serde_json::Value::String(p.to_string())).collect();
+        let paths_json: Vec<serde_json::Value> = paths
+            .iter()
+            .map(|p| serde_json::Value::String(p.to_string()))
+            .collect();
         serde_json::from_value(serde_json::json!({
             "kind": "fs.write",
             "paths": paths_json
@@ -291,8 +299,10 @@ mod tests {
     }
 
     fn net_http(hosts: Vec<&str>) -> Capability {
-        let hosts_json: Vec<serde_json::Value> =
-            hosts.iter().map(|h| serde_json::Value::String(h.to_string())).collect();
+        let hosts_json: Vec<serde_json::Value> = hosts
+            .iter()
+            .map(|h| serde_json::Value::String(h.to_string()))
+            .collect();
         serde_json::from_value(serde_json::json!({
             "kind": "net.http",
             "hosts": hosts_json,
@@ -322,7 +332,9 @@ mod tests {
         let out = substitute_skill_dir(&caps, std::path::Path::new("/scope"));
         assert_eq!(out.len(), 1);
         match &out[0] {
-            Capability::Network(NetCapability::Http { hosts, methods: _, .. }) => {
+            Capability::Network(NetCapability::Http {
+                hosts, methods: _, ..
+            }) => {
                 assert_eq!(hosts[0], "api.example.com");
             }
             other => panic!("expected net.http, got {other:?}"),
