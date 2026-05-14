@@ -494,8 +494,14 @@ pub fn list_sessions(
         });
     }
 
-    // Descending by created_at — newest first.
-    out.sort_by_key(|m| std::cmp::Reverse(m.created_at));
+    // Descending by created_at — newest first. Tiebreak by id
+    // descending so the order is total. UUIDv7 ids embed a 48-bit
+    // millisecond timestamp, so the id-descending tiebreaker is
+    // consistent with intent (newer first) when two sessions share
+    // a `created_at` SystemTime — which happens both in rapid
+    // scripted creation and in tests where SystemTime resolution
+    // can quantize back-to-back captures to the same value.
+    out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
     Ok(out)
 }
 
