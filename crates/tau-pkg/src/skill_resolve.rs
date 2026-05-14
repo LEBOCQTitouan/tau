@@ -9,9 +9,9 @@ use std::path::PathBuf;
 
 use tau_domain::{Capability, PackageManifest, PackageName, SkillManifest, Version};
 
+use crate::error::RegistryError;
 use crate::lockfile::{LockFile, SkillFrontmatterSnapshot};
 use crate::scope::Scope;
-use crate::error::RegistryError;
 
 /// A fully-resolved installed skill, ready for runtime invocation.
 #[derive(Debug, Clone)]
@@ -75,7 +75,9 @@ pub enum FindSkillError {
     },
     /// Manifest declared a kind other than "skill" but was found in a
     /// skill entry in the lockfile.
-    #[error("manifest at {path:?} has kind != \"skill\" but is recorded as a skill in the lockfile")]
+    #[error(
+        "manifest at {path:?} has kind != \"skill\" but is recorded as a skill in the lockfile"
+    )]
     NotASkillManifest {
         /// The manifest path.
         path: PathBuf,
@@ -105,14 +107,10 @@ pub fn find_installed_skill(
         None => return Ok(None),
     };
 
-    let locked_skill = pkg
-        .skill
-        .as_ref()
-        .expect("filtered to Some(skill) above");
+    let locked_skill = pkg.skill.as_ref().expect("filtered to Some(skill) above");
 
     // Install path uses state_path (e.g. <project>/.tau/packages/<name>/<version>)
-    let install_path = scope
-        .package_dir(&pkg.name, &pkg.active_version);
+    let install_path = scope.package_dir(&pkg.name, &pkg.active_version);
 
     let toml_path = install_path.join("tau.toml");
     if !toml_path.exists() {
@@ -121,18 +119,16 @@ pub fn find_installed_skill(
             path: install_path,
         });
     }
-    let toml_text = std::fs::read_to_string(&toml_path).map_err(|e| {
-        FindSkillError::ReadManifest {
+    let toml_text =
+        std::fs::read_to_string(&toml_path).map_err(|e| FindSkillError::ReadManifest {
             path: toml_path.clone(),
             source: e,
-        }
-    })?;
-    let unchecked: tau_domain::UncheckedManifest = toml::from_str(&toml_text).map_err(|e| {
-        FindSkillError::ParseManifest {
+        })?;
+    let unchecked: tau_domain::UncheckedManifest =
+        toml::from_str(&toml_text).map_err(|e| FindSkillError::ParseManifest {
             path: toml_path.clone(),
             detail: e.to_string(),
-        }
-    })?;
+        })?;
     let manifest = unchecked
         .validate()
         .map_err(|e| FindSkillError::ValidateManifest {
@@ -143,9 +139,7 @@ pub fn find_installed_skill(
     let skill = match manifest.skill() {
         Some(s) => s.clone(),
         None => {
-            return Err(FindSkillError::NotASkillManifest {
-                path: toml_path,
-            });
+            return Err(FindSkillError::NotASkillManifest { path: toml_path });
         }
     };
 
@@ -165,10 +159,12 @@ pub fn find_installed_skill(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lockfile::{LockFile, LockedPackage, LockedSkill, LockedVersion, SkillFrontmatterSnapshot};
+    use crate::lockfile::{
+        LockFile, LockedPackage, LockedSkill, LockedVersion, SkillFrontmatterSnapshot,
+    };
     use std::fs;
-    use std::time::UNIX_EPOCH;
     use std::time::Duration;
+    use std::time::UNIX_EPOCH;
     use tempfile::tempdir;
 
     fn make_critic_scope(tmp: &std::path::Path) -> Scope {
@@ -269,13 +265,13 @@ capabilities = []
         let scope = make_critic_scope(tmp.path());
         // Remove the install path tau.toml
         let toml_path = scope
-            .package_dir(
-                &"critic".parse().unwrap(),
-                &"0.1.0".parse().unwrap(),
-            )
+            .package_dir(&"critic".parse().unwrap(), &"0.1.0".parse().unwrap())
             .join("tau.toml");
         fs::remove_file(&toml_path).unwrap();
         let result = find_installed_skill(&scope, "critic");
-        assert!(matches!(result, Err(FindSkillError::InstallPathMissing { .. })));
+        assert!(matches!(
+            result,
+            Err(FindSkillError::InstallPathMissing { .. })
+        ));
     }
 }
