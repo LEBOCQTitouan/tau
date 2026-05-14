@@ -1,0 +1,13 @@
+---
+source: crates/tau-cli/tests/cmd_skill_show.rs
+assertion_line: 166
+expression: normalized
+---
+critic 0.1.0
+─────────────────────────────────────────────────
+description    Reviews drafts for quality.
+source         https://example.com/critic.git
+install path   [SCOPE]/packages/critic/0.1.0
+
+capabilities
+  fs.read    ${SKILL_DIR}/references/**

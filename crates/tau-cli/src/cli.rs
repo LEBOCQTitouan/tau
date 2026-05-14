@@ -112,6 +112,9 @@ pub enum Command {
     /// Workflow subcommand group (list, run, log, resume).
     #[command(subcommand)]
     Workflow(WorkflowSubcommand),
+    /// Inspect installed skill packages (list, show).
+    #[command(subcommand)]
+    Skill(SkillSubcommand),
 }
 
 /// `tau plugin <action>` — debug-tier helpers per spec §9.
@@ -530,6 +533,42 @@ pub struct WorkflowResumeArgs {
     /// Override drift detection (workflow file changed since the original run).
     #[arg(long)]
     pub force: bool,
+}
+
+/// `tau skill <subcommand>` variants.
+#[derive(Debug, clap::Subcommand)]
+pub enum SkillSubcommand {
+    /// List all installed skill packages in the current scope.
+    List(SkillListArgs),
+    /// Show detail for one installed skill.
+    Show(SkillShowArgs),
+}
+
+/// Arguments for `tau skill list`.
+#[derive(Debug, clap::Args)]
+pub struct SkillListArgs {
+    /// Emit canonical JSON instead of the default human-formatted table.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `tau skill show`.
+#[derive(Debug, clap::Args)]
+pub struct SkillShowArgs {
+    /// Skill package name (exact match).
+    pub name: String,
+    /// Emit canonical JSON instead of the default human-formatted summary.
+    #[arg(long)]
+    pub json: bool,
+    /// Include the SKILL.md body in the output. Rendered for terminal
+    /// display by default; combine with --raw for verbatim file bytes.
+    #[arg(long)]
+    pub body: bool,
+    /// With --body: emit verbatim file bytes instead of rendered output.
+    /// Implies --body (clap `requires` enforces). Useful for piping to
+    /// grep, diff, less.
+    #[arg(long, requires = "body")]
+    pub raw: bool,
 }
 
 #[cfg(test)]
