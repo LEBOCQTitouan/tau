@@ -124,6 +124,37 @@ pub fn make_session_context(
 }
 
 // ---------------------------------------------------------------------------
+// scratch_dir
+// ---------------------------------------------------------------------------
+
+/// Create a labeled scratch [`tempfile::TempDir`] for test use.
+///
+/// Prefer this over `tempfile::TempDir::new().unwrap()`: the panic message
+/// names the call site via `label`, and the directory itself is prefixed
+/// `tau-test-<label>-` so stray scratch dirs are attributable when a test
+/// leaks one (e.g. on hard process kill).
+///
+/// # Panics
+///
+/// Panics with a descriptive message (`label` included) if the underlying
+/// `tempfile::Builder::tempdir()` call fails.
+///
+/// # Example
+///
+/// ```ignore
+/// use tau_ports::fixtures::scratch_dir;
+///
+/// let dir = scratch_dir("install-roundtrip");
+/// // dir.path() lives until `dir` is dropped.
+/// ```
+pub fn scratch_dir(label: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("tau-test-{label}-"))
+        .tempdir()
+        .unwrap_or_else(|e| panic!("failed to create scratch dir for '{label}': {e}"))
+}
+
+// ---------------------------------------------------------------------------
 // MockLlmBackend
 // ---------------------------------------------------------------------------
 
@@ -683,5 +714,21 @@ mod sandbox_v01_tests {
             shape: CapabilityShape::FilesystemRead,
         };
         assert!(format!("{e}").contains("unsupported shape"));
+    }
+
+    #[test]
+    fn scratch_dir_creates_with_labeled_prefix() {
+        let dir = scratch_dir("smoke");
+        let name = dir
+            .path()
+            .file_name()
+            .expect("tempdir path has a file name")
+            .to_string_lossy()
+            .into_owned();
+        assert!(
+            name.starts_with("tau-test-smoke-"),
+            "prefix not applied; got: {name}"
+        );
+        assert!(dir.path().exists(), "scratch dir should exist on disk");
     }
 }

@@ -16,7 +16,7 @@
 
 use std::path::Path;
 
-use tempfile::TempDir;
+use tau_ports::fixtures::scratch_dir;
 
 const SCHEMA_V3_HEADER: &str = "schema_version = 3\nkind = \"project\"\ncreated_at = \"2026-05-04T00:00:00Z\"\ncreated_by_tau_version = \"0.0.0\"\n";
 
@@ -270,7 +270,7 @@ fn assert_ok_or_skip(out: &std::process::Output, plugin: &str) {
 
 #[test]
 fn anthropic_layer3_check_sandbox_passes() {
-    let scope = TempDir::new().unwrap();
+    let scope = scratch_dir("l3-anthropic");
     write_scope_config(scope.path());
     write_project_tau_toml_llm(scope.path(), "anthropic");
     install_synthetic_plugin(scope.path(), "anthropic", "0.1.0");
@@ -284,7 +284,7 @@ fn anthropic_layer3_check_sandbox_passes() {
 
 #[test]
 fn ollama_layer3_check_sandbox_passes() {
-    let scope = TempDir::new().unwrap();
+    let scope = scratch_dir("l3-ollama");
     write_scope_config(scope.path());
     write_project_tau_toml_llm(scope.path(), "ollama");
     install_synthetic_plugin(scope.path(), "ollama", "0.1.0");
@@ -298,7 +298,7 @@ fn ollama_layer3_check_sandbox_passes() {
 
 #[test]
 fn openai_layer3_check_sandbox_passes() {
-    let scope = TempDir::new().unwrap();
+    let scope = scratch_dir("l3-openai");
     write_scope_config(scope.path());
     write_project_tau_toml_llm(scope.path(), "openai");
     install_synthetic_plugin(scope.path(), "openai", "0.1.0");
@@ -312,7 +312,7 @@ fn openai_layer3_check_sandbox_passes() {
 
 #[test]
 fn fs_read_layer3_check_sandbox_passes() {
-    let scope = TempDir::new().unwrap();
+    let scope = scratch_dir("l3-fs-read");
     write_scope_config(scope.path());
     write_project_tau_toml_tool(scope.path(), "fs-read");
     install_synthetic_plugin(scope.path(), "fs-read", "0.1.0");
@@ -326,7 +326,7 @@ fn fs_read_layer3_check_sandbox_passes() {
 
 #[test]
 fn shell_layer3_check_sandbox_passes() {
-    let scope = TempDir::new().unwrap();
+    let scope = scratch_dir("l3-shell");
     write_scope_config(scope.path());
     write_project_tau_toml_tool(scope.path(), "shell");
     install_synthetic_plugin(scope.path(), "shell", "0.1.0");
