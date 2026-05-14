@@ -1,0 +1,39 @@
+[book]
+title = "tau"
+description = "tau — agentic Rust runtime. Documentation."
+authors = ["tau contributors"]
+language = "en"
+multilingual = false
+src = "."
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/titouanlebocq/tau"
+edit-url-template = "https://github.com/titouanlebocq/tau/edit/main/docs/{path}"
+no-section-label = true
+
+[output.html.search]
+enable = true
+limit-results = 30
+use-boolean-and = true
+boost-title = 2
+boost-hierarchy = 1
+boost-paragraph = 1
+expand = true
+heading-split-level = 3
+
+# mdbook-linkcheck disabled for v1.
+#
+# Activating it surfaces ~50 pre-existing issues from older ADRs:
+# `[ignore]` reference-link false positives in prose, dead refs to
+# spec/plan files that were never committed, and `../` links outside
+# the docs/ root (e.g. CLAUDE.md). Cleaning these up is its own PR,
+# tracked as a follow-up after this pipeline ships.
+#
+# To re-enable, restore an `[output.linkcheck]` section here AND
+# re-install `mdbook-linkcheck` in both `.github/workflows/docs-*.yml`.
