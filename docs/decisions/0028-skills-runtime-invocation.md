@@ -63,17 +63,15 @@ Bonus: 5 `#[ignore]`'d orchestration pattern test skeletons from PR #59 are un-i
 - No new external deps.
 - No CI changes.
 
-## Discovered during implementation (deferred)
+## Discovered during implementation
 
-Two pre-existing bugs surfaced by Skills-4 e2e tests but NOT fixed in this PR (out of scope):
+Skills-4 T8 e2e tests surfaced three gaps in `capability_satisfies`:
 
-1. **`capability_satisfies()` missing `TaskList` / `Plan` arms** (`tau-runtime/src/capability.rs`): falls through to `_ => false`. Means `task.*` and `run.note` virtual tool calls hit `PolicyDenied`. T9 patterns redesigned to use only `agent.*.spawn` (handled). Should be fixed as a Skills-4 follow-up.
+1. **`Capability::Skill` arm missing** — fixed in this PR. Added `skill_satisfies` helper with `string_subset` semantics matching `agent_satisfies`. Without this fix, every `skill.<name>.spawn` would silently PolicyDeny.
 
-2. **`check_capability_subset()` uses literal JSON string comparison** (`tau-runtime/src/orchestration/virtual_tools.rs`): subset law check compares JSON serialisations rather than semantic capability comparison. Means a narrowed `agent.spawn(["coder","tester"])` isn't recognized as subset of `agent.spawn(["team-lead","coder","tester"])`. T9 pattern D works around by granting child the full grant.
+2. **`Capability::TaskList` / `Capability::Plan` arms missing** — fixed independently on main (merged before this PR rebased; visible in `capability.rs` as `task_list_satisfies` + `plan_satisfies` helpers with mode-rank subsumption). Merge resolved by keeping both branches' arms.
 
-Both deserve their own ROADMAP entries.
-
-The Skills-4 T8 implementation surfaced and fixed a third gap: `capability_satisfies` had no `Capability::Skill` arm before this PR. Added `skill_satisfies` helper with `string_subset` semantics matching `agent_satisfies`. Without this fix, every `skill.<name>.spawn` would silently PolicyDeny.
+3. **`check_capability_subset()` uses literal JSON string comparison** (`tau-runtime/src/orchestration/virtual_tools.rs`): subset law check compares JSON serialisations rather than semantic capability comparison. Means a narrowed `agent.spawn(["coder","tester"])` isn't recognized as subset of `agent.spawn(["team-lead","coder","tester"])`. **Still deferred** — T9 pattern D works around by granting the child the full grant. Deserves its own ROADMAP entry.
 
 ## Out of scope (deferred to Skills-5+)
 
