@@ -4,10 +4,13 @@
 //! invocation). Uses a project scope: create `<tmp>/.tau/` so that
 //! `Scope::resolve(&cwd)` finds it when `current_dir` is `<tmp>`.
 //!
-//! Test list (3 tests, 2 insta snapshots):
-//! 1. `list_human_three_skills`  — column-aligned table, 3 skills alphabetical.
-//! 2. `list_human_empty_state`   — "no skills installed." + hint.
-//! 3. `list_json_three_skills`   — `--json` flag, assert via JSON parse.
+//! Test list (6 tests, 2 insta snapshots):
+//! 1. `list_human_three_skills`              — column-aligned table, 3 skills alphabetical.
+//! 2. `list_human_empty_state`               — "no skills installed." + hint.
+//! 3. `list_json_three_skills`               — `--json` flag, assert via JSON parse.
+//! 4. `list_lockfile_schema_too_new_errors`  — schema_version=99 → SchemaTooNew (exit 2).
+//! 5. `list_lockfile_malformed_toml_errors`  — garbage TOML → parse error (exit 2).
+//! 6. `list_plugin_only_lockfile_shows_empty`— plugin packages filtered out → empty state.
 
 use assert_cmd::Command;
 use serde_json::Value;
@@ -166,5 +169,107 @@ fn list_json_three_skills() {
         parsed["skills"][1]["name"],
         Value::String("proofread".into()),
         "second skill should be 'proofread' (alphabetical)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Negative-path tests
+// ---------------------------------------------------------------------------
+
+/// Lockfile with `schema_version = 99` (future / unknown schema).
+/// Expect exit 2 with `error: loading lockfile` on stderr. The underlying
+/// `RegistryError::SchemaTooNew` is hidden behind the anyhow `Context` wrap
+/// in cmd/skill/list.rs unless `--debug` is set. Pin the user-visible shape:
+/// the command MUST NOT panic and MUST surface a clear top-line error.
+#[test]
+fn list_lockfile_schema_too_new_errors() {
+    let dir = TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".tau")).unwrap();
+    // Inline setup — no helper for "bogus schema version" since this is the
+    // only test that needs it.
+    std::fs::write(
+        dir.path().join("tau-lock.toml"),
+        "schema_version = 99\n\
+         generated_by_tau_version = \"0.0.0\"\n\
+         generated_at = \"2026-05-12T10:00:00Z\"\n",
+    )
+    .unwrap();
+
+    let output = run_skill_list(dir.path(), &[]);
+    let exit_code = output.status.code().unwrap_or(-1);
+    assert_eq!(exit_code, 2, "expected exit code 2; got {exit_code}");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("loading lockfile"),
+        "expected 'loading lockfile' in stderr; got: {stderr}"
+    );
+}
+
+/// Lockfile present but its bytes are not valid TOML.
+/// Expect exit 2 with `error: loading lockfile` on stderr.
+/// Pins: no panic; user-visible top-line error mentions the lockfile load step.
+#[test]
+fn list_lockfile_malformed_toml_errors() {
+    let dir = TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".tau")).unwrap();
+    // Inline setup — garbage TOML bytes. No helper for this scenario.
+    std::fs::write(
+        dir.path().join("tau-lock.toml"),
+        "this is not valid toml = = = [[[\n",
+    )
+    .unwrap();
+
+    let output = run_skill_list(dir.path(), &[]);
+    let exit_code = output.status.code().unwrap_or(-1);
+    assert_eq!(exit_code, 2, "expected exit code 2; got {exit_code}");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("loading lockfile"),
+        "expected 'loading lockfile' in stderr; got: {stderr}"
+    );
+}
+
+/// Lockfile contains a package entry that is NOT a skill (no `[package.skill]`
+/// table — i.e. a plugin or other package kind). `tau skill list` MUST filter
+/// these out and report the empty state, not surface them as skills.
+#[test]
+fn list_plugin_only_lockfile_shows_empty() {
+    let dir = TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".tau")).unwrap();
+    // Inline setup — a plugin-only entry (no [package.skill] table). The
+    // v5_lockfile_toml helper always emits skill entries, so we write this
+    // by hand.
+    let toml = "schema_version = 5\n\
+                generated_by_tau_version = \"0.0.0\"\n\
+                generated_at = \"2026-05-12T10:00:00Z\"\n\n\
+                [[package]]\n\
+                name = \"some-plugin\"\n\
+                active_version = \"1.0.0\"\n\
+                source = \"https://example.com/plugin.git\"\n\
+                \n\
+                [[package.versions]]\n\
+                version = \"1.0.0\"\n\
+                resolved_commit = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+                sha256 = \"\"\n\
+                installed_at = \"2026-05-12T10:00:00Z\"\n";
+    std::fs::write(dir.path().join("tau-lock.toml"), toml).unwrap();
+
+    let output = run_skill_list(dir.path(), &[]);
+    assert!(
+        output.status.success(),
+        "expected success; stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("no skills installed."),
+        "expected 'no skills installed.' in stdout; got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("some-plugin"),
+        "plugin package leaked into skill list output: {stdout}"
     );
 }
