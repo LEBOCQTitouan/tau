@@ -43,6 +43,10 @@ pub(crate) fn capability_satisfies(granted: &Capability, required: &Capability) 
         (Capability::Network(g), Capability::Network(r)) => net_satisfies(g, r),
         (Capability::Process(g), Capability::Process(r)) => process_satisfies(g, r),
         (Capability::Agent(g), Capability::Agent(r)) => agent_satisfies(g, r),
+        (Capability::TaskList { mode: g }, Capability::TaskList { mode: r }) => {
+            task_list_satisfies(g, r)
+        }
+        (Capability::Plan { mode: g }, Capability::Plan { mode: r }) => plan_satisfies(g, r),
         (
             Capability::Custom {
                 name: gn,
@@ -120,6 +124,44 @@ pub(crate) fn process_satisfies(granted: &ProcessCapability, required: &ProcessC
             ProcessCapability::Spawn { commands: gc, .. },
             ProcessCapability::Spawn { commands: rc, .. },
         ) => paths_subset(gc, rc),
+        _ => false,
+    }
+}
+
+/// Orchestration TaskList subsumption: `manage` ⊇ `write` ⊇ `read`.
+///
+/// Mode strings are validated at parse time in `tau-domain` (unknown
+/// modes route to `Capability::Custom`), but this helper is defensive:
+/// any unrecognised mode on either side denies rather than panics.
+pub(crate) fn task_list_satisfies(granted: &str, required: &str) -> bool {
+    let rank = |s: &str| -> Option<u8> {
+        match s {
+            "read" => Some(0),
+            "write" => Some(1),
+            "manage" => Some(2),
+            _ => None,
+        }
+    };
+    match (rank(granted), rank(required)) {
+        (Some(g), Some(r)) => g >= r,
+        _ => false,
+    }
+}
+
+/// Orchestration Plan subsumption: `write` ⊇ `read`.
+///
+/// Same defensive deny-on-unknown-mode contract as
+/// [`task_list_satisfies`].
+pub(crate) fn plan_satisfies(granted: &str, required: &str) -> bool {
+    let rank = |s: &str| -> Option<u8> {
+        match s {
+            "read" => Some(0),
+            "write" => Some(1),
+            _ => None,
+        }
+    };
+    match (rank(granted), rank(required)) {
+        (Some(g), Some(r)) => g >= r,
         _ => false,
     }
 }
@@ -465,6 +507,120 @@ servers = ["fs-mcp"]
         let required = cap(r#"[cap]
 kind = "mcp.resource.read"
 servers = ["fs-mcp"]
+"#);
+        assert!(!capability_satisfies(&granted, &required));
+    }
+
+    // -------------------- TaskList --------------------
+
+    #[test]
+    fn task_list_manage_satisfies_write() {
+        let granted = cap(r#"[cap]
+kind = "task_list"
+mode = "manage"
+"#);
+        let required = cap(r#"[cap]
+kind = "task_list"
+mode = "write"
+"#);
+        assert!(capability_satisfies(&granted, &required));
+    }
+
+    #[test]
+    fn task_list_manage_satisfies_read() {
+        let granted = cap(r#"[cap]
+kind = "task_list"
+mode = "manage"
+"#);
+        let required = cap(r#"[cap]
+kind = "task_list"
+mode = "read"
+"#);
+        assert!(capability_satisfies(&granted, &required));
+    }
+
+    #[test]
+    fn task_list_write_satisfies_read() {
+        let granted = cap(r#"[cap]
+kind = "task_list"
+mode = "write"
+"#);
+        let required = cap(r#"[cap]
+kind = "task_list"
+mode = "read"
+"#);
+        assert!(capability_satisfies(&granted, &required));
+    }
+
+    #[test]
+    fn task_list_read_does_not_satisfy_write() {
+        let granted = cap(r#"[cap]
+kind = "task_list"
+mode = "read"
+"#);
+        let required = cap(r#"[cap]
+kind = "task_list"
+mode = "write"
+"#);
+        assert!(!capability_satisfies(&granted, &required));
+    }
+
+    #[test]
+    fn task_list_unknown_mode_does_not_satisfy() {
+        // Parse-time validation in tau-domain rejects unknown modes for
+        // the `task_list` kind by routing them to `Capability::Custom`,
+        // so construct the TaskList variant directly here to exercise
+        // the defensive deny path inside `task_list_satisfies`.
+        let granted = Capability::TaskList {
+            mode: "frobnicate".into(),
+        };
+        let required = Capability::TaskList {
+            mode: "write".into(),
+        };
+        assert!(!capability_satisfies(&granted, &required));
+    }
+
+    // -------------------- Plan --------------------
+
+    #[test]
+    fn plan_write_satisfies_read() {
+        let granted = cap(r#"[cap]
+kind = "plan"
+mode = "write"
+"#);
+        let required = cap(r#"[cap]
+kind = "plan"
+mode = "read"
+"#);
+        assert!(capability_satisfies(&granted, &required));
+    }
+
+    #[test]
+    fn plan_read_does_not_satisfy_write() {
+        let granted = cap(r#"[cap]
+kind = "plan"
+mode = "read"
+"#);
+        let required = cap(r#"[cap]
+kind = "plan"
+mode = "write"
+"#);
+        assert!(!capability_satisfies(&granted, &required));
+    }
+
+    #[test]
+    fn tasklist_does_not_cover_plan() {
+        // Cross-namespace negative: a `task_list` grant — even at the
+        // strongest `manage` mode — must never satisfy a `plan`
+        // request. The top-level enum mismatch fires before the
+        // mode-rank comparison.
+        let granted = cap(r#"[cap]
+kind = "task_list"
+mode = "write"
+"#);
+        let required = cap(r#"[cap]
+kind = "plan"
+mode = "write"
 "#);
         assert!(!capability_satisfies(&granted, &required));
     }
