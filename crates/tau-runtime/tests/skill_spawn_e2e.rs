@@ -75,9 +75,7 @@ impl Drop for CwdGuard {
 /// The `resolve_skill_for_spawn` path reads the SKILL.md body after `parse_skill_md`.
 fn write_skill_md(install_dir: &Path, body: &str) {
     // parse_skill_md expects YAML frontmatter + body separated by `---`.
-    let content = format!(
-        "---\nname: critic\ndescription: Reviews drafts.\n---\n{body}\n"
-    );
+    let content = format!("---\nname: critic\ndescription: Reviews drafts.\n---\n{body}\n");
     fs::write(install_dir.join("SKILL.md"), content).expect("write SKILL.md");
 }
 
@@ -157,16 +155,9 @@ description = "Reviews drafts."
 /// `"capabilities = []\n"` or `"[[capabilities]]\nkind = \"fs.read\"\npaths = [\"/tmp/**\"]\n"`).
 ///
 /// `skill_md_body` is the SKILL.md body text (below the frontmatter `---`).
-fn setup_critic_project(
-    tmp: &Path,
-    capabilities_toml: &str,
-    skill_md_body: &str,
-) -> PathBuf {
+fn setup_critic_project(tmp: &Path, capabilities_toml: &str, skill_md_body: &str) -> PathBuf {
     let tau_dir = tmp.join(".tau");
-    let install_dir = tau_dir
-        .join("packages")
-        .join("critic")
-        .join("0.1.0");
+    let install_dir = tau_dir.join("packages").join("critic").join("0.1.0");
     fs::create_dir_all(&install_dir).expect("create install_dir");
     write_scope_config(&tau_dir);
     write_lockfile_with_critic(tmp);
@@ -214,7 +205,11 @@ fn manifest_with_no_skill_cap() -> tau_domain::PackageManifest {
 #[tokio::test]
 async fn happy_path_parent_spawns_critic_and_receives_response() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    setup_critic_project(tmp.path(), "capabilities = []\n", "You are a helpful critic.");
+    setup_critic_project(
+        tmp.path(),
+        "capabilities = []\n",
+        "You are a helpful critic.",
+    );
 
     let _guard = CwdGuard::enter(tmp.path());
 

@@ -494,6 +494,34 @@ allowed_kinds = ["worker"]
         assert!(capability_satisfies(&granted, &required));
     }
 
+    // -------------------- Skill --------------------
+
+    #[test]
+    fn skill_spawn_subset_satisfies() {
+        let granted = cap(r#"[cap]
+kind = "skill.spawn"
+allowed_skills = ["critic", "fact-checker"]
+"#);
+        let required = cap(r#"[cap]
+kind = "skill.spawn"
+allowed_skills = ["critic"]
+"#);
+        assert!(capability_satisfies(&granted, &required));
+    }
+
+    #[test]
+    fn skill_spawn_superset_denies() {
+        let granted = cap(r#"[cap]
+kind = "skill.spawn"
+allowed_skills = ["critic"]
+"#);
+        let required = cap(r#"[cap]
+kind = "skill.spawn"
+allowed_skills = ["critic", "fact-checker"]
+"#);
+        assert!(!capability_satisfies(&granted, &required));
+    }
+
     // -------------------- Custom --------------------
 
     #[test]
@@ -891,6 +919,7 @@ mod proptests {
                 | (Capability::Network(_), Capability::Network(_))
                 | (Capability::Process(_), Capability::Process(_))
                 | (Capability::Agent(_), Capability::Agent(_))
+                | (Capability::Skill(_), Capability::Skill(_))
                 | (Capability::Custom { .. }, Capability::Custom { .. },)
         )
     }
