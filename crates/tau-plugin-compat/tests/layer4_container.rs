@@ -40,12 +40,12 @@ use tau_domain::{
     fixtures as domain_fixtures, AgentInstanceId, Capability, PluginKind, PluginManifest, PortKind,
 };
 use tau_pkg::LockedPlugin;
+use tau_ports::fixtures::scratch_dir;
 use tau_ports::{
     CompletionRequest, ContentBlock, LlmProviderMessage, SandboxPlan, SandboxProbe, SessionContext,
 };
 use tau_runtime::sandbox::registry::RegistryKind;
 use tau_runtime::sandbox::resolve_adapter_forced;
-use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -401,7 +401,7 @@ async fn fs_read_layer4_container_reads_data_file() {
     };
 
     // 4. Write the data fixture into a tempdir.
-    let scope = TempDir::new().expect("tempdir creation must succeed");
+    let scope = scratch_dir("l4-container-fs-read");
     let data_path = scope.path().join("data.txt");
     let data_content = "layer4-container-fs-read-fixture";
     std::fs::write(&data_path, data_content).expect("write data.txt must succeed");
