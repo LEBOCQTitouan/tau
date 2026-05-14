@@ -14,6 +14,8 @@ use tau_ports::{
 };
 use tau_runtime::{RunOptions, RunOutcome, Runtime};
 
+use assert_matches::assert_matches;
+
 /// LLM that always returns a single canned response with a tool_use,
 /// no matter how many times it's called. Combined with a permissive
 /// tool, this makes the run loop iterate forever — bounded only by
@@ -81,29 +83,26 @@ async fn max_turns_exceeded_returns_out_of_resources() {
         .await
         .expect("agent-level failures flow through Ok(RunOutcome::Failed)");
 
-    let RunOutcome::Failed {
-        status,
-        total_turns,
-        all_messages,
-        ..
-    } = outcome
-    else {
-        panic!("expected Failed (OutOfResources), got Completed");
-    };
+    assert_matches!(
+        outcome,
+        RunOutcome::Failed {
+            status: AgentStatus::Failed { kind, .. },
+            total_turns,
+            all_messages,
+            ..
+        } => {
+            assert_eq!(kind, FailureKind::OutOfResources);
+            assert_eq!(total_turns, 3, "loop should hit max_turns exactly");
 
-    let AgentStatus::Failed { kind, .. } = status else {
-        panic!("expected AgentStatus::Failed");
-    };
-    assert_eq!(kind, FailureKind::OutOfResources);
-    assert_eq!(total_turns, 3, "loop should hit max_turns exactly");
-
-    // Lower bound: initial user msg + 3 turns × (tool_call + tool_result) = 7.
-    // The kernel skips an empty assistant text turn (this LLM never
-    // emits text), so this is the canonical count.
-    assert!(
-        all_messages.len() >= 7,
-        "expected >= 7 messages, got {}",
-        all_messages.len()
+            // Lower bound: initial user msg + 3 turns × (tool_call + tool_result) = 7.
+            // The kernel skips an empty assistant text turn (this LLM never
+            // emits text), so this is the canonical count.
+            assert!(
+                all_messages.len() >= 7,
+                "expected >= 7 messages, got {}",
+                all_messages.len()
+            );
+        }
     );
 
     // LLM was called once per turn, exactly `max_turns` times.

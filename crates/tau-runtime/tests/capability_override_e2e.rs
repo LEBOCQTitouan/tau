@@ -44,6 +44,8 @@ use tau_ports::{
 };
 use tau_runtime::{builder::DynTool, error::RuntimeError, CapabilityOverride, RunOptions, Runtime};
 
+use assert_matches::assert_matches;
+
 // ---------------------------------------------------------------------------
 // InProcessFsRead: DynTool adapter bridging FsReadSession → ()
 // (verbatim from tool_plugin_e2e.rs — see module-level rationale there)
@@ -266,12 +268,14 @@ paths = ["{package_glob}"]
         .await
         .expect_err("plugin scope check must surface as Err(RuntimeError)");
 
-    let RuntimeError::Tool(ToolError::BadArgs { reason }) = err else {
-        panic!("expected RuntimeError::Tool(ToolError::BadArgs), got: {err:?}");
-    };
-    assert!(
-        reason.contains("not in capability scope"),
-        "narrowed allow must reject with scope-violation message; got {reason:?}"
+    assert_matches!(
+        err,
+        RuntimeError::Tool(ToolError::BadArgs { reason }) => {
+            assert!(
+                reason.contains("not in capability scope"),
+                "narrowed allow must reject with scope-violation message; got {reason:?}"
+            );
+        }
     );
 }
 
@@ -335,12 +339,14 @@ paths = ["{package_glob}"]
         .await
         .expect_err("plugin deny check must surface as Err(RuntimeError)");
 
-    let RuntimeError::Tool(ToolError::BadArgs { reason }) = err else {
-        panic!("expected RuntimeError::Tool(ToolError::BadArgs), got: {err:?}");
-    };
-    assert!(
-        reason.contains("not in capability scope"),
-        "deny carve-out must reject with scope-violation message; got {reason:?}"
+    assert_matches!(
+        err,
+        RuntimeError::Tool(ToolError::BadArgs { reason }) => {
+            assert!(
+                reason.contains("not in capability scope"),
+                "deny carve-out must reject with scope-violation message; got {reason:?}"
+            );
+        }
     );
 }
 
@@ -394,12 +400,14 @@ paths = ["/var/definitely-not-the-tmpfile-dir/**"]
         .await
         .expect_err("expanding override must fail at runtime");
 
-    let RuntimeError::CapabilityOverrideExpands { kind, reason } = err else {
-        panic!("expected RuntimeError::CapabilityOverrideExpands, got: {err:?}");
-    };
-    assert_eq!(kind, "fs.read");
-    assert!(
-        reason.contains("not a subset"),
-        "expand-rejected reason must mention subset; got {reason:?}"
+    assert_matches!(
+        err,
+        RuntimeError::CapabilityOverrideExpands { kind, reason } => {
+            assert_eq!(kind, "fs.read");
+            assert!(
+                reason.contains("not a subset"),
+                "expand-rejected reason must mention subset; got {reason:?}"
+            );
+        }
     );
 }

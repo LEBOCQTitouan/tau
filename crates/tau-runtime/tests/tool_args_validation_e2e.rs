@@ -41,6 +41,8 @@ use tau_ports::{
 };
 use tau_runtime::{builder::DynTool, RunOptions, RunOutcome, Runtime};
 
+use assert_matches::assert_matches;
+
 // ---------------------------------------------------------------------------
 // InProcessFsRead: DynTool adapter bridging FsReadSession → ()
 // (verbatim from tool_plugin_e2e.rs — see module-level rationale there)
@@ -400,40 +402,41 @@ async fn scripted_llm_self_corrects_after_validation_error() {
         .await
         .expect("scripted scenario completes cleanly");
 
-    let RunOutcome::Completed { all_messages, .. } = outcome else {
-        panic!("expected RunOutcome::Completed; got {outcome:?}");
-    };
+    assert_matches!(
+        outcome,
+        RunOutcome::Completed { all_messages, .. } => {
+            // The conversation MUST contain the validation error.
+            let validation_error = find_validation_error(&all_messages);
+            assert!(
+                validation_error.is_some(),
+                "conversation must contain a tool_args_validation ToolError"
+            );
 
-    // The conversation MUST contain the validation error.
-    let validation_error = find_validation_error(&all_messages);
-    assert!(
-        validation_error.is_some(),
-        "conversation must contain a tool_args_validation ToolError"
-    );
-
-    // The conversation MUST contain a SECOND tool-output message after
-    // the validation error — either ToolResult (file unexpectedly
-    // existed) or ToolError with kind != "tool_args_validation"
-    // (file-not-found surfaced through fs-read's invoke).
-    let validation_idx = all_messages
-        .iter()
-        .position(|m| {
-            matches!(&m.payload, MessagePayload::ToolError { kind, .. } if kind == "tool_args_validation")
-        })
-        .expect("validation error must be present");
-    let post_validation_count = all_messages[validation_idx + 1..]
-        .iter()
-        .filter(|m| {
-            matches!(
-                &m.payload,
-                MessagePayload::ToolResult { .. } | MessagePayload::ToolError { .. }
-            )
-        })
-        .count();
-    assert!(
-        post_validation_count >= 1,
-        "expected at least one tool result/error AFTER the validation error \
-         (turn 2's invoke); got 0. Messages: {:#?}",
-        all_messages
+            // The conversation MUST contain a SECOND tool-output message after
+            // the validation error — either ToolResult (file unexpectedly
+            // existed) or ToolError with kind != "tool_args_validation"
+            // (file-not-found surfaced through fs-read's invoke).
+            let validation_idx = all_messages
+                .iter()
+                .position(|m| {
+                    matches!(&m.payload, MessagePayload::ToolError { kind, .. } if kind == "tool_args_validation")
+                })
+                .expect("validation error must be present");
+            let post_validation_count = all_messages[validation_idx + 1..]
+                .iter()
+                .filter(|m| {
+                    matches!(
+                        &m.payload,
+                        MessagePayload::ToolResult { .. } | MessagePayload::ToolError { .. }
+                    )
+                })
+                .count();
+            assert!(
+                post_validation_count >= 1,
+                "expected at least one tool result/error AFTER the validation error \
+                 (turn 2's invoke); got 0. Messages: {:#?}",
+                all_messages
+            );
+        }
     );
 }

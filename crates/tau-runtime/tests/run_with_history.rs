@@ -25,6 +25,8 @@ use tau_ports::{
 };
 use tau_runtime::{RunOptions, RunOutcome, Runtime};
 
+use assert_matches::assert_matches;
+
 /// LLM backend that records every `CompletionRequest` for inspection
 /// and replies with a single canned `CompletionResponse`.
 #[derive(Clone)]
@@ -119,10 +121,12 @@ async fn run_with_history_threads_prior_messages() {
 
     // Outcome shape: a single LLM call (no tool_uses) → Completed in one
     // turn. The history was preloaded for that single call.
-    let RunOutcome::Completed { total_turns, .. } = outcome else {
-        panic!("expected Completed");
-    };
-    assert_eq!(total_turns, 1, "single LLM call, no tool_uses");
+    assert_matches!(
+        outcome,
+        RunOutcome::Completed { total_turns, .. } => {
+            assert_eq!(total_turns, 1, "single LLM call, no tool_uses");
+        }
+    );
 
     // The kernel must have forwarded all three messages to the LLM:
     // 2 prior history entries + 1 new initial_message, in that order.
@@ -165,10 +169,12 @@ async fn run_calls_run_with_history_with_empty_history() {
         .await
         .expect("run succeeded");
 
-    let RunOutcome::Completed { total_turns, .. } = outcome else {
-        panic!("expected Completed");
-    };
-    assert_eq!(total_turns, 1);
+    assert_matches!(
+        outcome,
+        RunOutcome::Completed { total_turns, .. } => {
+            assert_eq!(total_turns, 1);
+        }
+    );
 
     let recorded = invocations.lock().expect("RecordingLlm mutex poisoned");
     assert_eq!(recorded.len(), 1);
