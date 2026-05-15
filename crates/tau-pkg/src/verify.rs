@@ -322,6 +322,7 @@ mod tests {
             }],
             plugin: None,
             skill: None,
+            synthesized_from: None,
         };
         lf.packages.push(pkg);
         lf.save(&scope.lockfile_path()).unwrap();

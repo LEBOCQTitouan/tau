@@ -455,6 +455,7 @@ pub fn install_with_options(
                 installed_versions: vec![new_locked_version.clone()],
                 plugin: locked_plugin.clone(),
                 skill: locked_skill,
+                synthesized_from: None,
             },
         };
 
@@ -922,6 +923,7 @@ mod tests {
             installed_versions: vec![fixture_locked_version("1.0.0")],
             plugin: None,
             skill: None,
+            synthesized_from: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &installed_version)).unwrap();
@@ -952,6 +954,7 @@ mod tests {
             ],
             plugin: None,
             skill: None,
+            synthesized_from: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
@@ -985,6 +988,7 @@ mod tests {
             ],
             plugin: None,
             skill: None,
+            synthesized_from: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
@@ -1025,6 +1029,7 @@ mod tests {
             ],
             plugin: None,
             skill: None,
+            synthesized_from: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
