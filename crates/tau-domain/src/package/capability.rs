@@ -37,6 +37,8 @@ pub enum Capability {
     Process(ProcessCapability),
     /// Inter-agent capability.
     Agent(AgentCapability),
+    /// Skill-related capability (Skills-4).
+    Skill(SkillCapability),
     /// Read or mutate the shared TaskList of the current multi-agent Run.
     /// `mode` is one of `"read"`, `"write"`, `"manage"`. Not OS-sandbox-enforced;
     /// gated at the virtual-tool dispatch layer in tau-runtime.
@@ -160,6 +162,37 @@ pub enum AgentCapability {
     },
 }
 
+/// Skill capability verbs.
+///
+/// Added by Skills-4 (ROADMAP §16). Skills are an installable
+/// package kind that ships a reusable agent behavior (SKILL.md
+/// system_prompt + declared capabilities). The `Spawn` variant
+/// authorizes a parent agent to invoke installed skills as child
+/// agents via the `skill.<name>.spawn` virtual tool.
+///
+/// # Example
+///
+/// ```ignore
+/// use tau_domain::SkillCapability;
+/// let cap = SkillCapability::Spawn {
+///     allowed_skills: vec!["critic".into(), "fact-checker".into()],
+/// };
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum SkillCapability {
+    /// Spawn an installed skill as a child agent. `allowed_skills` is
+    /// the list of skill names (matching `LockedPackage.name` for
+    /// `kind = "skill"` entries in the lockfile) the parent agent
+    /// may invoke via `skill.<name>.spawn`.
+    #[non_exhaustive]
+    Spawn {
+        /// Permitted skill names.
+        allowed_skills: Vec<String>,
+    },
+}
+
 /// Typed vocabulary describing the *shape* of enforcement a [`Capability`]
 /// requires from a sandbox adapter. Each variant maps to a distinct
 /// kernel-level enforcement primitive (filesystem read/write, exec gating,
@@ -188,6 +221,9 @@ pub enum CapabilityShape {
     /// Plugin needs to spawn a sub-agent. (Future: not enforced by OS sandbox
     /// today; reserved for forward-compat.)
     AgentSpawn,
+    /// Plugin / agent needs to spawn an installed skill via the
+    /// `skill.<name>.spawn` virtual tool. (Added by Skills-4.)
+    SkillSpawn,
     /// Plugin uses a `Capability::Custom` whose enforcement is plugin-defined.
     /// Adapters MAY refuse to sandbox `Custom` shapes.
     /// See: [escape-hatches.md#capability-custom](../../../../../docs/explanation/escape-hatches.md#capability-custom).
@@ -257,6 +293,7 @@ impl Capability {
             Capability::Network(NetCapability::Http { .. }) => CapabilityShape::NetworkHttp,
             Capability::Process(ProcessCapability::Spawn { .. }) => CapabilityShape::ProcessExec,
             Capability::Agent(AgentCapability::Spawn { .. }) => CapabilityShape::AgentSpawn,
+            Capability::Skill(SkillCapability::Spawn { .. }) => CapabilityShape::SkillSpawn,
             Capability::TaskList { .. } => CapabilityShape::Custom {
                 name: "task_list".to_string(),
             },
@@ -290,6 +327,8 @@ mod capability_de {
         #[serde(default)]
         allowed_kinds: Option<Vec<String>>,
         #[serde(default)]
+        allowed_skills: Option<Vec<String>>,
+        #[serde(default)]
         mode: Option<String>,
         #[serde(flatten)]
         rest: BTreeMap<String, Value>,
@@ -318,6 +357,9 @@ mod capability_de {
                 }),
                 "agent.spawn" => Capability::Agent(AgentCapability::Spawn {
                     allowed_kinds: raw.allowed_kinds.unwrap_or_default(),
+                }),
+                "skill.spawn" => Capability::Skill(SkillCapability::Spawn {
+                    allowed_skills: raw.allowed_skills.unwrap_or_default(),
                 }),
                 "task_list" => match raw.mode.as_deref() {
                     Some(m @ ("read" | "write" | "manage")) => Capability::TaskList {
@@ -413,6 +455,12 @@ mod capability_de {
                     let mut m = s.serialize_map(Some(2))?;
                     m.serialize_entry("kind", "agent.spawn")?;
                     m.serialize_entry("allowed_kinds", allowed_kinds)?;
+                    m.end()
+                }
+                Capability::Skill(SkillCapability::Spawn { allowed_skills }) => {
+                    let mut m = s.serialize_map(Some(2))?;
+                    m.serialize_entry("kind", "skill.spawn")?;
+                    m.serialize_entry("allowed_skills", allowed_skills)?;
                     m.end()
                 }
                 Capability::TaskList { mode } => {
@@ -631,5 +679,40 @@ mod tests {
         assert_eq!(json, r#"{"kind":"mcp.tool.use","servers":["fs-mcp"]}"#);
         let back: Capability = serde_json::from_str(&json).unwrap();
         assert_eq!(cap, back);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn skill_spawn_capability_round_trips_through_json() {
+        let cap = Capability::Skill(SkillCapability::Spawn {
+            allowed_skills: vec!["critic".into(), "fact-checker".into()],
+        });
+        let json = serde_json::to_string(&cap).unwrap();
+        assert_eq!(
+            json,
+            r#"{"kind":"skill.spawn","allowed_skills":["critic","fact-checker"]}"#
+        );
+        let back: Capability = serde_json::from_str(&json).unwrap();
+        assert_eq!(cap, back);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn skill_spawn_capability_empty_allowed_skills_round_trips() {
+        let cap = Capability::Skill(SkillCapability::Spawn {
+            allowed_skills: vec![],
+        });
+        let json = serde_json::to_string(&cap).unwrap();
+        let back: Capability = serde_json::from_str(&json).unwrap();
+        assert_eq!(cap, back);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn skill_spawn_required_shape_is_skill_spawn() {
+        let cap = Capability::Skill(SkillCapability::Spawn {
+            allowed_skills: vec!["x".into()],
+        });
+        assert_eq!(cap.required_shape(), CapabilityShape::SkillSpawn);
     }
 }

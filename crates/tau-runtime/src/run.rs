@@ -679,7 +679,9 @@ pub(crate) fn narrowed_capability_for_session(eff: &EffectiveCapability) -> Capa
 /// Top-level capability kind string used in
 /// [`CapabilityDenial::required_kind`] and the `capability.deny` event.
 pub(crate) fn capability_kind_str(cap: &Capability) -> String {
-    use tau_domain::{AgentCapability, FsCapability, NetCapability, ProcessCapability};
+    use tau_domain::{
+        AgentCapability, FsCapability, NetCapability, ProcessCapability, SkillCapability,
+    };
     match cap {
         Capability::Filesystem(FsCapability::Read { .. }) => "fs.read".into(),
         Capability::Filesystem(FsCapability::Write { .. }) => "fs.write".into(),
@@ -689,6 +691,7 @@ pub(crate) fn capability_kind_str(cap: &Capability) -> String {
         Capability::Agent(AgentCapability::Spawn { .. }) => "agent.spawn".into(),
         Capability::TaskList { .. } => "task_list".into(),
         Capability::Plan { .. } => "plan".into(),
+        Capability::Skill(SkillCapability::Spawn { .. }) => "skill.spawn".into(),
         Capability::Custom { name, .. } => name.clone(),
         // `Capability` is `#[non_exhaustive]`; future variants degrade
         // to a generic tag — additive evolution must not silently

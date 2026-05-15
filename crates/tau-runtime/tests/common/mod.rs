@@ -11,7 +11,10 @@
 //! read as straight-line scenarios (build LLM, build runtime, run,
 //! assert) without per-file boilerplate.
 
-#![allow(dead_code)] // Integration test helpers — used selectively per test file.
+#![allow(dead_code, unused_imports)] // Integration test helpers — used selectively per test file.
+
+pub mod mock_llm;
+pub use mock_llm::{MockLlmBackend, MockTurn};
 
 use std::str::FromStr;
 

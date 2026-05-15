@@ -94,4 +94,48 @@ pub enum OrchestrationError {
         /// Detail.
         detail: String,
     },
+
+    /// Skills-4: `skill.<name>.spawn` — no installed skill matches `name`.
+    #[error("skill not installed: {name:?}")]
+    SkillNotInstalled {
+        /// The unresolved skill name.
+        name: String,
+    },
+
+    /// Skills-4: skill's lockfile entry exists but install path is
+    /// missing on disk.
+    #[error("skill {name:?} install path missing at {expected_path:?}")]
+    SkillInstallPathMissing {
+        /// Skill name.
+        name: String,
+        /// The expected install path (the manifest location).
+        expected_path: std::path::PathBuf,
+    },
+
+    /// Skills-4: SKILL.md couldn't be read or parsed.
+    #[error("skill {name:?} content invalid: {detail}")]
+    SkillContentInvalid {
+        /// Skill name.
+        name: String,
+        /// Reason (read error, YAML parse failure, missing required field).
+        detail: String,
+    },
+
+    /// Skills-4: caller's `scope_paths` includes a path not covered
+    /// by any declared fs.* path. Typo detection.
+    #[error("skill scope_path {path:?} is not covered by any declared fs.* path")]
+    SkillScopePathNotCovered {
+        /// The offending scope_path entry.
+        path: String,
+    },
+
+    /// Skills-4: parent's `Capability::Skill(SkillCapability::Spawn)`
+    /// doesn't include the requested skill in `allowed_skills`.
+    #[error("agent {parent:?} not authorized to spawn skill {name:?}")]
+    SkillSpawnNotAuthorized {
+        /// Parent agent id.
+        parent: AgentId,
+        /// The requested skill name.
+        name: String,
+    },
 }
