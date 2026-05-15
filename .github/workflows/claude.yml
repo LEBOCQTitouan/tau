@@ -1,0 +1,88 @@
+name: Claude
+
+# Anthropic Claude Code action — `@claude` mention bot.
+#
+# Triggers when "@claude" appears in:
+#   - a new issue body or title
+#   - a comment on any issue
+#   - a comment on a PR (issue_comment fires for PR comments too)
+#   - a review comment on a specific line of code in a PR
+#   - a PR review submission
+#
+# Claude reads the surrounding context, can answer questions, comment,
+# and (with the permissions granted below) push commits to the branch
+# of an open PR. Useful for: code review, design questions, small
+# fixes triggered by maintainer comment.
+#
+# Security
+# --------
+# - actor allowlist enforced below. Only the configured GitHub users
+#   can trigger a Claude run. This prevents random commenters on
+#   public issues/PRs from getting Claude to modify the repo.
+# - the `if:` gate also requires the @claude mention to be in the
+#   triggering content (issue body, comment, review body) — Claude
+#   does not run on every comment.
+# - `pull_request_target` and `workflow_run` are intentionally NOT
+#   used. Those event types run with the base repo's secrets even
+#   for fork PRs, which combined with write permissions would be a
+#   secret-exfil vector.
+# - all user-controlled fields (issue/comment/review body, issue
+#   title) are consumed by the action input, NOT injected into a
+#   shell `run:` step. The action handles them as data, not commands.
+#
+# Secret
+# ------
+# Add `ANTHROPIC_API_KEY` to repo Settings → Secrets and variables →
+# Actions → New repository secret before this workflow can run.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, assigned]
+
+jobs:
+  claude:
+    # Allowlist actors. Add additional logins as more contributors
+    # need the bot.
+    if: |
+      contains(fromJSON('["LEBOCQTitouan"]'), github.actor) && (
+        (github.event_name == 'issue_comment' &&
+          contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' &&
+          contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review' &&
+          contains(github.event.review.body, '@claude')) ||
+        (github.event_name == 'issues' &&
+          (contains(github.event.issue.body, '@claude') ||
+           contains(github.event.issue.title, '@claude')))
+      )
+
+    runs-on: ubuntu-latest
+
+    # Least-privilege scoped to what claude-code-action needs:
+    # - contents:write so Claude can push commits to PR branches
+    # - pull-requests:write so Claude can comment/review on PRs
+    # - issues:write so Claude can comment on issues
+    # - id-token:write for the action's OIDC flow
+    # - actions:read for the action to inspect workflow context
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Shallow checkout is enough; the action fetches more if needed.
+          fetch-depth: 1
+
+      - uses: anthropic-ai/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
