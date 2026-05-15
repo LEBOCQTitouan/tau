@@ -11,7 +11,7 @@ ADR-0019 shipped F's per-host network filter (veth + nftables + CAP_NET_ADMIN-in
 
 1. Privileged-Docker requirement in CI made tests slow and brittle
 2. The 4 strict_net_filter integration tests hung in privileged Docker (suspected cmd.output() / seccomp KillProcess interaction)
-3. The 3 layer4_container HTTP plugin tests couldn't be un-#[ignore]'d because Docker networking ≠ veth IP
+3. The 3 layer4_container HTTP plugin tests couldn't be un-`#[ignore]`'d because Docker networking ≠ veth IP
 4. Production tau required root or CAP_NET_ADMIN — friction for deployers
 
 Research (sub-project H) found that Anthropic's own sandbox-runtime uses a userspace proxy pattern that avoids all four pain points. This ADR adopts that pattern.
@@ -29,7 +29,7 @@ Pass-through CONNECT: proxy does NOT terminate TLS. SNI in the TLS ClientHello m
 Positive:
 - Zero kernel privileges in the parent (drops CAP_NET_ADMIN requirement)
 - CI runs on stock ubuntu-latest (no privileged Docker)
-- 7 #[ignore]'d sandbox tests become runnable (4 strict_net_filter replaced by strict_proxy + 3 layer4_container HTTP plugin tests un-ignored)
+- 7 `#[ignore]`'d sandbox tests become runnable (4 strict_net_filter replaced by strict_proxy + 3 layer4_container HTTP plugin tests un-ignored)
 - ~640 LOC of F's machinery removed; net code reduction
 - F's sync-pipe machinery in tau-ports also removed (~80 more LOC + trait field)
 - New shared crate tau-sandbox-proxy enables future Container/Native parity work

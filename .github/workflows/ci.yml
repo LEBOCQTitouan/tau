@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
+    # Skip the full Rust matrix on pure-docs PRs. Branch protection
+    # should require the ci-summary job (defined at the end of this
+    # file), which reports success when all real jobs pass OR when
+    # they all skip (the docs-only case). Docs-only PRs still get the
+    # docs-check workflow as a gate.
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.github/workflows/docs-*.yml'
 
 # Cancel superseded runs on the same ref.
 concurrency:
@@ -22,6 +31,9 @@ env:
   # compilation embeds compilation-state metadata that sccache can't
   # deduplicate).
   CARGO_INCREMENTAL: 0
+
+permissions:
+  contents: read
 
 jobs:
   fmt:
@@ -76,7 +88,21 @@ jobs:
           with-nextest: true
           with-sccache: true
           with-mold: true
-      - run: cargo nextest run --workspace --all-targets
+      - run: cargo nextest run --profile ci --workspace --all-targets
+
+  doc-tests:
+    name: doc-tests / linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: stable
+          shared-key: linux-stable
+          with-sccache: true
+          with-mold: true
+      # Doctests are serial-per-binary in cargo and don't exercise
+      # OS-specific paths in this workspace. Linux-only run is enough.
       - run: cargo test --workspace --doc
 
   msrv-check:
@@ -108,7 +134,7 @@ jobs:
           with-sccache: true
           with-mold: true
       - name: Test tau-ports (test-fixtures feature only)
-        run: cargo nextest run -p tau-ports --features test-fixtures
+        run: cargo nextest run --profile ci -p tau-ports --features test-fixtures
       - name: Doctests tau-ports (test-fixtures feature only)
         # Workspace-level `cargo test --workspace --doc` (test-stable job)
         # runs doctests without features; the fixtures module is gated
@@ -179,8 +205,8 @@ jobs:
           retention-days: 1
           path: _artifacts/
 
-  build-tau-plugin-test-support:
-    name: build (tau-plugin-test-support)
+  build-checks-linux:
+    name: build-checks / linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -193,20 +219,13 @@ jobs:
       - name: Build tau-plugin-test-support
         run: cargo build -p tau-plugin-test-support
       - name: Test tau-plugin-test-support
-        run: cargo nextest run -p tau-plugin-test-support --all-targets
-
-  build-tau-plugin-conformance:
-    name: build (tau-plugin-conformance)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-sccache: true
-          with-mold: true
+        run: cargo nextest run --profile ci -p tau-plugin-test-support --all-targets
       - name: Build tau-plugin-conformance
         run: cargo build -p tau-plugin-conformance
+      - name: Build tau-plugin-compat
+        run: cargo build -p tau-plugin-compat
+      - name: Build tau-plugin-compat (integration-tests feature)
+        run: cargo build -p tau-plugin-compat --features integration-tests --tests
 
   test-conformance:
     name: test (conformance)
@@ -220,39 +239,14 @@ jobs:
           with-nextest: true
           with-sccache: true
           with-mold: true
-      - name: Download fixture binaries
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/place-fixture-binaries
         with:
-          name: linux-fixture-binaries
-          path: ./prebuilt
-      - name: Place plugin binaries
-        run: |
-          mkdir -p target/release
-          mv ./prebuilt/anthropic-plugin ./prebuilt/ollama-plugin ./prebuilt/openai-plugin \
-             target/release/
-          # actions/upload-artifact strips executable bits; restore them.
-          chmod +x target/release/anthropic-plugin target/release/ollama-plugin target/release/openai-plugin
-          touch target/release/anthropic-plugin target/release/ollama-plugin target/release/openai-plugin
+          binaries: "anthropic-plugin ollama-plugin openai-plugin"
       - name: Run conformance suite against all 3 plugins
         run: |
-          cargo nextest run -p anthropic --test conformance --no-capture
-          cargo nextest run -p ollama    --test conformance --no-capture
-          cargo nextest run -p openai    --test conformance --no-capture
-
-  build-tau-plugin-compat:
-    name: build (tau-plugin-compat)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-sccache: true
-          with-mold: true
-      - name: Build tau-plugin-compat
-        run: cargo build -p tau-plugin-compat
-      - name: Build tau-plugin-compat (integration-tests feature)
-        run: cargo build -p tau-plugin-compat --features integration-tests --tests
+          cargo nextest run --profile ci -p anthropic --test conformance --no-capture
+          cargo nextest run --profile ci -p ollama    --test conformance --no-capture
+          cargo nextest run --profile ci -p openai    --test conformance --no-capture
 
   test-tau-plugin-compat:
     name: test (tau-plugin-compat / linux)
@@ -271,29 +265,9 @@ jobs:
           shared-key: linux-stable
           with-nextest: true
           with-mold: true
-      - name: Download fixture binaries
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/place-fixture-binaries
         with:
-          name: linux-fixture-binaries
-          path: ./prebuilt
-      - name: Place binaries at cargo-expected paths
-        run: |
-          mkdir -p target/release
-          mv ./prebuilt/anthropic-plugin ./prebuilt/ollama-plugin ./prebuilt/openai-plugin \
-             ./prebuilt/fs-read-plugin ./prebuilt/shell-plugin \
-             ./prebuilt/echo-llm ./prebuilt/echo-tool \
-             ./prebuilt/tau \
-             target/release/
-          mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
-          mv ./prebuilt/tau-controlled-env \
-             crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
-          # actions/upload-artifact strips executable bits; restore them.
-          chmod +x target/release/* \
-                   crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
-          # Touch to bump mtime above source files so cargo's freshness
-          # check doesn't decide to rebuild.
-          touch target/release/* \
-                crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+          binaries: "all"
       - name: Build tau binary (debug)
         # Layer 3 tests at crates/tau-plugin-compat/tests/layer3_check_sandbox.rs
         # hardcode the debug binary path (target/debug/tau). Build it here;
@@ -315,7 +289,7 @@ jobs:
           BUILDKIT_PROGRESS: plain
           DOCKER_BUILDKIT: "1"
       - name: Test tau-plugin-compat (integration-tests feature)
-        run: cargo nextest run -p tau-plugin-compat --features integration-tests --tests --verbose
+        run: cargo nextest run --profile ci -p tau-plugin-compat --features integration-tests --tests --verbose
 
   test-tau-sandbox-native-e2e:
     name: test (tau-sandbox-native e2e / linux)
@@ -328,24 +302,14 @@ jobs:
           shared-key: linux-stable
           with-nextest: true
           with-mold: true
-      - name: Download fixture binaries
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/place-fixture-binaries
         with:
-          name: linux-fixture-binaries
-          path: ./prebuilt
-      - name: Place controlled-env binary
-        run: |
-          mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
-          mv ./prebuilt/tau-controlled-env \
-             crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
-          # actions/upload-artifact strips executable bits; restore them.
-          chmod +x crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
-          touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+          binaries: "tau-controlled-env"
       - name: Test tau-sandbox-native e2e
         # strict_net_filter tests were replaced by strict_proxy tests (sub-project H,
         # ADR-0020). The proxy pattern needs no CAP_NET_ADMIN; all integration tests
         # run on this stock ubuntu-latest runner.
-        run: cargo nextest run -p tau-sandbox-native --features integration-tests --tests --verbose
+        run: cargo nextest run --profile ci -p tau-sandbox-native --features integration-tests --tests --verbose
 
   test-tau-runtime-e2e:
     name: test (tau-runtime e2e / linux)
@@ -358,18 +322,43 @@ jobs:
           shared-key: linux-stable
           with-nextest: true
           with-mold: true
-      - name: Download fixture binaries
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/place-fixture-binaries
         with:
-          name: linux-fixture-binaries
-          path: ./prebuilt
-      - name: Place controlled-env binary
-        run: |
-          mkdir -p crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release
-          mv ./prebuilt/tau-controlled-env \
-             crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/
-          # actions/upload-artifact strips executable bits; restore them.
-          chmod +x crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
-          touch crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env
+          binaries: "tau-controlled-env"
       - name: Test tau-runtime e2e
-        run: cargo nextest run -p tau-runtime --features integration-tests --tests --verbose
+        run: cargo nextest run --profile ci -p tau-runtime --features integration-tests --tests --verbose
+
+  # Aggregate gate. Required by branch protection in place of the
+  # per-job entries. Reports success when every dep passes OR when
+  # every dep is skipped (the docs-only `paths-ignore` case). A
+  # failure or cancellation in any dep fails this job.
+  ci-summary:
+    name: ci-summary
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      - fmt
+      - clippy
+      - cargo-deny
+      - test-stable
+      - doc-tests
+      - msrv-check
+      - test-fixtures-ports
+      - feature-flag-matrix
+      - build-fixtures-linux
+      - build-checks-linux
+      - test-conformance
+      - test-tau-plugin-compat
+      - test-tau-sandbox-native-e2e
+      - test-tau-runtime-e2e
+    steps:
+      - name: Verify all required jobs passed or skipped
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS_JSON"
+          if echo "$NEEDS_JSON" | jq -e 'to_entries | map(select(.value.result != "success" and .value.result != "skipped")) | length > 0' >/dev/null; then
+            echo "::error::One or more required jobs failed or were cancelled"
+            exit 1
+          fi
+          echo "All required jobs passed or were skipped (docs-only PR)."
