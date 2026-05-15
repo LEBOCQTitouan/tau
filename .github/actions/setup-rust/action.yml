@@ -47,7 +47,13 @@ runs:
   using: composite
   steps:
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@master
+      # Pinned to @stable (a published named ref of the action itself),
+      # not @master. @master is a moving target that has caused at least
+      # two transient macOS rustup flakes in recent CI history. The
+      # `toolchain:` input below independently controls *which* Rust
+      # version gets installed (stable / 1.91 / etc.); the @stable
+      # action ref is just the action version.
+      uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}

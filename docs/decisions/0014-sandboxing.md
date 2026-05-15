@@ -15,7 +15,7 @@
   is now implementable; activation by default is the next sub-project
   (see Sub-project A in [the followups doc](../superpowers/specs/2026-05-03-sandboxing-followups.md)).
 **Amends:** —
-**Refines:** [ADR-0002](0002-package-manifest.md) — capability declarations
+**Refines:** [ADR-0002](0002-manifest-format.md) — capability declarations
 in `tau.toml` now have a typed `CapabilityShape` companion that adapters
 declare support for at probe time.
 
@@ -325,8 +325,8 @@ followups are addressed.
 - Vision: [`docs/explanation/tau-as-language.md`](../explanation/tau-as-language.md).
 - Followups: [`docs/superpowers/specs/2026-05-03-sandboxing-followups.md`](../superpowers/specs/2026-05-03-sandboxing-followups.md).
 - Trait: [`crates/tau-ports/src/sandbox.rs`](../../crates/tau-ports/src/sandbox.rs).
-- Adapters: [`crates/tau-sandbox-native/`](../../crates/tau-sandbox-native/),
-  [`crates/tau-sandbox-container/`](../../crates/tau-sandbox-container/).
-- Runtime glue: [`crates/tau-runtime/src/sandbox/`](../../crates/tau-runtime/src/sandbox/).
+- Adapters: [`crates/tau-sandbox-native/`](https://github.com/titouanlebocq/tau/tree/main/crates/tau-sandbox-native),
+  [`crates/tau-sandbox-container/`](https://github.com/titouanlebocq/tau/tree/main/crates/tau-sandbox-container).
+- Runtime glue: [`crates/tau-runtime/src/sandbox/`](https://github.com/titouanlebocq/tau/tree/main/crates/tau-runtime/src/sandbox).
 - Layer 3 CLI: [`crates/tau-cli/src/cmd/resolve.rs`](../../crates/tau-cli/src/cmd/resolve.rs)
   (`--check-sandbox` flag).

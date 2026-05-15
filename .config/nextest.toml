@@ -1,13 +1,24 @@
 # Nextest configuration. See https://nexte.st/docs/configuration/
 
 [profile.default]
-# Retry flaky tests up to twice before marking as failure. nextest's
-# parallel test execution exposes timing-sensitive flakes that
-# cargo test (single-threaded per binary) masked. Two retries lets
-# genuinely flaky tests pass while keeping deterministic failures fast.
+# Local dev: retry flaky tests up to twice. nextest's parallel test
+# execution exposes timing-sensitive flakes that cargo test
+# (single-threaded per binary) masked. Two retries keep the inner
+# dev loop snappy without re-running cargo manually.
 retries = 2
 
 # Show output for failures even when retries succeed, so flakes are
-# visible in CI logs.
+# visible in local logs.
+failure-output = "immediate-final"
+success-output = "never"
+
+[profile.ci]
+# CI: NO retries. A flake is real signal — surface it. If a test is
+# genuinely timing-sensitive in a way that retries could mask, fix
+# the test, don't hide the symptom.
+#
+# Invoked via `cargo nextest run --profile ci ...` in
+# .github/workflows/ci.yml.
+retries = 0
 failure-output = "immediate-final"
 success-output = "never"
