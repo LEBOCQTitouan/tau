@@ -32,8 +32,16 @@ name: Claude
 #
 # Secret
 # ------
-# Add `ANTHROPIC_API_KEY` to repo Settings → Secrets and variables →
-# Actions → New repository secret before this workflow can run.
+# Add `CLAUDE_CODE_OAUTH_TOKEN` to repo Settings → Secrets and
+# variables → Actions → New repository secret before this workflow
+# can run. Generate the token locally with `claude setup-token`
+# (Claude Code CLI) — it issues a long-lived OAuth token that
+# bills against the active Claude.ai subscription (Max/Pro) rather
+# than per-token API credits. The token starts with `sk-ant-oat01-`.
+#
+# To switch to pay-per-token API billing instead, replace the
+# secret name + the input below with `ANTHROPIC_API_KEY` and
+# `anthropic_api_key`.
 
 on:
   issue_comment:
@@ -85,4 +93,4 @@ jobs:
 
       - uses: anthropic-ai/claude-code-action@beta
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
