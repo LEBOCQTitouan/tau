@@ -4,17 +4,8 @@ on:
   pull_request:
     paths:
       - 'docs/**'
-      - '.github/workflows/docs-check.yml'
-      - '.github/workflows/docs-deploy.yml'
-      - 'CHANGELOG.md'
-      - 'README.md'
-      - 'ROADMAP.md'
-      - 'CONSTITUTION.md'
-      - 'GUIDELINES_CHEATSHEET.md'
-      - 'GOVERNANCE.md'
-      - 'CONTRIBUTING.md'
-      - 'SECURITY.md'
-      - 'CODE_OF_CONDUCT.md'
+      - '*.md'
+      - '.github/workflows/docs-*.yml'
 
 concurrency:
   group: docs-check-${{ github.ref }}
@@ -25,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    name: mdbook build
+    name: mdbook build + linkcheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
