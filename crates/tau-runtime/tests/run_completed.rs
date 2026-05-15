@@ -4,6 +4,8 @@
 
 mod common;
 
+use std::sync::Arc;
+
 use tau_domain::MessagePayload;
 use tau_ports::fixtures::{make_completion_response, make_token_usage, MockLlmBackend};
 use tau_ports::StopReason;
@@ -20,11 +22,14 @@ async fn run_completes_with_text_response() {
         StopReason::EndTurn,
         Some(make_token_usage(5, 10)),
     );
-    let llm = MockLlmBackend::new("gpt-4").with_response(resp);
+    // Wrap in Arc so we can keep an observation handle after the
+    // runtime consumes the backend, and `verify_invocation_count` the
+    // mock at the end of the test.
+    let llm = Arc::new(MockLlmBackend::new("gpt-4").with_response(resp));
 
     // 2. Build the runtime with just the LLM backend.
     let runtime = Runtime::builder()
-        .with_llm_backend(llm)
+        .with_dyn_llm_backend(llm.clone())
         .build()
         .expect("build runtime");
 
@@ -65,4 +70,8 @@ async fn run_completes_with_text_response() {
             assert_eq!(token_usage.output_tokens, 10);
         }
     );
+
+    // The LLM mock should have been invoked exactly once for the single
+    // text-only turn (no tool_uses → no follow-up turn).
+    llm.verify_invocation_count(1);
 }
