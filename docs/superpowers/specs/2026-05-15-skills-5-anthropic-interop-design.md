@@ -50,7 +50,7 @@ The synthesized manifest lives in-memory during `tau install`; the on-disk sourc
 
 Synthesized manifests start with `capabilities = []`. Skill authors who want capabilities must add them by hand (via `tau skill import` + edit, or by writing tau.toml from scratch).
 
-Synthesized `[skill]` block uses `files = ["**"]` to capture every non-`SKILL.md` file in the source directory (refs/, assets/, etc.). This ensures `tau skill export` of an installed Anthropic-format skill produces a byte-identical directory to the original. Users who want a narrower file payload can edit the synthesized tau.toml before installing (via the `tau skill import` flow).
+For non-SKILL.md content (refs/, assets/, etc.), Skills-5 ships a simple **copy-everything-except-tau.toml** export strategy. `tau-domain::package::SkillManifest` does not currently carry a `files` glob — the install pipeline already copies the entire source tree into `<scope>/.tau/packages/<name>/<version>/`, so on export we copy the whole installed directory verbatim minus `tau.toml`. This is byte-identical for Anthropic-sourced skills (round-trip clean) and includes any extra files for tau-native skills (acceptable: those files were authored to live alongside SKILL.md).
 
 On export, any capabilities in the installed skill's `tau.toml` are silently dropped from the output (Anthropic format has no equivalent). A single-line stderr note records what was dropped: `note: "critic" had 2 capabilities dropped on Anthropic export (fs.read, net.http); Anthropic format does not preserve capability declarations`.
 
@@ -139,9 +139,9 @@ tau install <git-url-or-path>
       │                     authors: [],
       │                     capabilities: [],
       │                     skill: SkillManifest {
-      │                       content: "SKILL.md",
-      │                       files: vec!["**".into()],   // ← capture all
-      │                       requires_skills: vec![],     //   referenced files
+      │                       content: "SKILL.md".into(),
+      │                       requires_tools: vec![],
+      │                       requires_skills: vec![],
       │                     },
       │                   }
       │             → install with synthesized PackageManifest
@@ -178,10 +178,9 @@ tau skill export <name> --output ./out [--strict] [--force]
   → find_installed_skill(scope, name)                [reuse Skills-4 helper]
   → check installed.capabilities is empty OR --strict not set:
       OK path:
-        → copy <install_path>/SKILL.md to ./out/SKILL.md
-        → for each glob in installed.skill.files:
-            for each path matching glob in install_path:
-              copy to ./out/<relative_path>
+        → walk <install_path> recursively
+        → for each file: copy to ./out/<relative_path>
+                          UNLESS file_name == "tau.toml"
         → DO NOT copy tau.toml
         → DO NOT copy any scope metadata
         → if installed.capabilities.len() > 0:
