@@ -213,7 +213,7 @@ The architectural conflict (child PID unavailable during `wrap_spawn` / `pre_exe
 
 - Spec: [`docs/superpowers/specs/2026-05-06-sandbox-net-filter-design.md`](../superpowers/specs/2026-05-06-sandbox-net-filter-design.md)
 - Plan: [`docs/superpowers/plans/2026-05-06-sandbox-net-filter.md`](../superpowers/plans/2026-05-06-sandbox-net-filter.md)
-- INTEGRATION.md: [`crates/tau-sandbox-native/src/net_filter/INTEGRATION.md`](../../crates/tau-sandbox-native/src/net_filter/INTEGRATION.md)
+- INTEGRATION.md: `crates/tau-sandbox-native/src/net_filter/INTEGRATION.md` — deleted with the `net_filter` module per ADR-0020.
 - PR #35 (merged 2026-05-06 at commit d4438ae): per-host network filter machinery
 - Phase 0 verification PR #34 (closed): GHA uid_map write failure discovery
 - ADR-0014: [`0014-sandboxing.md`](0014-sandboxing.md) — original sandbox design
@@ -264,4 +264,4 @@ The `unshare_flags_for_plan` flip + `validate_plan` hard-refuse + post-spawn int
 
 ## Addendum (2026-05-07): Superseded by ADR-0020
 
-The veth + nftables + CAP_NET_ADMIN design has been replaced by a userspace HTTP-CONNECT proxy (see [ADR-0020 — Sandbox proxy](0020-sandbox-proxy.md)). The `tau-sandbox-native::net_filter` module described in this ADR was deleted in PR <TBD>. Reasons: privileged-Docker friction, 7 #[ignore]'d tests it left blocked, and a hang in the strict_net_filter integration tests under privileged-Docker CI.
+The veth + nftables + CAP_NET_ADMIN design has been replaced by a userspace HTTP-CONNECT proxy (see [ADR-0020 — Sandbox proxy](0020-sandbox-proxy.md)). The `tau-sandbox-native::net_filter` module described in this ADR was deleted in PR <TBD>. Reasons: privileged-Docker friction, 7 `#[ignore]`'d tests it left blocked, and a hang in the strict_net_filter integration tests under privileged-Docker CI.
