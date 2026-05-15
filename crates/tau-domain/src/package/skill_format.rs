@@ -209,4 +209,28 @@ mod tests {
         assert!(skill.requires_tools.is_empty());
         assert!(skill.requires_skills.is_empty());
     }
+
+    /// Defensive: if a SkillContent reaches synthesize with an empty
+    /// `description` (bypassing parse_skill_md, which rejects it),
+    /// the UncheckedManifest::validate step should surface a
+    /// ManifestBuild error. Spec requires explicit coverage.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn synthesize_fails_on_empty_description() {
+        use crate::package::skill::{SkillContent, SkillFrontmatter};
+
+        let invalid = SkillContent {
+            frontmatter: SkillFrontmatter {
+                name: "critic".into(),
+                description: String::new(),
+            },
+            body: "body".into(),
+        };
+        let source = PackageSource::from_str("https://example.com/critic.git").unwrap();
+        let result = synthesize_manifest_from_skill_md(&invalid, source);
+        assert!(
+            matches!(result, Err(SynthesizeError::ManifestBuild { .. })),
+            "expected ManifestBuild error, got {result:?}"
+        );
+    }
 }
