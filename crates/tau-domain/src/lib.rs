@@ -28,14 +28,14 @@ pub use error::{
 };
 pub use id::{AgentId, AgentInstanceId, MessageId, PackageName};
 pub use message::{Address, Message, MessagePayload};
+#[cfg(feature = "serde")]
+pub use package::synthesize_manifest_from_skill_md;
 pub use package::{
     kinds, AgentCapability, Capability, CapabilityShape, CapabilityShapeSet, FsCapability,
     GitLocation, NetCapability, PackageDep, PackageId, PackageKind, PackageManifest, PackageSource,
     PluginKind, PluginManifest, PluginRequiredTier, PluginSandboxRequirements, PortKind,
     ProcessCapability, SkillCapability, SkillFormat, SynthesizeError, UncheckedManifest,
 };
-#[cfg(feature = "serde")]
-pub use package::synthesize_manifest_from_skill_md;
 pub use value::Value;
 pub use version::{Version, VersionReq};
 

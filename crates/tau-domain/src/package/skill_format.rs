@@ -20,11 +20,9 @@ use std::path::Path;
 use std::str::FromStr;
 
 use crate::id::PackageName;
-use crate::package::{
-    kinds, PackageKind, PackageManifest, PackageSource, UncheckedManifest,
-};
 use crate::package::sandbox::PluginSandboxRequirements;
 use crate::package::skill::{SkillContent, SkillManifest};
+use crate::package::{kinds, PackageKind, PackageManifest, PackageSource, UncheckedManifest};
 use crate::version::Version;
 
 /// Classification of a directory containing a skill package.
@@ -80,11 +78,12 @@ pub fn synthesize_manifest_from_skill_md(
     parsed: &SkillContent,
     source: PackageSource,
 ) -> Result<PackageManifest, SynthesizeError> {
-    let name = PackageName::from_str(&parsed.frontmatter.name)
-        .map_err(|e| SynthesizeError::InvalidName {
+    let name = PackageName::from_str(&parsed.frontmatter.name).map_err(|e| {
+        SynthesizeError::InvalidName {
             name: parsed.frontmatter.name.clone(),
             detail: e.to_string(),
-        })?;
+        }
+    })?;
     let version = Version::parse("0.1.0").expect("0.1.0 is a valid semver");
 
     let skill = SkillManifest {
@@ -110,9 +109,11 @@ pub fn synthesize_manifest_from_skill_md(
         skill: Some(skill),
     };
 
-    unchecked.validate().map_err(|e| SynthesizeError::ManifestBuild {
-        detail: e.to_string(),
-    })
+    unchecked
+        .validate()
+        .map_err(|e| SynthesizeError::ManifestBuild {
+            detail: e.to_string(),
+        })
 }
 
 /// Errors raised by [`synthesize_manifest_from_skill_md`].
@@ -186,10 +187,9 @@ mod tests {
     fn synthesize_produces_skill_kind_manifest_with_defaults() {
         use crate::package::skill::parse_skill_md;
 
-        let parsed = parse_skill_md(
-            "---\nname: critic\ndescription: Reviews drafts.\n---\nBody.\n",
-        )
-        .unwrap();
+        let parsed =
+            parse_skill_md("---\nname: critic\ndescription: Reviews drafts.\n---\nBody.\n")
+                .unwrap();
         let source = PackageSource::from_str("https://example.com/critic.git").unwrap();
         let manifest = synthesize_manifest_from_skill_md(&parsed, source).unwrap();
 
