@@ -237,6 +237,34 @@ impl MockLlmBackend {
             .invocations
             .clone()
     }
+
+    /// Number of times [`LlmBackend::complete`] or [`LlmBackend::stream`]
+    /// has been invoked on this mock.
+    pub fn invocation_count(&self) -> usize {
+        self.state
+            .lock()
+            .expect("MockLlmBackend mutex poisoned")
+            .invocations
+            .len()
+    }
+
+    /// Assert the mock was invoked exactly `expected` times.
+    ///
+    /// Call this near the end of a test (after the code-under-test has
+    /// finished using the mock) to make the test fail loudly when the
+    /// mock was never called, or was called too many times. Counts both
+    /// [`LlmBackend::complete`] and [`LlmBackend::stream`].
+    ///
+    /// `#[track_caller]` makes the panic point at the call site rather
+    /// than into this helper.
+    #[track_caller]
+    pub fn verify_invocation_count(&self, expected: usize) {
+        let actual = self.invocation_count();
+        assert_eq!(
+            actual, expected,
+            "MockLlmBackend invocation count mismatch: expected {expected}, got {actual}"
+        );
+    }
 }
 
 impl LlmBackend for MockLlmBackend {
@@ -602,6 +630,41 @@ pub fn resource_limits(
         cpu_seconds,
         wall_clock_seconds: None,
         max_subprocesses: None,
+    }
+}
+
+#[cfg(test)]
+mod mock_llm_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn verify_invocation_count_passes_on_zero_when_unused() {
+        let mock = MockLlmBackend::new("zero");
+        assert_eq!(mock.invocation_count(), 0);
+        mock.verify_invocation_count(0); // should not panic
+    }
+
+    #[tokio::test]
+    async fn verify_invocation_count_tracks_complete_calls() {
+        let mock = MockLlmBackend::new("counter");
+        let req = make_completion_request("model-x".into());
+        let _ = mock.complete(req.clone()).await.expect("complete ok");
+        let _ = mock.complete(req).await.expect("complete ok");
+        assert_eq!(mock.invocation_count(), 2);
+        mock.verify_invocation_count(2); // should not panic
+    }
+
+    #[tokio::test]
+    async fn verify_invocation_count_panics_on_mismatch() {
+        let mock = MockLlmBackend::new("mismatch");
+        // 0 invocations recorded; verifying against 1 must panic.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            mock.verify_invocation_count(1);
+        }));
+        assert!(
+            result.is_err(),
+            "verify_invocation_count must panic when actual != expected"
+        );
     }
 }
 
