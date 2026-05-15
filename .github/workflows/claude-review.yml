@@ -1,0 +1,147 @@
+name: Claude review
+
+# AI code review via anthropic-ai/claude-code-action.
+#
+# Three trigger modes, all routed to the same action with a different
+# `direct_prompt` per mode:
+#
+#   1. PR auto-review — every PR opened or pushed gets a fresh
+#      Claude review comment. Industry-standard pattern (CodeRabbit,
+#      Codium PR-Agent, Greptile). Catches issues at proposal time.
+#
+#   2. Manual re-review — adding the `claude:review` label to any PR
+#      re-runs the review. Useful after edits or for a second pass.
+#
+#   3. Release-summary — on tag push matching `v[0-9]+.0.0` or
+#      `v0.[0-9]+.0` (major-equivalent per QG11), Claude reads the
+#      diff from the previous tag and opens a release-summary issue
+#      with changelog highlights + notable risks.
+#
+# Distinct from `.github/workflows/claude.yml` (the @claude mention
+# bot): that one is interactive (responds to maintainer @-mentions);
+# this one is non-interactive (event-driven analysis output).
+#
+# Secret
+# ------
+# Shared with claude.yml: `CLAUDE_CODE_OAUTH_TOKEN` (Claude.ai
+# subscription via OAuth). Set via Settings → Secrets and variables
+# → Actions. Generate locally with `claude setup-token`.
+#
+# Cost note
+# ---------
+# Auto-review fires on every PR push (synchronize), which can add up
+# on actively-developed PRs. Tune by:
+#   - Removing `synchronize` from the trigger types (review on open
+#     only; re-review via the manual label).
+#   - Adding a `paths:` filter to skip review for docs-only or
+#     vendor-only PRs (currently the docs-check.yml gate handles
+#     docs but Claude still gets fired).
+# Both are one-line edits below.
+#
+# Security
+# --------
+# `pull_request` (not `pull_request_target`) is used so fork PRs
+# cannot access the OAuth secret. Same-repo PRs from collaborators
+# are auto-reviewed; fork PRs are skipped silently. Release-summary
+# only fires on push by collaborators (tag push requires write
+# access).
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, labeled]
+  push:
+    tags:
+      - 'v[0-9]*.0.0'
+      - 'v0.[0-9]*.0'
+
+concurrency:
+  group: claude-review-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  review-pr:
+    name: review PR
+    if: |
+      (github.event_name == 'pull_request' && (
+        (github.event.action == 'labeled' &&
+          github.event.label.name == 'claude:review') ||
+        (github.event.action != 'labeled' &&
+          github.event.pull_request.draft == false)
+      ))
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropic-ai/claude-code-action@beta
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          direct_prompt: |
+            Review this pull request as a senior engineer would.
+            Focus on:
+              - Correctness bugs, edge cases the tests miss
+              - Security issues (input validation, auth, injection)
+              - Performance regressions
+              - API/contract changes that affect callers
+              - Code style only when it actively harms readability
+            Skip nits about formatting (rustfmt enforces that) or
+            clippy-caught issues (the clippy job covers those).
+            Be concise. If the PR is in great shape, say so plainly
+            instead of inventing nits.
+
+  release-summary:
+    name: release summary
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve previous tag
+        id: prev
+        env:
+          CURRENT_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          previous=$(git tag --list 'v*.0.0' 'v0.*.0' --sort=-v:refname \
+            | grep -A1 "^${CURRENT_TAG}$" | tail -n1)
+          if [[ -z "$previous" || "$previous" == "$CURRENT_TAG" ]]; then
+            previous=$(git rev-list --max-parents=0 HEAD | head -1)
+          fi
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "Previous tag/commit: $previous"
+
+      - uses: anthropic-ai/claude-code-action@beta
+        env:
+          CURRENT_TAG: ${{ github.ref_name }}
+          PREV_REF: ${{ steps.prev.outputs.previous }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          direct_prompt: |
+            A new release tag was pushed: $CURRENT_TAG.
+            Read the diff between $PREV_REF and $CURRENT_TAG and
+            open a GitHub issue titled "Release summary: $CURRENT_TAG"
+            containing:
+              - Changelog-style highlights of what shipped
+                (grouped: features / fixes / breaking changes /
+                docs / CI)
+              - Notable risks or behaviors a user upgrading to this
+                version should know about
+              - Recommended manual smoke tests before publishing
+                release notes
+            Use the GitHub MCP tools to open the issue. Be concise;
+            this is a record, not a full audit.
