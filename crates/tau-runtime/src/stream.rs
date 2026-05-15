@@ -370,11 +370,291 @@ pub(crate) fn run_streaming_inner(
                         // Build the ToolResult.
                         let is_agent_spawn = tool_use.name.starts_with("agent.")
                             && tool_use.name.ends_with(".spawn");
+                        let is_skill_spawn = tool_use.name.starts_with("skill.")
+                            && tool_use.name.ends_with(".spawn")
+                            && tool_use.name.len() > "skill..spawn".len();
                         let agent_id_str = agent_def.id.to_string();
                         // tau_domain::Value -> serde_json::Value via serde
                         // (orchestration handlers parse serde_json::Value).
                         let args_json = serde_json::to_value(&tool_use.input)
                             .unwrap_or(serde_json::Value::Null);
+
+                        // Skills-4: skill.<name>.spawn virtual tool dispatch.
+                        // Parallel to is_agent_spawn above, but resolves an
+                        // installed skill instead of an agent kind. Uses the
+                        // same v1.1 Box::pin(child_runtime.run_with_history)
+                        // recursion mechanic — no new kernel infrastructure.
+                        //
+                        // Early-exit (yield + continue) pattern instead of the
+                        // if/else expression form used by is_agent_spawn, so
+                        // that we can bail out cleanly on scope/validation
+                        // failures without restructuring the rest of the arm.
+                        if is_skill_spawn {
+                            // Resolve the tau-pkg Scope from cwd.
+                            let scope_result = std::env::current_dir()
+                                .ok()
+                                .and_then(|cwd| tau_pkg::Scope::resolve(&cwd).ok());
+                            let scope = match scope_result {
+                                Some(s) => s,
+                                None => {
+                                    yield make_skill_spawn_error_tool_result(
+                                        tool_use,
+                                        "no scope available for skill resolution",
+                                    );
+                                    // Append error tool-result message so LLM
+                                    // history is coherent.
+                                    messages.push(Message::new(
+                                        tool_addr.clone(),
+                                        agent_addr.clone(),
+                                        MessagePayload::ToolError {
+                                            kind: "orchestration_virtual_tool_error"
+                                                .into(),
+                                            message: "skill spawn failed: no scope \
+                                                      available for skill resolution"
+                                                .into(),
+                                            details: None,
+                                        },
+                                    ));
+                                    continue;
+                                }
+                            };
+
+                            // Validate: capability check, authorization, skill
+                            // lookup, ${SKILL_DIR} substitution, scope_paths
+                            // narrowing, subset law.
+                            let skill_req = match crate::orchestration::validate_skill_spawn(
+                                &tool_use.name,
+                                &args_json,
+                                &agent_id_str,
+                                &granted_capabilities,
+                                &scope,
+                            ) {
+                                Ok(r) => r,
+                                Err(e) => {
+                                    let err_msg = format!("{e}");
+                                    yield make_skill_spawn_error_tool_result(
+                                        tool_use,
+                                        &err_msg,
+                                    );
+                                    messages.push(Message::new(
+                                        tool_addr.clone(),
+                                        agent_addr.clone(),
+                                        MessagePayload::ToolError {
+                                            kind: "orchestration_virtual_tool_error"
+                                                .into(),
+                                            message: format!(
+                                                "skill spawn failed: {err_msg}"
+                                            ),
+                                            details: None,
+                                        },
+                                    ));
+                                    continue;
+                                }
+                            };
+
+                            // If orchestration_runtime is None this is a
+                            // single-agent run that somehow received a skill
+                            // virtual tool — fail with is_error so the LLM
+                            // can recover.
+                            let skill_tool_result: ToolResult =
+                                match options.orchestration_runtime.as_ref() {
+                                    None => ToolResult::new(
+                                        vec![tau_ports::ToolContent::Text {
+                                            text: "skill.<name>.spawn: no orchestration \
+                                                   runtime; this run was not launched \
+                                                   via spawn_root_agent."
+                                                .into(),
+                                        }],
+                                        true,
+                                    ),
+                                    Some(child_runtime) => {
+                                        // Record the spawn in the shared
+                                        // RunState's counter for budget.
+                                        {
+                                            let s = state_arc.lock().await;
+                                            s.record_agent_spawn();
+                                        }
+
+                                        // Build child agent id: parent id +
+                                        // sanitized skill name suffix.
+                                        // skill_name may contain dots — replace
+                                        // with '-' for AgentId compliance.
+                                        let safe_skill =
+                                            skill_req.skill_name.replace('.', "-");
+                                        let child_id_str = format!(
+                                            "{}-skill-{}",
+                                            agent_def.id.as_str(),
+                                            safe_skill,
+                                        );
+                                        let child_id =
+                                            std::str::FromStr::from_str(&child_id_str)
+                                                .unwrap_or_else(|_| {
+                                                    agent_def.id.clone()
+                                                });
+
+                                        // Build child def: same package +
+                                        // llm_backend as parent; skill's
+                                        // system_prompt (from SKILL.md or
+                                        // caller override); new id; display
+                                        // name identifies the skill.
+                                        let mut child_def =
+                                            tau_domain::AgentDefinition::new(
+                                                child_id,
+                                                format!(
+                                                    "{} (skill)",
+                                                    skill_req.skill_name
+                                                ),
+                                                agent_def.package.clone(),
+                                                agent_def.llm_backend.clone(),
+                                            );
+                                        child_def = child_def.with_system_prompt(
+                                            skill_req.system_prompt.clone(),
+                                        );
+                                        child_def = child_def
+                                            .with_config(agent_def.config.clone());
+
+                                        // Build child opts: share state + runtime
+                                        // arc; override grant with validated skill
+                                        // grant.
+                                        let child_opts = crate::RunOptions {
+                                            orchestration_state: Some(
+                                                state_arc.clone(),
+                                            ),
+                                            orchestration_runtime: Some(
+                                                child_runtime.clone(),
+                                            ),
+                                            granted_capabilities_override: Some(
+                                                skill_req.grant.clone(),
+                                            ),
+                                            ..crate::RunOptions::default()
+                                        };
+
+                                        // Initial user message for the child.
+                                        let child_msg = Message::new(
+                                            Address::User,
+                                            Address::Agent(AgentInstanceId::new()),
+                                            MessagePayload::Text {
+                                                content: skill_req.message.clone(),
+                                            },
+                                        );
+
+                                        // Emit Spawn trace event before
+                                        // recursing.
+                                        {
+                                            let mut s = state_arc.lock().await;
+                                            let run_id = s.run_id.clone();
+                                            s.trace.emit(tau_ports::TraceEvent {
+                                                id: ulid::Ulid::new().to_string(),
+                                                ts: chrono::Utc::now(),
+                                                run_id,
+                                                agent_id: Some(agent_id_str.clone()),
+                                                kind: tau_ports::TraceEventKind::Spawn {
+                                                    child_id: child_id_str.clone(),
+                                                    agent_kind: skill_req
+                                                        .skill_name
+                                                        .clone(),
+                                                    grant_size: skill_req.grant.len(),
+                                                },
+                                            });
+                                        }
+
+                                        // Recurse. Box::pin for async recursion
+                                        // (the future would otherwise be
+                                        // infinitely sized).
+                                        let child_runtime_clone = child_runtime.clone();
+                                        let package_manifest_clone =
+                                            package_manifest.clone();
+                                        let child_outcome_res: Result<
+                                            RunOutcome,
+                                            crate::error::RuntimeError,
+                                        > = Box::pin(async move {
+                                            child_runtime_clone
+                                                .run_with_history(
+                                                    child_def,
+                                                    package_manifest_clone,
+                                                    Vec::new(),
+                                                    child_msg,
+                                                    child_opts,
+                                                )
+                                                .await
+                                        })
+                                        .await;
+
+                                        match child_outcome_res {
+                                            Ok(RunOutcome::Completed {
+                                                final_message,
+                                                ..
+                                            }) => {
+                                                let text = match &final_message.payload
+                                                {
+                                                    MessagePayload::Text {
+                                                        content,
+                                                    } => content.clone(),
+                                                    _ => {
+                                                        "<child run completed without \
+                                                         text payload>"
+                                                            .to_string()
+                                                    }
+                                                };
+                                                ToolResult::new(
+                                                    vec![tau_ports::ToolContent::Text {
+                                                        text,
+                                                    }],
+                                                    false,
+                                                )
+                                            }
+                                            Ok(other) => ToolResult::new(
+                                                vec![tau_ports::ToolContent::Text {
+                                                    text: format!(
+                                                        "child run did not complete: \
+                                                         {other:?}"
+                                                    ),
+                                                }],
+                                                true,
+                                            ),
+                                            Err(e) => ToolResult::new(
+                                                vec![tau_ports::ToolContent::Text {
+                                                    text: format!(
+                                                        "child run error: {e}"
+                                                    ),
+                                                }],
+                                                true,
+                                            ),
+                                        }
+                                    }
+                                };
+
+                            // Append tool-result message so history is coherent
+                            // (mirrors what the non-early-exit path does below).
+                            let skill_result_payload = if skill_tool_result.is_error {
+                                MessagePayload::ToolError {
+                                    kind: "orchestration_virtual_tool_error".into(),
+                                    message: crate::run::flatten_content_to_string(
+                                        &skill_tool_result.content,
+                                    ),
+                                    details: None,
+                                }
+                            } else {
+                                MessagePayload::ToolResult {
+                                    body: crate::run::content_to_value(
+                                        &skill_tool_result.content,
+                                    ),
+                                }
+                            };
+                            messages.push(Message::new(
+                                tool_addr.clone(),
+                                agent_addr.clone(),
+                                skill_result_payload,
+                            ));
+
+                            yield RunEvent::ToolCallCompleted {
+                                id: tool_use.id.clone(),
+                                name: tool_use.name.clone(),
+                                result: Ok(skill_tool_result),
+                            };
+                            continue; // skip rest of dispatch arm
+                        }
+
                         let tool_result: ToolResult = if is_agent_spawn {
                             // v1.1: recursive agent.<kind>.spawn dispatch.
                             // Validate via validate_agent_spawn (parent's
@@ -857,6 +1137,23 @@ pub(crate) fn run_streaming_inner(
 
 /// LLM-side fatal error (backend.stream / chunk error).
 /// Drainer converts to Err(RuntimeError::Llm(_)) or Internal.
+/// Build a `RunEvent::ToolCallCompleted` with `is_error = true` for a failed
+/// `skill.<name>.spawn` virtual tool call. Used in the `is_skill_spawn` branch
+/// of `run_streaming_inner` for early-exit error paths (scope resolution
+/// failure, validation failure).
+fn make_skill_spawn_error_tool_result(tool_use: &tau_ports::ToolUse, msg: &str) -> RunEvent {
+    RunEvent::ToolCallCompleted {
+        id: tool_use.id.clone(),
+        name: tool_use.name.clone(),
+        result: Ok(ToolResult::new(
+            vec![tau_ports::ToolContent::Text {
+                text: format!("skill spawn failed: {msg}"),
+            }],
+            true,
+        )),
+    }
+}
+
 fn make_llm_fatal_error(llm_err: LlmError) -> RunEvent {
     RunEvent::FatalError {
         kind: "Llm".to_string(),

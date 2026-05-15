@@ -29,7 +29,8 @@
 use std::collections::BTreeMap;
 
 use tau_domain::{
-    AgentCapability, Capability, FsCapability, NetCapability, ProcessCapability, Value,
+    AgentCapability, Capability, FsCapability, NetCapability, ProcessCapability, SkillCapability,
+    Value,
 };
 
 /// Returns `true` iff `granted` covers `required` for one capability pair.
@@ -47,6 +48,7 @@ pub(crate) fn capability_satisfies(granted: &Capability, required: &Capability) 
             task_list_satisfies(g, r)
         }
         (Capability::Plan { mode: g }, Capability::Plan { mode: r }) => plan_satisfies(g, r),
+        (Capability::Skill(g), Capability::Skill(r)) => skill_satisfies(g, r),
         (
             Capability::Custom {
                 name: gn,
@@ -176,6 +178,31 @@ pub(crate) fn agent_satisfies(granted: &AgentCapability, required: &AgentCapabil
                 allowed_kinds: rk, ..
             },
         ) => string_subset(gk, rk),
+        _ => false,
+    }
+}
+
+/// `Skill` satisfaction: granted `allowed_skills` is a superset of required.
+///
+/// `required_capability()` in virtual_tools.rs emits
+/// `SkillCapability::Spawn { allowed_skills: [] }` (empty = "just needs
+/// any skill.spawn capability"), which is trivially satisfied by any
+/// granted skill.spawn entry. The specific `allowed_skills` membership
+/// check (which skill is actually being spawned) is deferred to
+/// `validate_skill_spawn`, which inspects the spawned skill name against
+/// the actual `allowed_skills` list in the grant.
+pub(crate) fn skill_satisfies(granted: &SkillCapability, required: &SkillCapability) -> bool {
+    match (granted, required) {
+        (
+            SkillCapability::Spawn {
+                allowed_skills: gs, ..
+            },
+            SkillCapability::Spawn {
+                allowed_skills: rs, ..
+            },
+        ) => string_subset(gs, rs),
+        // `SkillCapability` is `#[non_exhaustive]`; future variants
+        // default to deny — additive evolution must not silently widen grants.
         _ => false,
     }
 }
@@ -465,6 +492,34 @@ kind = "agent.spawn"
 allowed_kinds = ["worker"]
 "#);
         assert!(capability_satisfies(&granted, &required));
+    }
+
+    // -------------------- Skill --------------------
+
+    #[test]
+    fn skill_spawn_subset_satisfies() {
+        let granted = cap(r#"[cap]
+kind = "skill.spawn"
+allowed_skills = ["critic", "fact-checker"]
+"#);
+        let required = cap(r#"[cap]
+kind = "skill.spawn"
+allowed_skills = ["critic"]
+"#);
+        assert!(capability_satisfies(&granted, &required));
+    }
+
+    #[test]
+    fn skill_spawn_superset_denies() {
+        let granted = cap(r#"[cap]
+kind = "skill.spawn"
+allowed_skills = ["critic"]
+"#);
+        let required = cap(r#"[cap]
+kind = "skill.spawn"
+allowed_skills = ["critic", "fact-checker"]
+"#);
+        assert!(!capability_satisfies(&granted, &required));
     }
 
     // -------------------- Custom --------------------
@@ -864,6 +919,7 @@ mod proptests {
                 | (Capability::Network(_), Capability::Network(_))
                 | (Capability::Process(_), Capability::Process(_))
                 | (Capability::Agent(_), Capability::Agent(_))
+                | (Capability::Skill(_), Capability::Skill(_))
                 | (Capability::Custom { .. }, Capability::Custom { .. },)
         )
     }

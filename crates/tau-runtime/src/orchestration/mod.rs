@@ -20,6 +20,7 @@ pub mod budget;
 pub mod error;
 pub mod persistence;
 pub mod run_state;
+pub mod skill_resolve;
 pub mod task_list;
 pub mod trace;
 pub mod virtual_tools;
@@ -27,9 +28,13 @@ pub mod virtual_tools;
 pub use budget::BudgetWatchdog;
 pub use error::OrchestrationError;
 pub use run_state::RunState;
+pub use skill_resolve::{
+    apply_scope_paths, resolve_skill_for_spawn, substitute_skill_dir, SkillSpawnArgs,
+    SkillSpawnRequest,
+};
 pub use task_list::TaskList;
 pub use trace::{TraceStream, TraceSubscriber};
 pub use virtual_tools::{
     check_capability_subset, dispatch, is_virtual, required_capability, validate_agent_spawn,
-    AgentSpawnRequest,
+    validate_skill_spawn, AgentSpawnRequest,
 };
