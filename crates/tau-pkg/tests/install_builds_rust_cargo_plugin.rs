@@ -319,8 +319,8 @@ installed_at = "2026-04-27T10:00:00Z"
     // Sanity-check the file is parseable as v1 (auto-upgraded in memory).
     let pre = LockFile::load(&lock_path).unwrap();
     assert_eq!(
-        pre.schema_version, 5,
-        "load should auto-upgrade v1 to v5 in memory",
+        pre.schema_version, 6,
+        "load should auto-upgrade v1 to v6 in memory",
     );
     assert_eq!(pre.packages.len(), 1);
     assert_eq!(pre.packages[0].name.as_str(), "legacy-pkg");
