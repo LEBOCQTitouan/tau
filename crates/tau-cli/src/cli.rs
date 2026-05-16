@@ -354,6 +354,12 @@ pub struct VerifyArgs {
     /// Use global scope.
     #[arg(long)]
     pub global: bool,
+    /// Skills-5: in addition to the standard drift check, validate
+    /// each installed skill against the Anthropic Agent Skills
+    /// spec (non-empty description, non-empty body, well-formed
+    /// frontmatter).
+    #[arg(long)]
+    pub anthropic_strict: bool,
 }
 
 /// Arguments for `tau update`.
