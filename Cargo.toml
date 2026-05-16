@@ -87,6 +87,6 @@ async-stream        = "0.3"
 secrecy             = "0.10"
 landlock     = "0.4"
 libc         = "0.2"
-nix          = { version = "0.29", default-features = false, features = ["sched", "user", "process", "fs"] }
+nix          = { version = "0.31", default-features = false, features = ["sched", "user", "process", "fs"] }
 seccompiler  = "0.5"
 ulid         = "1"

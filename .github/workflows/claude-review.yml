@@ -61,7 +61,11 @@ concurrency:
 jobs:
   review-pr:
     name: review PR
+    # Skip dependabot PRs: they're mechanical version bumps that don't
+    # benefit from Claude review, and the OAuth token isn't available
+    # to dependabot-triggered runs anyway (the action step would fail).
     if: |
+      github.actor != 'dependabot[bot]' &&
       (github.event_name == 'pull_request' && (
         (github.event.action == 'labeled' &&
           github.event.label.name == 'claude:review') ||
