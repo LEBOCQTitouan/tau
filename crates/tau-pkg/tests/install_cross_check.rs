@@ -377,42 +377,20 @@ path = "src/main.rs"
     // (no fork, no stdio plumbing). On non-Unix we spawn-and-wait,
     // inheriting stdio.
     let real_path = real_binary.to_string_lossy().replace('\\', "\\\\");
-    // Diagnostic: relay writes its intended exec target and any exec error to
-    // `/tmp/tau-relay-debug-<pid>.log`. The cross-check null's the child's
-    // stderr, so without this side-channel an exec failure is invisible.
     let main_rs = format!(
         r##"use std::process::Command;
-
-fn debug_log_path() -> std::path::PathBuf {{
-    std::path::PathBuf::from(format!("/tmp/tau-relay-debug-{{}}.log", std::process::id()))
-}}
-
-fn write_debug(line: &str) {{
-    let path = debug_log_path();
-    let _ = std::fs::write(&path, line);
-}}
 
 #[cfg(unix)]
 fn main() {{
     use std::os::unix::process::CommandExt;
-    let target = "{real_path}";
-    let exists = std::path::Path::new(target).exists();
-    let metadata = std::fs::metadata(target).map(|m| format!("len={{}} mode=0o{{:o}}", m.len(), {{
-        use std::os::unix::fs::PermissionsExt;
-        m.permissions().mode()
-    }})).unwrap_or_else(|e| format!("metadata err: {{e}}"));
-    write_debug(&format!("exec_target={{target}}\nexists={{exists}}\n{{metadata}}\npre_exec\n"));
-    let err = Command::new(target).args(std::env::args_os().skip(1)).exec();
-    write_debug(&format!("exec_target={{target}}\nexists={{exists}}\n{{metadata}}\nexec_err={{err}}\n"));
+    let err = Command::new("{real_path}").args(std::env::args_os().skip(1)).exec();
     eprintln!("relay: exec failed: {{err}}");
     std::process::exit(127);
 }}
 
 #[cfg(not(unix))]
 fn main() {{
-    let target = "{real_path}";
-    write_debug(&format!("exec_target={{target}}\nspawn (windows)\n"));
-    let status = Command::new(target)
+    let status = Command::new("{real_path}")
         .args(std::env::args_os().skip(1))
         .stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
@@ -443,30 +421,6 @@ fn cargo_and_git_available() -> bool {
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
-}
-
-/// Collect any `/tmp/tau-relay-debug-*.log` files written by the relay binary
-/// during the test. Returns a single string suitable for inclusion in a panic
-/// message — empty string if no logs found.
-fn collect_relay_debug() -> String {
-    let mut out = String::new();
-    if let Ok(entries) = std::fs::read_dir("/tmp") {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if name_str.starts_with("tau-relay-debug-") && name_str.ends_with(".log") {
-                let path = entry.path();
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    out.push_str(&format!("--- {} ---\n{}\n", path.display(), content));
-                }
-            }
-        }
-    }
-    if out.is_empty() {
-        "(no /tmp/tau-relay-debug-*.log files found)".to_string()
-    } else {
-        out
-    }
 }
 
 // ── Test 4: install with matching manifest succeeds ──────────────────────────
@@ -504,14 +458,7 @@ fn install_with_matching_manifest_succeeds_and_populates_required_shapes() {
     let source = PackageSource::from_str(&fixtures::file_url(&bare)).unwrap();
 
     let installed = install_with_options(&source, &scope, InstallOptions::default())
-        .unwrap_or_else(|e| {
-            panic!(
-                "install with matching manifest should succeed: {e}\n\
-                 echo_tool_path={}\nrelay debug:\n{}",
-                echo_tool.display(),
-                collect_relay_debug()
-            )
-        });
+        .expect("install with matching manifest should succeed");
     assert_eq!(installed.name.as_str(), "match-plugin");
 
     let lf = LockFile::load(&scope.lockfile_path()).unwrap();
@@ -601,14 +548,8 @@ fn install_force_after_cross_check_fix_succeeds() {
     // ── Step 3: re-install with force=true ───────────────────────────────────
     let mut opts = InstallOptions::default();
     opts.force = true;
-    let installed = install_with_options(&source, &scope, opts).unwrap_or_else(|e| {
-        panic!(
-            "install --force after fix should succeed: {e}\n\
-             echo_tool_path={}\nrelay debug:\n{}",
-            echo_tool.display(),
-            collect_relay_debug()
-        )
-    });
+    let installed = install_with_options(&source, &scope, opts)
+        .expect("install --force after fix should succeed");
     assert_eq!(installed.name.as_str(), "force-plugin");
 
     let lf = LockFile::load(&scope.lockfile_path()).unwrap();

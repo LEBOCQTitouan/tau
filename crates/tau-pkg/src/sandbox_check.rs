@@ -133,7 +133,11 @@ pub async fn cross_check_plugin_capabilities(
         serde_json::Value::Null,
     );
 
-    let params = rmp_serde::to_vec(&handshake_req)
+    // The wire shape for `meta.handshake` params is a 1-element array
+    // (`Vec<HandshakeRequest>`) per the SDK's matching decoder; see
+    // `tau_plugin_sdk::handshake::drive_handshake` and the parallel
+    // call site at `tau_runtime::plugin_host::handshake`.
+    let params = rmp_serde::to_vec(&vec![&handshake_req])
         .map_err(|e| CrossCheckError::HandshakeFailed(format!("encode handshake request: {e}")))?;
 
     let req_frame = Frame::Request {
