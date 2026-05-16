@@ -31,7 +31,7 @@ use tempfile::TempDir;
 /// sub-element is opened.
 fn v5_lockfile_toml(skills: &[(&str, &str, &str)]) -> String {
     let mut s = String::from(
-        "schema_version = 5\n\
+        "schema_version = 6\n\
          generated_by_tau_version = \"0.0.0\"\n\
          generated_at = \"2026-05-12T10:00:00Z\"\n\n",
     );
@@ -240,7 +240,7 @@ fn list_plugin_only_lockfile_shows_empty() {
     // Inline setup — a plugin-only entry (no [package.skill] table). The
     // v5_lockfile_toml helper always emits skill entries, so we write this
     // by hand.
-    let toml = "schema_version = 5\n\
+    let toml = "schema_version = 6\n\
                 generated_by_tau_version = \"0.0.0\"\n\
                 generated_at = \"2026-05-12T10:00:00Z\"\n\n\
                 [[package]]\n\

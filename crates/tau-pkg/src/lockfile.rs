@@ -54,7 +54,13 @@ use crate::error::RegistryError;
 ///   to `None` for legacy entries via `#[serde(default)]`; skill
 ///   packages installed before the upgrade surface as "unverified"
 ///   via `tau verify` until reinstalled).
-pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 5;
+/// - `6` — Synthesized-manifest provenance:
+///   `LockedPackage::synthesized_from: Option<SynthesizedSource>` added.
+///   v5 lockfiles auto-upgrade to v6 on load (`synthesized_from` defaults
+///   to `None` for legacy entries via `#[serde(default)]`; packages
+///   installed before the upgrade retain `None` provenance, which is
+///   correct — they were installed from tau-native sources).
+pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 6;
 
 /// Schema for `tau-lock.toml`.
 ///
@@ -68,21 +74,23 @@ pub const MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION: u32 = 5;
 /// use tau_pkg::lockfile::LockFile;
 ///
 /// let lf = LockFile::default();
-/// assert_eq!(lf.schema_version, 5);
+/// assert_eq!(lf.schema_version, 6);
 /// assert!(lf.packages.is_empty());
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LockFile {
-    /// Schema version. Currently `5`. Bumped on breaking changes only.
-    /// v1–v4 lockfiles are accepted on load and auto-upgraded to v5
+    /// Schema version. Currently `6`. Bumped on breaking changes only.
+    /// v1–v5 lockfiles are accepted on load and auto-upgraded to v6
     /// on the next save (v1→v2: legacy entries get `plugin = None`;
     /// v2→v3: `LockedPlugin` entries get `binary_sha256 = ""`
     /// defaulted via `#[serde(default)]`; v3→v4: `LockedPlugin`
     /// entries get `required_shapes = []` defaulted via
     /// `#[serde(default)]` with a per-plugin warning emitted;
     /// v4→v5: `LockedPackage` entries get `skill = None` defaulted
-    /// via `#[serde(default)]` with a once-per-process warn emitted).
+    /// via `#[serde(default)]` with a once-per-process warn emitted;
+    /// v5→v6: `LockedPackage` entries get `synthesized_from = None`
+    /// defaulted via `#[serde(default)]`).
     pub schema_version: u32,
     /// `CARGO_PKG_VERSION` of the tau-pkg crate that last wrote this file.
     pub generated_by_tau_version: String,
@@ -95,6 +103,24 @@ pub struct LockFile {
     /// natural diff output.
     #[serde(default, rename = "package")]
     pub packages: Vec<LockedPackage>,
+}
+
+/// Provenance marker for synthesized manifests (Skills-5).
+///
+/// Recorded on [`LockedPackage::synthesized_from`] when the install
+/// pipeline auto-detected a non-tau format (currently: Anthropic
+/// Agent Skills) and synthesized the `tau.toml` in-memory rather
+/// than reading one from the source. `tau skill show` surfaces this
+/// to the user.
+///
+/// Added in lockfile schema v6.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SynthesizedSource {
+    /// The package was installed from a vanilla Anthropic Agent Skills
+    /// source (SKILL.md only; no tau.toml in the source tree).
+    Anthropic,
 }
 
 /// One installed package's lockfile entry.
@@ -140,6 +166,15 @@ pub struct LockedPackage {
     /// Added in lockfile schema v5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill: Option<LockedSkill>,
+    /// Provenance: `Some(_)` if this package's manifest was synthesized
+    /// at install time from a non-tau source format (e.g. Anthropic
+    /// Agent Skills). `None` for packages installed from sources
+    /// that already had a `tau.toml`.
+    ///
+    /// Added in lockfile schema v6 (Skills-5). v5 entries deserialize
+    /// as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synthesized_from: Option<SynthesizedSource>,
 }
 
 /// Recorded build artifact for a plugin package.
@@ -416,6 +451,7 @@ impl LockFile {
         // writes the current version.
         let was_pre_v4 = parsed.schema_version < 4;
         let was_pre_v5 = parsed.schema_version < 5;
+        let was_pre_v6 = parsed.schema_version < 6;
         if parsed.schema_version < MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION {
             parsed.schema_version = MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION;
         }
@@ -442,6 +478,13 @@ impl LockFile {
             // frontmatter.
             warn_lockfile_pre_v5_once();
         }
+
+        // v5 → v6 migration: `synthesized_from` is absent on legacy
+        // lockfiles. The field defaults to `None` via `#[serde(default)]`
+        // which is the correct value for all packages installed before
+        // Skills-5 (they were all installed from tau-native sources).
+        // No warning needed — `None` is the silent, correct default.
+        let _ = was_pre_v6; // migration is purely serde-default; no warn required
 
         Ok(parsed)
     }
@@ -606,6 +649,7 @@ mod tests {
             installed_versions: vec![fixture_locked_version()],
             plugin: None,
             skill: None,
+            synthesized_from: None,
         }
     }
 
@@ -613,7 +657,7 @@ mod tests {
     fn default_lockfile_has_current_schema_version() {
         let lf = LockFile::default();
         assert_eq!(lf.schema_version, MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION);
-        assert_eq!(lf.schema_version, 5);
+        assert_eq!(lf.schema_version, 6);
     }
 
     #[test]
@@ -805,7 +849,7 @@ mod tests {
             err,
             RegistryError::SchemaTooNew {
                 found: 999,
-                supported: 5,
+                supported: 6,
             }
         ));
     }
@@ -1045,8 +1089,8 @@ mod tests {
             plugin.required_shapes.is_empty(),
             "required_shapes should default to empty for v3 lockfile entries"
         );
-        // Schema version is bumped to v5 in memory.
-        assert_eq!(loaded.schema_version, 5);
+        // Schema version is bumped to v6 in memory.
+        assert_eq!(loaded.schema_version, 6);
     }
 
     /// A v4 lockfile with `required_shapes` populated must round-trip
@@ -1073,7 +1117,7 @@ mod tests {
         lf.save(&path).unwrap();
         let loaded = LockFile::load(&path).unwrap();
 
-        assert_eq!(loaded.schema_version, 5);
+        assert_eq!(loaded.schema_version, 6);
         assert_eq!(loaded.packages.len(), 1);
         let loaded_plugin = loaded.packages[0].plugin.as_ref().unwrap();
         assert_eq!(
@@ -1089,7 +1133,7 @@ mod tests {
     #[test]
     fn loads_v4_lockfile_with_skill_none_on_auto_upgrade() {
         // v4 lockfile (no `skill` field). On load, schema_version
-        // bumps to v5 and pkg.skill is None.
+        // bumps to v6 and pkg.skill is None.
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("tau.lock");
         let v4_text = r#"
@@ -1107,5 +1151,75 @@ source = "https://example.com/tool.git"
         assert_eq!(lf.schema_version, MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION);
         assert_eq!(lf.packages.len(), 1);
         assert!(lf.packages[0].skill.is_none());
+    }
+
+    // ---- v5 → v6 migration tests (Skills-5) ----
+
+    #[test]
+    fn v5_lockfile_reads_as_v6_with_none_synthesized_from() {
+        let v5_toml = r#"schema_version = 5
+generated_by_tau_version = "0.0.0"
+generated_at = "2026-05-12T10:00:00Z"
+
+[[package]]
+name = "critic"
+active_version = "0.1.0"
+source = "https://example.com/critic.git"
+
+[[package.versions]]
+version = "0.1.0"
+resolved_commit = "0000000000000000000000000000000000000000"
+sha256 = ""
+installed_at = "2026-05-12T10:00:00Z"
+"#;
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("tau-lock.toml");
+        std::fs::write(&path, v5_toml).unwrap();
+        let lf = LockFile::load(&path).unwrap();
+
+        assert_eq!(lf.schema_version, MAX_SUPPORTED_LOCKFILE_SCHEMA_VERSION);
+        assert_eq!(lf.packages.len(), 1);
+        assert!(
+            lf.packages[0].synthesized_from.is_none(),
+            "v5 entries must deserialize with synthesized_from = None"
+        );
+    }
+
+    #[test]
+    fn synthesized_from_anthropic_serializes_and_roundtrips() {
+        let v6_toml = r#"schema_version = 6
+generated_by_tau_version = "0.0.0"
+generated_at = "2026-05-15T10:00:00Z"
+
+[[package]]
+name = "critic"
+active_version = "0.1.0"
+source = "https://example.com/critic.git"
+synthesized_from = "anthropic"
+
+[[package.versions]]
+version = "0.1.0"
+resolved_commit = "0000000000000000000000000000000000000000"
+sha256 = ""
+installed_at = "2026-05-15T10:00:00Z"
+"#;
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("tau-lock.toml");
+        std::fs::write(&path, v6_toml).unwrap();
+        let lf = LockFile::load(&path).unwrap();
+        assert_eq!(
+            lf.packages[0].synthesized_from,
+            Some(SynthesizedSource::Anthropic)
+        );
+
+        // Round-trip: save + reload.
+        let out = tmp.path().join("out.toml");
+        lf.save(&out).unwrap();
+        let lf2 = LockFile::load(&out).unwrap();
+        assert_eq!(
+            lf2.packages[0].synthesized_from,
+            lf.packages[0].synthesized_from
+        );
+        assert_eq!(lf2.schema_version, 6);
     }
 }
