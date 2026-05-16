@@ -1,6 +1,6 @@
 name: Claude review
 
-# AI code review via anthropic-ai/claude-code-action.
+# AI code review via anthropics/claude-code-action.
 #
 # Three trigger modes, all routed to the same action with a different
 # `direct_prompt` per mode:
@@ -80,7 +80,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: anthropic-ai/claude-code-action@beta
+      - uses: anthropics/claude-code-action@beta
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           direct_prompt: |
@@ -125,7 +125,7 @@ jobs:
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
           echo "Previous tag/commit: $previous"
 
-      - uses: anthropic-ai/claude-code-action@beta
+      - uses: anthropics/claude-code-action@beta
         env:
           CURRENT_TAG: ${{ github.ref_name }}
           PREV_REF: ${{ steps.prev.outputs.previous }}

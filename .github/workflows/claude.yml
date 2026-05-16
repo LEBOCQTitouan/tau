@@ -91,6 +91,6 @@ jobs:
           # Shallow checkout is enough; the action fetches more if needed.
           fetch-depth: 1
 
-      - uses: anthropic-ai/claude-code-action@beta
+      - uses: anthropics/claude-code-action@beta
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
