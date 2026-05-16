@@ -17,6 +17,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// Lowercase-hex encode a byte slice. digest 0.11's `finalize()` returns
+/// a `hybrid_array::Array<u8, ..>` which no longer implements `LowerHex`
+/// directly (it did in 0.10 via `GenericArray`), so we format manually.
+pub(crate) fn to_hex_lower(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
 /// Error from `tree_hash`.
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
@@ -42,7 +54,7 @@ pub fn sha256_of_file(path: &Path) -> Result<String, TreeHashError> {
     })?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(to_hex_lower(&hasher.finalize()))
 }
 
 /// Hash entry for a single file in the tree.
@@ -132,7 +144,7 @@ pub fn tree_hash(root: &Path) -> Result<String, TreeHashError> {
         hasher.update([0u8]);
     }
 
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(to_hex_lower(&hasher.finalize()))
 }
 
 #[cfg(test)]

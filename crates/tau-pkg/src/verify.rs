@@ -154,7 +154,7 @@ pub fn verify_skill_content(
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(&bytes);
-    let got = format!("{:x}", h.finalize());
+    let got = crate::tree_hash::to_hex_lower(&h.finalize());
     if got == locked.content_sha256 {
         Ok(())
     } else {
@@ -400,7 +400,7 @@ mod skill_drift_tests {
         use sha2::{Digest, Sha256};
         let mut h = Sha256::new();
         h.update(body.as_bytes());
-        format!("{:x}", h.finalize())
+        crate::tree_hash::to_hex_lower(&h.finalize())
     }
 
     #[test]
