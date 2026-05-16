@@ -181,7 +181,7 @@ jobs:
           cargo build --release \
             --manifest-path crates/tau-plugin-compat/fixtures/controlled-env-binary/Cargo.toml
       - name: Stage binaries into flat _artifacts directory
-        # actions/upload-artifact@v4 preserves directory structure relative
+        # actions/upload-artifact@v7 preserves directory structure relative
         # to the workspace root. Without this staging step, downstream jobs
         # would see binaries under ./prebuilt/target/release/ and
         # ./prebuilt/crates/.../target/release/ — different roots break the
@@ -199,7 +199,7 @@ jobs:
           cp target/release/tau _artifacts/
           cp crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env _artifacts/
       - name: Upload fixture binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-fixture-binaries
           retention-days: 1
