@@ -377,27 +377,25 @@ path = "src/main.rs"
     // (no fork, no stdio plumbing). On non-Unix we spawn-and-wait,
     // inheriting stdio.
     let real_path = real_binary.to_string_lossy().replace('\\', "\\\\");
+    // Spawn-and-wait variant that captures echo-tool's stderr to a side file.
+    // The cross-check null's the child's stderr, so without this side-channel
+    // we can't see why echo-tool fails (handshake error, config decode, etc.).
     let main_rs = format!(
-        r##"use std::process::Command;
+        r##"use std::process::{{Command, Stdio}};
 
-#[cfg(unix)]
 fn main() {{
-    use std::os::unix::process::CommandExt;
-    let err = Command::new("{real_path}").args(std::env::args_os().skip(1)).exec();
-    eprintln!("relay: exec failed: {{err}}");
-    std::process::exit(127);
-}}
-
-#[cfg(not(unix))]
-fn main() {{
-    let status = Command::new("{real_path}")
+    let target = "{real_path}";
+    let pid = std::process::id();
+    let stderr_path = format!("/tmp/tau-echo-stderr-{{pid}}.log");
+    let stderr_file = std::fs::File::create(&stderr_path).expect("create stderr file");
+    let status = Command::new(target)
         .args(std::env::args_os().skip(1))
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::from(stderr_file))
         .status()
-        .expect("spawn echo-tool relay child");
-    std::process::exit(status.code().unwrap_or(1));
+        .expect("spawn echo-tool child");
+    std::process::exit(status.code().unwrap_or(127));
 }}
 "##
     );
@@ -421,6 +419,30 @@ fn cargo_and_git_available() -> bool {
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
+}
+
+/// Read any `/tmp/tau-echo-stderr-*.log` files left by the relay binary.
+fn collect_echo_stderr() -> String {
+    let mut out = String::new();
+    if let Ok(entries) = std::fs::read_dir("/tmp") {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with("tau-echo-stderr-") && name_str.ends_with(".log") {
+                let path = entry.path();
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if !content.trim().is_empty() {
+                        out.push_str(&format!("--- {} ---\n{}\n", path.display(), content));
+                    }
+                }
+            }
+        }
+    }
+    if out.is_empty() {
+        "(no echo-tool stderr captured)".to_string()
+    } else {
+        out
+    }
 }
 
 // ── Test 4: install with matching manifest succeeds ──────────────────────────
@@ -458,7 +480,7 @@ fn install_with_matching_manifest_succeeds_and_populates_required_shapes() {
     let source = PackageSource::from_str(&fixtures::file_url(&bare)).unwrap();
 
     let installed = install_with_options(&source, &scope, InstallOptions::default())
-        .expect("install with matching manifest should succeed");
+        .unwrap_or_else(|e| panic!("install should succeed: {e}\necho-tool stderr:\n{}", collect_echo_stderr()));
     assert_eq!(installed.name.as_str(), "match-plugin");
 
     let lf = LockFile::load(&scope.lockfile_path()).unwrap();
