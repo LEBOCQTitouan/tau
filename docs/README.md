@@ -29,3 +29,4 @@ ADRs.
 brainstorming and writing-plans skills. These are *process* documentation,
 not end-user documentation — kept in-repo so reviewers see how decisions
 were made.
+
