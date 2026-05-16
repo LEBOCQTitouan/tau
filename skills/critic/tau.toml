@@ -1,0 +1,10 @@
+name = "critic"
+version = "0.1.0"
+description = "Reviews drafts for clarity, completeness, and rhetorical quality."
+authors = ["tau contributors <dev@tau>"]
+source = "https://github.com/LEBOCQTitouan/tau.git"
+kind = "skill"
+dependencies = []
+capabilities = []
+
+[skill]
