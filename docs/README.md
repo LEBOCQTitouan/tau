@@ -30,4 +30,3 @@ brainstorming and writing-plans skills. These are *process* documentation,
 not end-user documentation — kept in-repo so reviewers see how decisions
 were made.
 
-<!-- smoke test: PR #102 / docs-deploy trigger paths verified 2026-05-16 -->
