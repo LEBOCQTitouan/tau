@@ -222,7 +222,7 @@ jobs:
           cat docs/book/html/versions.json
 
       - name: Upload built site
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: site
           path: docs/book/html
