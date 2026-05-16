@@ -1,6 +1,4 @@
-*.json text eol=lf
-*.toml text eol=lf
-*.rs text eol=lf
-*.md text eol=lf
-*.yml text eol=lf
-*.txt text eol=lf
+# Skills-6: SKILL.md files must round-trip byte-identically through tau skill export.
+# Force LF so Windows checkouts don't break the test.
+skills/**/SKILL.md text eol=lf
+skills/**/*.md text eol=lf
