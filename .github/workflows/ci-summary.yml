@@ -43,16 +43,27 @@ jobs:
         run: |
           if [[ "$EVENT" == "workflow_run" ]]; then
             # Authoritative path: ci.yml just completed.
-            if [[ "$CI_CONCLUSION" == "success" ]]; then
-              echo "CI workflow succeeded."
-              exit 0
-            elif [[ "$CI_CONCLUSION" == "skipped" || "$CI_CONCLUSION" == "neutral" ]]; then
-              echo "CI workflow conclusion: $CI_CONCLUSION (treated as success)."
-              exit 0
-            else
-              echo "::error::CI workflow concluded with: $CI_CONCLUSION"
-              exit 1
-            fi
+            #
+            # Non-failure outcomes:
+            # - success: all jobs passed.
+            # - skipped: workflow-level paths-ignore matched.
+            # - neutral: rarely used; treat as non-failure.
+            # - cancelled: superseded by a newer run on the same ref
+            #     (concurrency cancel-in-progress in ci.yml). The
+            #     newer run will produce its own ci-summary status;
+            #     do not report this as a hard failure or branch
+            #     protection sees a transient blocker every time
+            #     two commits land back-to-back.
+            case "$CI_CONCLUSION" in
+              success|skipped|neutral|cancelled)
+                echo "CI workflow conclusion: $CI_CONCLUSION (treated as non-failure)."
+                exit 0
+                ;;
+              *)
+                echo "::error::CI workflow concluded with: $CI_CONCLUSION"
+                exit 1
+                ;;
+            esac
           else
             # Provisional path: PR event. If ci.yml is going to run
             # (code paths), the workflow_run-triggered ci-summary
