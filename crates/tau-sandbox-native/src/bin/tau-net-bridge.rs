@@ -112,7 +112,7 @@ fn parse_args(argv: &[String]) -> Result<Args, &'static str> {
 #[cfg(target_os = "linux")]
 fn bring_lo_up() -> std::io::Result<()> {
     use futures::TryStreamExt;
-    use rtnetlink::new_connection;
+    use rtnetlink::{new_connection, LinkUnspec};
     use tokio::runtime::Builder;
 
     // Best-effort: empty netns from Native adapter starts with lo down and we
@@ -134,8 +134,7 @@ fn bring_lo_up() -> std::io::Result<()> {
             .ok_or_else(|| std::io::Error::other("lo not found"))?;
         handle
             .link()
-            .set(link.header.index)
-            .up()
+            .set(LinkUnspec::new_with_index(link.header.index).up().build())
             .execute()
             .await
             .map_err(std::io::Error::other)?;
