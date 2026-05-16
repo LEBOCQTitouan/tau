@@ -514,7 +514,7 @@ mod anthropic_strict_tests {
         use sha2::{Digest, Sha256};
         let mut h = Sha256::new();
         h.update(skill_md_content.as_bytes());
-        let sha = format!("{:x}", h.finalize());
+        let sha = crate::tree_hash::to_hex_lower(&h.finalize());
 
         let locked_pkg = LockedPackage {
             name: "critic".parse().unwrap(),
