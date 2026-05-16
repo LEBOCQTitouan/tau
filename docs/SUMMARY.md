@@ -16,21 +16,27 @@
 # Tutorials
 
 - [Overview](tutorials/README.md)
+- [Build your first skill](tutorials/build-your-first-skill.md)
 
 # How-to
 
 - [Overview](how-to/README.md)
+- [Install a skill](how-to/install-a-skill.md)
+- [Author a skill](how-to/author-a-skill.md)
+- [Export a skill](how-to/export-a-skill.md)
 
 # Reference
 
 - [Overview](reference/README.md)
 - [Sandbox platform support](reference/sandbox-platform-support.md)
+- [Skill manifest schema](reference/skill-manifest-schema.md)
 
 # Explanation
 
 - [Overview](explanation/README.md)
 - [Escape hatches](explanation/escape-hatches.md)
 - [tau as language](explanation/tau-as-language.md)
+- [Two-layer skills](explanation/two-layer-skills.md)
 
 # Architecture decisions
 
