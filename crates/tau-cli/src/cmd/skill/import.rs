@@ -137,15 +137,14 @@ pub fn run(args: SkillImportArgs) -> Result<(), ImportError> {
 ///
 /// Heuristic: absolute path, relative `.`/`..` path, or a string that
 /// is an existing directory (even if it has unusual characters). Git
-/// URLs always contain `://` or `@` with `:` (scp form).
+/// URLs (including `file://`) always contain `://` or `@` with `:` (scp form).
+///
+/// `file://` URLs are intentionally treated as git URLs (not local paths)
+/// because a bare git repo at a `file://` path is git metadata — it has
+/// no SKILL.md at the top level. Routing `file://` through `git clone`
+/// produces a proper working tree with SKILL.md present.
 fn is_local_path(s: &str) -> bool {
-    // Explicit file:// scheme — treat as local (git supports it too, but
-    // we handle it as a copy to avoid requiring git on the host for
-    // purely local imports).
-    if s.starts_with("file://") {
-        return true;
-    }
-    // Clear URL schemes → remote.
+    // Any URL scheme (https://, file://, git://, etc.) → git clone path.
     if s.contains("://") {
         return false;
     }

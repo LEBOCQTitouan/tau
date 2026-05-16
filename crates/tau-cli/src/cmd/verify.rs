@@ -225,9 +225,7 @@ fn emit_json_event(report: &VerifyReport, output: &mut Output) -> anyhow::Result
         }
         VerifyStatus::AnthropicConformance { skill_name, issue } => {
             let (issue_kind, detail) = match issue {
-                AnthropicConformanceIssue::MissingDescription => {
-                    ("missing_description", None)
-                }
+                AnthropicConformanceIssue::MissingDescription => ("missing_description", None),
                 AnthropicConformanceIssue::EmptyBody => ("empty_body", None),
                 AnthropicConformanceIssue::MalformedFrontmatter { detail } => {
                     ("malformed_frontmatter", Some(detail.as_str()))

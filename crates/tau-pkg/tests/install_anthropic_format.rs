@@ -222,7 +222,58 @@ fn install_invalid_workspace_errors_with_not_a_skill_package() {
     );
 }
 
-// ─── Test 4 ──────────────────────────────────────────────────────────────────
+// ─── Test 4 (new) ────────────────────────────────────────────────────────────
+
+/// After an Anthropic-format install, the synthesized `tau.toml` must be
+/// written to `<install_dir>/tau.toml` so that `find_installed_skill` (and
+/// thus `tau skill show` / `tau skill export`) can locate the manifest
+/// without consulting the lockfile.
+///
+/// This test addresses the Skills-5 gap surfaced by T7's roundtrip tests.
+#[test]
+fn install_anthropic_writes_tau_toml_to_install_dir() {
+    if !fixtures::git_available() {
+        eprintln!("skipping: `git` not on PATH");
+        return;
+    }
+
+    let tmp = TempDir::new().unwrap();
+    let scope_dir = tmp.path().join("tau-home");
+    std::fs::create_dir_all(&scope_dir).unwrap();
+    let scope = Scope::new_project(&scope_dir).unwrap();
+
+    let bare = make_anthropic_fixture_repo(tmp.path(), "synthesized-skill");
+    let source = PackageSource::from_str(&fixtures::file_url(&bare)).unwrap();
+
+    let installed = install_with_options(&source, &scope, test_install_options()).unwrap();
+
+    // The install dir must contain tau.toml.
+    let tau_toml_path = installed.installed_path.join("tau.toml");
+    assert!(
+        tau_toml_path.exists(),
+        "tau.toml must be written to the install dir after Anthropic-format install; \
+         expected at {tau_toml_path:?}"
+    );
+
+    // The tau.toml content must reflect the synthesized manifest.
+    let content = std::fs::read_to_string(&tau_toml_path).unwrap();
+    assert!(
+        content.contains("name = \"synthesized-skill\""),
+        "synthesized tau.toml should contain the package name; got:\n{content}"
+    );
+    assert!(
+        content.contains("version = \"0.1.0\""),
+        "synthesized tau.toml should contain version 0.1.0; got:\n{content}"
+    );
+
+    // SKILL.md is still present alongside the new tau.toml.
+    assert!(
+        installed.installed_path.join("SKILL.md").exists(),
+        "SKILL.md must still be present after Anthropic-format install"
+    );
+}
+
+// ─── Test 5 (original test 4) ────────────────────────────────────────────────
 
 /// Upgrade from a v5 lockfile: install an Anthropic-format package on top
 /// of an existing v5 lockfile. The resulting lockfile should be v6, contain

@@ -137,25 +137,11 @@ fn tau_install_project(project_root: &Path, url: &str) {
 /// the exported SKILL.md must be byte-identical to the original source
 /// SKILL.md. tau.toml must not appear in the export output.
 ///
-/// # Known limitation (Skills-5 gap)
-///
-/// The `tau skill export` command uses `find_installed_skill` which reads
-/// `tau.toml` from the install directory. However, the Anthropic-format
-/// install pipeline synthesizes the manifest in-memory and does NOT write
-/// `tau.toml` to the installed package directory (the renamed staging dir).
-/// This means `tau skill export` fails with "no tau.toml found" for
-/// Anthropic-sourced packages installed via auto-detect.
-///
-/// This is a known gap identified during Skills-5 T7 integration testing.
-/// Fix requires either:
-/// (a) writing the synthesized `tau.toml` to the install dir during
-///     Anthropic-format install (install.rs change), or
-/// (b) making `find_installed_skill` fall back to reading the lockfile
-///     for Anthropic-synthesized packages.
-///
-/// Marked `#[ignore]` until the gap is addressed in a follow-up task.
+/// Gap closed (Skills-5 T7 follow-up): `install_with_options` now writes
+/// the synthesized `tau.toml` to the install directory during Anthropic-format
+/// auto-detect install (install.rs fix). `find_installed_skill` can now read
+/// the manifest from disk as expected by `tau skill show` and `tau skill export`.
 #[test]
-#[ignore = "Skills-5 gap: find_installed_skill requires tau.toml which is absent after Anthropic-format auto-detect install"]
 fn roundtrip_anthropic_source_through_tau() {
     if !git_available() {
         eprintln!("skipping roundtrip_anthropic_source_through_tau: `git` not on PATH");
@@ -207,16 +193,16 @@ fn roundtrip_anthropic_source_through_tau() {
     );
 
     // SKILL.md must be byte-identical.
-    let exported_skill_md = std::fs::read(export_out.join("SKILL.md"))
-        .expect("SKILL.md should be in export output");
+    let exported_skill_md =
+        std::fs::read(export_out.join("SKILL.md")).expect("SKILL.md should be in export output");
     assert_eq!(
         original_skill_md, exported_skill_md,
         "SKILL.md must be byte-identical after roundtrip"
     );
 
     // README.md must be byte-identical.
-    let exported_readme = std::fs::read(export_out.join("README.md"))
-        .expect("README.md should be in export output");
+    let exported_readme =
+        std::fs::read(export_out.join("README.md")).expect("README.md should be in export output");
     assert_eq!(
         original_readme, exported_readme,
         "README.md must be byte-identical after roundtrip"
@@ -245,20 +231,12 @@ fn roundtrip_anthropic_source_through_tau() {
 ///
 /// Both lockfiles must agree on `name` and `version`.
 ///
-/// # Known limitation (Skills-5 gap)
-///
-/// The direct `tau install <src>` path (Anthropic auto-detect) works at
-/// the tau-pkg level (T3 tests pass) but requires a git URL as source.
-/// The `tau skill import` with a git URL uses git clone (not local copy),
-/// which works for non-file:// remote URLs. For file:// URLs, the import
-/// command treats them as local paths and copies the bare repo directory
-/// (not the working tree), which has no SKILL.md at the top level.
-///
-/// Marked `#[ignore]` until the gap is addressed — either by making
-/// `tau skill import` use `git clone` for `file://` URLs or by providing
-/// a way to pass a working directory path as source.
+/// Gap closed (Skills-5 T7 follow-up): `tau skill import` now routes
+/// `file://` URLs through `git clone` (not local fs copy), so bare repos
+/// are cloned to a working tree with SKILL.md at the top level. Combined
+/// with the synthesized `tau.toml` write fix in install.rs, the full
+/// import-then-install roundtrip now works end-to-end.
 #[test]
-#[ignore = "Skills-5 gap: tau skill import file:// URLs copy bare repo dirs (no SKILL.md); direct Anthropic install requires git URL"]
 fn import_then_install_matches_direct_install() {
     if !git_available() {
         eprintln!("skipping import_then_install_matches_direct_install: `git` not on PATH");
@@ -336,16 +314,22 @@ fn import_then_install_matches_direct_install() {
         + "\n";
     std::fs::write(import_dir.join("tau.toml"), &updated_toml).unwrap();
 
-    // Init the imported dir as a git repo and push to the bare.
-    run_git(&import_dir, &["init", "-q", "-b", "main"]);
+    // `tau skill import` (via git clone) already initialised import_dir as a
+    // git repo with remote "origin" pointing to the original critic.git bare.
+    // Re-point origin to the new import_bare and push the updated tree.
     run_git(&import_dir, &["config", "user.email", "test@example.com"]);
     run_git(&import_dir, &["config", "user.name", "Test User"]);
-    run_git(&import_dir, &["add", "."]);
-    run_git(&import_dir, &["commit", "-q", "-m", "imported tau skill"]);
     run_git(
         &import_dir,
-        &["remote", "add", "origin", &import_bare.to_string_lossy()],
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            &import_bare.to_string_lossy(),
+        ],
     );
+    run_git(&import_dir, &["add", "."]);
+    run_git(&import_dir, &["commit", "-q", "-m", "imported tau skill"]);
     run_git(&import_dir, &["push", "-q", "origin", "main"]);
 
     // Step B3: install from the tau-format git source.

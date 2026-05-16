@@ -246,6 +246,21 @@ pub fn install_with_options(
                     source.clone(),
                 )
                 .map_err(crate::error::InstallError::SynthesizeFailed)?;
+
+                // Write the synthesized tau.toml to the staging workspace so
+                // that it is present in the install directory after the rename
+                // at step 8. This allows `find_installed_skill` (used by
+                // `tau skill show` and `tau skill export`) to locate the
+                // manifest without needing the lockfile.
+                let toml_text = toml::to_string_pretty(&m).map_err(|e| InstallError::Internal {
+                    message: format!("serializing synthesized tau.toml: {e}"),
+                })?;
+                fs::write(staging_dir.path().join("tau.toml"), &toml_text).map_err(|e| {
+                    InstallError::Internal {
+                        message: format!("writing synthesized tau.toml to staging dir: {e}"),
+                    }
+                })?;
+
                 (m, Some(crate::lockfile::SynthesizedSource::Anthropic))
             }
             tau_domain::SkillFormat::Invalid => {
