@@ -38,7 +38,7 @@ thiserror          = { workspace = true }
 uuid               = { workspace = true }
 anyhow             = "1"
 chrono             = { workspace = true }
-termimad           = "0.30"
+termimad           = "0.34"
 rustyline          = "18"
 is-terminal        = "0.4"
 tempfile           = { workspace = true }
