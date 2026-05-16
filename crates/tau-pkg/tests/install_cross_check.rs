@@ -534,7 +534,11 @@ fn install_force_after_cross_check_fix_succeeds() {
     run_git(&working, &["config", "user.name", "Test User"]);
 
     let manifest_path = working.join("tau.toml");
-    let body = std::fs::read_to_string(&manifest_path).unwrap();
+    // Normalize CRLF → LF so the literal `caps_unused` (which uses \n) matches
+    // on Windows, where `read_to_string` returns line endings as-stored (\r\n).
+    let body = std::fs::read_to_string(&manifest_path)
+        .unwrap()
+        .replace("\r\n", "\n");
     let fixed = body.replace(caps_unused, "capabilities = []");
     assert_ne!(body, fixed, "manifest rewrite must replace the cap block");
     std::fs::write(&manifest_path, fixed).unwrap();
