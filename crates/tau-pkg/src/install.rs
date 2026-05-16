@@ -231,7 +231,37 @@ pub fn install_with_options(
         Git::clone(source, staging_dir.path())?;
 
         // Step 3 + 4: parse + validate manifest (validate is part of read_manifest).
-        let manifest = read_manifest(&staging_dir.path().join("tau.toml"))?;
+        // Skills-5: auto-detect format. Tau-format workspaces read tau.toml (existing
+        // path). Anthropic-format workspaces (SKILL.md only) synthesize a manifest
+        // in-memory. Neither file → NotASkillPackage.
+        let workspace_format = tau_domain::detect_format(staging_dir.path());
+        let (manifest, synthesized_from) = match workspace_format {
+            tau_domain::SkillFormat::Tau => {
+                let m = read_manifest(&staging_dir.path().join("tau.toml"))?;
+                (m, None)
+            }
+            tau_domain::SkillFormat::Anthropic => {
+                let m = crate::synthesize::synthesize_anthropic_skill(
+                    staging_dir.path(),
+                    source.clone(),
+                )
+                .map_err(crate::error::InstallError::SynthesizeFailed)?;
+                (m, Some(crate::lockfile::SynthesizedSource::Anthropic))
+            }
+            tau_domain::SkillFormat::Invalid => {
+                return Err(crate::error::InstallError::NotASkillPackage {
+                    path: staging_dir.path().to_owned(),
+                    detail: "directory has neither tau.toml nor SKILL.md".into(),
+                });
+            }
+            _ => {
+                // Forward-compat: treat unknown variants as invalid.
+                return Err(crate::error::InstallError::NotASkillPackage {
+                    path: staging_dir.path().to_owned(),
+                    detail: "unrecognized workspace format".into(),
+                });
+            }
+        };
 
         // Step 5: source / manifest match.
         if *manifest.source() != *source {
@@ -442,6 +472,7 @@ pub fn install_with_options(
                 existing.source = source.clone();
                 existing.plugin = locked_plugin.clone();
                 existing.skill = locked_skill.clone();
+                existing.synthesized_from = synthesized_from;
                 // Sort installed_versions for deterministic lockfile diffs.
                 existing
                     .installed_versions
@@ -455,7 +486,7 @@ pub fn install_with_options(
                 installed_versions: vec![new_locked_version.clone()],
                 plugin: locked_plugin.clone(),
                 skill: locked_skill,
-                synthesized_from: None,
+                synthesized_from,
             },
         };
 

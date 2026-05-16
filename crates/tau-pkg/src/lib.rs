@@ -30,6 +30,7 @@ pub mod scope;
 pub mod skill_check;
 pub mod skill_resolve;
 pub mod source_list;
+pub mod synthesize;
 pub mod tree_hash;
 pub mod update;
 pub mod verify;
@@ -37,6 +38,7 @@ pub mod verify;
 pub use error::{
     GitError, InstallError, ManifestReadError, RegistryError, ScopeError, UninstallError,
 };
+pub use synthesize::{synthesize_anthropic_skill, SynthesizeError};
 pub use install::{
     install, install_with_options, uninstall, BuildOptions, InstallOptions, InstalledPackage,
 };
