@@ -386,7 +386,7 @@ pub fn install_with_options(
                 use sha2::{Digest, Sha256};
                 let mut hasher = Sha256::new();
                 hasher.update(&bytes);
-                format!("{:x}", hasher.finalize())
+                crate::tree_hash::to_hex_lower(&hasher.finalize())
             };
 
             // Re-parse for the frontmatter snapshot. cross_check_skill_package
