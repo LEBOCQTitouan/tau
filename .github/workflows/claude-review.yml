@@ -67,11 +67,17 @@ concurrency:
 jobs:
   review-pr:
     name: review PR
-    # Skip dependabot PRs: they're mechanical version bumps that don't
-    # benefit from Claude review, and the OAuth token isn't available
-    # to dependabot-triggered runs anyway (the action step would fail).
+    # Skip dependabot PRs: mechanical version bumps that don't
+    # benefit from Claude review.
+    #
+    # Use github.event.pull_request.user.login (the PR author, stable
+    # across all events on the PR) instead of github.actor (the
+    # triggering user, which becomes the maintainer when they run
+    # `gh pr update-branch`, add a label, etc. — so an actor check
+    # only skips the *opened* event and lets every subsequent
+    # synchronize/labeled event sneak through).
     if: |
-      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
       (github.event_name == 'pull_request' && (
         (github.event.action == 'labeled' &&
           github.event.label.name == 'claude:review') ||
