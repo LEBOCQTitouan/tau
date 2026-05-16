@@ -19,11 +19,11 @@ jobs:
     name: mdbook build + linkcheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Cache mdBook binaries
         id: cache-mdbook
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/mdbook
@@ -42,7 +42,7 @@ jobs:
 
       - name: Upload built site as artifact (debugging)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docs-build-failed
           path: docs/book/

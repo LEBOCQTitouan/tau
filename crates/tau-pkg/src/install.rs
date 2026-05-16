@@ -231,7 +231,52 @@ pub fn install_with_options(
         Git::clone(source, staging_dir.path())?;
 
         // Step 3 + 4: parse + validate manifest (validate is part of read_manifest).
-        let manifest = read_manifest(&staging_dir.path().join("tau.toml"))?;
+        // Skills-5: auto-detect format. Tau-format workspaces read tau.toml (existing
+        // path). Anthropic-format workspaces (SKILL.md only) synthesize a manifest
+        // in-memory. Neither file → NotASkillPackage.
+        let workspace_format = tau_domain::detect_format(staging_dir.path());
+        let (manifest, synthesized_from) = match workspace_format {
+            tau_domain::SkillFormat::Tau => {
+                let m = read_manifest(&staging_dir.path().join("tau.toml"))?;
+                (m, None)
+            }
+            tau_domain::SkillFormat::Anthropic => {
+                let m = crate::synthesize::synthesize_anthropic_skill(
+                    staging_dir.path(),
+                    source.clone(),
+                )
+                .map_err(crate::error::InstallError::SynthesizeFailed)?;
+
+                // Write the synthesized tau.toml to the staging workspace so
+                // that it is present in the install directory after the rename
+                // at step 8. This allows `find_installed_skill` (used by
+                // `tau skill show` and `tau skill export`) to locate the
+                // manifest without needing the lockfile.
+                let toml_text = toml::to_string_pretty(&m).map_err(|e| InstallError::Internal {
+                    message: format!("serializing synthesized tau.toml: {e}"),
+                })?;
+                fs::write(staging_dir.path().join("tau.toml"), &toml_text).map_err(|e| {
+                    InstallError::Internal {
+                        message: format!("writing synthesized tau.toml to staging dir: {e}"),
+                    }
+                })?;
+
+                (m, Some(crate::lockfile::SynthesizedSource::Anthropic))
+            }
+            tau_domain::SkillFormat::Invalid => {
+                return Err(crate::error::InstallError::NotASkillPackage {
+                    path: staging_dir.path().to_owned(),
+                    detail: "directory has neither tau.toml nor SKILL.md".into(),
+                });
+            }
+            _ => {
+                // Forward-compat: treat unknown variants as invalid.
+                return Err(crate::error::InstallError::NotASkillPackage {
+                    path: staging_dir.path().to_owned(),
+                    detail: "unrecognized workspace format".into(),
+                });
+            }
+        };
 
         // Step 5: source / manifest match.
         if *manifest.source() != *source {
@@ -386,7 +431,7 @@ pub fn install_with_options(
                 use sha2::{Digest, Sha256};
                 let mut hasher = Sha256::new();
                 hasher.update(&bytes);
-                format!("{:x}", hasher.finalize())
+                crate::tree_hash::to_hex_lower(&hasher.finalize())
             };
 
             // Re-parse for the frontmatter snapshot. cross_check_skill_package
@@ -442,6 +487,7 @@ pub fn install_with_options(
                 existing.source = source.clone();
                 existing.plugin = locked_plugin.clone();
                 existing.skill = locked_skill.clone();
+                existing.synthesized_from = synthesized_from;
                 // Sort installed_versions for deterministic lockfile diffs.
                 existing
                     .installed_versions
@@ -455,6 +501,7 @@ pub fn install_with_options(
                 installed_versions: vec![new_locked_version.clone()],
                 plugin: locked_plugin.clone(),
                 skill: locked_skill,
+                synthesized_from,
             },
         };
 
@@ -922,6 +969,7 @@ mod tests {
             installed_versions: vec![fixture_locked_version("1.0.0")],
             plugin: None,
             skill: None,
+            synthesized_from: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &installed_version)).unwrap();
@@ -952,6 +1000,7 @@ mod tests {
             ],
             plugin: None,
             skill: None,
+            synthesized_from: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
@@ -985,6 +1034,7 @@ mod tests {
             ],
             plugin: None,
             skill: None,
+            synthesized_from: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();
@@ -1025,6 +1075,7 @@ mod tests {
             ],
             plugin: None,
             skill: None,
+            synthesized_from: None,
         });
         lf.save(&scope.lockfile_path()).unwrap();
         fs::create_dir_all(scope.package_dir(&name, &v1)).unwrap();

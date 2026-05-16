@@ -49,10 +49,16 @@ name: Claude review
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, labeled]
-  push:
-    tags:
-      - 'v[0-9]*.0.0'
-      - 'v0.[0-9]*.0'
+  # release: triggered when a GitHub release is published (via UI or
+  # API) for a tag. We previously used `push: tags:` here but that
+  # event shape produces an OIDC token the Claude Code GitHub App
+  # rejects ("Invalid OIDC token"). `release` events have the correct
+  # OIDC claims. Trade-off: pushing a bare tag no longer fires the
+  # release-summary; you must also publish a GitHub Release for that
+  # tag. docs-deploy.yml continues to fire on raw `push: tags:` so the
+  # site itself is published on any matching tag push.
+  release:
+    types: [published]
 
 concurrency:
   group: claude-review-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
@@ -61,7 +67,17 @@ concurrency:
 jobs:
   review-pr:
     name: review PR
+    # Skip dependabot PRs: mechanical version bumps that don't
+    # benefit from Claude review.
+    #
+    # Use github.event.pull_request.user.login (the PR author, stable
+    # across all events on the PR) instead of github.actor (the
+    # triggering user, which becomes the maintainer when they run
+    # `gh pr update-branch`, add a label, etc. — so an actor check
+    # only skips the *opened* event and lets every subsequent
+    # synchronize/labeled event sneak through).
     if: |
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
       (github.event_name == 'pull_request' && (
         (github.event.action == 'labeled' &&
           github.event.label.name == 'claude:review') ||
@@ -76,7 +92,7 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -98,7 +114,7 @@ jobs:
 
   release-summary:
     name: release summary
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
 
     permissions:
@@ -107,14 +123,15 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ github.event.release.tag_name }}
 
       - name: Resolve previous tag
         id: prev
         env:
-          CURRENT_TAG: ${{ github.ref_name }}
+          CURRENT_TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
           previous=$(git tag --list 'v*.0.0' 'v0.*.0' --sort=-v:refname \
@@ -127,12 +144,12 @@ jobs:
 
       - uses: anthropics/claude-code-action@beta
         env:
-          CURRENT_TAG: ${{ github.ref_name }}
+          CURRENT_TAG: ${{ github.event.release.tag_name }}
           PREV_REF: ${{ steps.prev.outputs.previous }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           direct_prompt: |
-            A new release tag was pushed: $CURRENT_TAG.
+            A new GitHub release was published: $CURRENT_TAG.
             Read the diff between $PREV_REF and $CURRENT_TAG and
             open a GitHub issue titled "Release summary: $CURRENT_TAG"
             containing:

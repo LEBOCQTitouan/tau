@@ -105,6 +105,8 @@ struct SkillShowJson {
     requires_tools: Vec<PackageDepJson>,
     requires_skills: Vec<PackageDepJson>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    synthesized_from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     body: Option<String>,
 }
 
@@ -180,6 +182,10 @@ pub async fn run(args: &SkillShowArgs, _output: &mut Output) -> anyhow::Result<(
     if args.json {
         let caps: Vec<CapabilityJson> = manifest.capabilities().iter().map(cap_to_json).collect();
         let skill_block = manifest.skill().expect("skill kind verified");
+        let synthesized_from_str = pkg.synthesized_from.as_ref().map(|syn| match syn {
+            tau_pkg::SynthesizedSource::Anthropic => "anthropic".to_string(),
+            _ => "unknown".to_string(),
+        });
         let json_obj = SkillShowJson {
             name: pkg.name.as_str().to_string(),
             version: pkg.active_version.to_string(),
@@ -203,6 +209,7 @@ pub async fn run(args: &SkillShowArgs, _output: &mut Output) -> anyhow::Result<(
                     version_req: d.version_req.to_string(),
                 })
                 .collect(),
+            synthesized_from: synthesized_from_str,
             body: body_raw,
         };
         let json = serde_json::to_string_pretty(&json_obj).context("serializing show to JSON")?;
@@ -215,6 +222,15 @@ pub async fn run(args: &SkillShowArgs, _output: &mut Output) -> anyhow::Result<(
     println!("─────────────────────────────────────────────────");
     println!("description    {}", locked_skill.frontmatter.description);
     println!("source         {}", pkg.source);
+    if let Some(syn) = &pkg.synthesized_from {
+        println!(
+            "source format  synthesized ({})",
+            match syn {
+                tau_pkg::SynthesizedSource::Anthropic => "Anthropic Agent Skills",
+                _ => "unknown",
+            }
+        );
+    }
     println!("install path   {}", install_path.display());
 
     if !manifest.capabilities().is_empty() {

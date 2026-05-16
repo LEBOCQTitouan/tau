@@ -222,6 +222,7 @@ capabilities = []
                     description: "x".into(),
                 },
             )),
+            synthesized_from: None,
         };
 
         let mut lf = LockFile::default();

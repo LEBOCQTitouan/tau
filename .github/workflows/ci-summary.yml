@@ -1,0 +1,75 @@
+name: CI summary
+
+# Branch-protection-required aggregate check.
+#
+# Two trigger paths:
+#
+#   1. `workflow_run` after `CI` completes — authoritative for code
+#      PRs (where ci.yml fired). Reports the CI run's conclusion as
+#      this job's status. CI passing → ci-summary success; CI failing
+#      → ci-summary failure.
+#
+#   2. `pull_request` — provisional success for every PR. Handles
+#      docs-only PRs where ci.yml's `paths-ignore` skipped it entirely
+#      (no `workflow_run` event will fire). For code PRs the
+#      provisional success is later superseded by the workflow_run-
+#      triggered run; auto-merge waits for the latest status anyway.
+#
+# Branch protection on `main` requires the `ci-summary` check. With
+# this two-trigger setup:
+#   - Code PR: ci.yml runs all 14 jobs → workflow_run fires →
+#     ci-summary reports CI's conclusion → merge gated on it.
+#   - Docs PR: ci.yml skipped → only pull_request fires → ci-summary
+#     succeeds → docs PR merges without dragging the Rust matrix.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci-summary:
+    name: ci-summary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report status
+        env:
+          EVENT: ${{ github.event_name }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          if [[ "$EVENT" == "workflow_run" ]]; then
+            # Authoritative path: ci.yml just completed.
+            #
+            # Non-failure outcomes:
+            # - success: all jobs passed.
+            # - skipped: workflow-level paths-ignore matched.
+            # - neutral: rarely used; treat as non-failure.
+            # - cancelled: superseded by a newer run on the same ref
+            #     (concurrency cancel-in-progress in ci.yml). The
+            #     newer run will produce its own ci-summary status;
+            #     do not report this as a hard failure or branch
+            #     protection sees a transient blocker every time
+            #     two commits land back-to-back.
+            case "$CI_CONCLUSION" in
+              success|skipped|neutral|cancelled)
+                echo "CI workflow conclusion: $CI_CONCLUSION (treated as non-failure)."
+                exit 0
+                ;;
+              *)
+                echo "::error::CI workflow concluded with: $CI_CONCLUSION"
+                exit 1
+                ;;
+            esac
+          else
+            # Provisional path: PR event. If ci.yml is going to run
+            # (code paths), the workflow_run-triggered ci-summary
+            # will supersede this status with the real conclusion.
+            # If ci.yml is paths-ignore-skipped (docs-only PR), this
+            # succeeds and unblocks branch protection.
+            echo "PR event: provisional success (workflow_run will supersede if CI fires)."
+            exit 0
+          fi

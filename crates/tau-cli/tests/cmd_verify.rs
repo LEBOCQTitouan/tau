@@ -161,7 +161,189 @@ installed_at = "{now_rfc3339}"
         .stdout(predicate::str::contains("unverified"));
 }
 
-/// Test 5: `tau verify --json` emits one JSON object per line on stdout,
+// ---------------------------------------------------------------------------
+// Helper for anthropic_strict tests
+// ---------------------------------------------------------------------------
+
+/// Build a minimal skill lockfile entry (schema_version = 6) with a
+/// [package.skill] section so that verify_all_with_options treats it as
+/// a skill package and applies the Anthropic conformance check.
+fn skill_lockfile_toml(name: &str, version: &str) -> String {
+    format!(
+        "schema_version = 6\n\
+         generated_by_tau_version = \"0.0.0\"\n\
+         generated_at = \"2026-05-12T10:00:00Z\"\n\n\
+         [[package]]\n\
+         name = \"{name}\"\n\
+         active_version = \"{version}\"\n\
+         source = \"https://example.com/{name}.git\"\n\
+         \n\
+         [package.skill]\n\
+         content_sha256 = \"\"\n\
+         [package.skill.frontmatter]\n\
+         name = \"{name}\"\n\
+         description = \"Test skill.\"\n\
+         \n\
+         [[package.versions]]\n\
+         version = \"{version}\"\n\
+         resolved_commit = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+         sha256 = \"\"\n\
+         installed_at = \"2026-05-12T10:00:00Z\"\n"
+    )
+}
+
+/// Write a minimal tau.toml + SKILL.md into `pkg_dir`.
+/// The `skill_md` content is written verbatim.
+fn write_skill_package(pkg_dir: &std::path::Path, name: &str, version: &str, skill_md: &str) {
+    std::fs::create_dir_all(pkg_dir).unwrap();
+    // Write a minimal tau.toml so show / verify can parse the manifest.
+    let tau_toml = format!(
+        "name = \"{name}\"\nversion = \"{version}\"\ndescription = \"Test skill.\"\n\
+         authors = []\nsource = \"https://example.com/{name}.git\"\nkind = \"skill\"\n\
+         dependencies = []\ncapabilities = []\n\n[skill]\n"
+    );
+    std::fs::write(pkg_dir.join("tau.toml"), tau_toml).unwrap();
+    std::fs::write(pkg_dir.join("SKILL.md"), skill_md).unwrap();
+}
+
+/// Test 6: `tau verify --anthropic-strict` exits 0 for a conformant skill.
+///
+/// A skill with a well-formed frontmatter, non-empty description, and
+/// non-empty body must not produce any AnthropicConformance entries.
+#[test]
+fn verify_anthropic_strict_passes_for_conformant_skill() {
+    let global_dir = tempfile::tempdir().unwrap();
+    let global_path = global_dir.path();
+
+    // Write the lockfile.
+    std::fs::write(
+        global_path.join("tau-lock.toml"),
+        skill_lockfile_toml("good-skill", "1.0.0"),
+    )
+    .unwrap();
+
+    // Write the package dir with a conformant SKILL.md.
+    let pkg_dir = global_path.join("packages/good-skill/1.0.0");
+    write_skill_package(
+        &pkg_dir,
+        "good-skill",
+        "1.0.0",
+        "---\nname: good-skill\ndescription: Does something useful.\n---\nDo the thing.\n",
+    );
+
+    // Run tau verify --anthropic-strict --global.
+    Command::cargo_bin("tau")
+        .unwrap()
+        .args(["verify", "--global", "--anthropic-strict"])
+        .env("TAU_HOME", global_path)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ok").or(predicate::str::contains("unverified")));
+}
+
+/// Test 7: `tau verify --anthropic-strict` exits 2 for a skill with an
+/// empty description field.
+///
+/// Validates that the `MissingDescription` conformance issue is raised and
+/// renders as "AnthropicConformance" in the output.
+#[test]
+fn verify_anthropic_strict_fails_for_missing_description() {
+    let global_dir = tempfile::tempdir().unwrap();
+    let global_path = global_dir.path();
+
+    // Write the lockfile.
+    std::fs::write(
+        global_path.join("tau-lock.toml"),
+        skill_lockfile_toml("bad-skill", "1.0.0"),
+    )
+    .unwrap();
+
+    // Write the package dir with a SKILL.md that has an empty description.
+    let pkg_dir = global_path.join("packages/bad-skill/1.0.0");
+    write_skill_package(
+        &pkg_dir,
+        "bad-skill",
+        "1.0.0",
+        // description is empty (whitespace only); body is non-empty.
+        "---\nname: bad-skill\ndescription: \"\"\n---\nDo the thing.\n",
+    );
+
+    let output = Command::cargo_bin("tau")
+        .unwrap()
+        .args(["verify", "--global", "--anthropic-strict"])
+        .env("TAU_HOME", global_path)
+        .output()
+        .expect("tau verify ran");
+
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit when description is empty"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("AnthropicConformance"),
+        "expected 'AnthropicConformance' in output for missing description; got: {stdout}"
+    );
+}
+
+/// Test 8: `tau verify` (without `--anthropic-strict`) exits 0 even for a
+/// skill that would fail the strict conformance check.
+///
+/// Validates that the flag is required to trigger Anthropic conformance
+/// checks — the default verify must not surface AnthropicConformance.
+#[test]
+fn verify_without_flag_does_not_check_anthropic_conformance() {
+    let global_dir = tempfile::tempdir().unwrap();
+    let global_path = global_dir.path();
+
+    // Write the lockfile.
+    std::fs::write(
+        global_path.join("tau-lock.toml"),
+        skill_lockfile_toml("lax-skill", "1.0.0"),
+    )
+    .unwrap();
+
+    // Write the package dir with a SKILL.md that would fail strict.
+    let pkg_dir = global_path.join("packages/lax-skill/1.0.0");
+    write_skill_package(
+        &pkg_dir,
+        "lax-skill",
+        "1.0.0",
+        // description is whitespace-only; would fail --anthropic-strict.
+        "---\nname: lax-skill\ndescription: \"   \"\n---\nDo the thing.\n",
+    );
+
+    // Run without --anthropic-strict: should exit 0 (only sha256 drift is
+    // checked, and we seeded sha256 = "" which gives Unverified, not drift).
+    Command::cargo_bin("tau")
+        .unwrap()
+        .args(["verify", "--global"])
+        .env("TAU_HOME", global_path)
+        .assert()
+        .success();
+
+    // Re-run with JSON mode and assert no "anthropic_conformance" entries.
+    let output = Command::cargo_bin("tau")
+        .unwrap()
+        .args(["--json", "verify", "--global"])
+        .env("TAU_HOME", global_path)
+        .output()
+        .expect("tau --json verify ran");
+
+    assert!(
+        output.status.success(),
+        "expected exit 0 without --anthropic-strict"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("anthropic_conformance"),
+        "expected no 'anthropic_conformance' entries without --anthropic-strict; got:\n{stdout}"
+    );
+}
+
+/// Test 5 (original): `tau verify --json` emits one JSON object per line on stdout,
 /// each with an "event" field.
 #[test]
 fn cmd_verify_json_mode_emits_one_event_per_line() {
