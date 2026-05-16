@@ -276,6 +276,16 @@ jobs:
           HTML
           fi
 
+          # Stage versions.json at the root of the payload for
+          # release deploys. The build job writes it into
+          # site/versions.json (which also lands inside /vX/ harmlessly).
+          # The spec-intended consumer is a future version-picker UI
+          # reading /versions.json — copy to payload/versions.json so
+          # peaceiris uploads it at the gh-pages root.
+          if [[ "$MODE" == "release" && -f site/versions.json ]]; then
+            cp site/versions.json payload/versions.json
+          fi
+
           # Release also publishes /latest/ as a copy of this build.
           # We populate payload/latest/ and wipe gh-pages/latest/ before overlay.
           if [[ "$MODE" == "release" ]]; then
