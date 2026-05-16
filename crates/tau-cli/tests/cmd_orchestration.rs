@@ -13,20 +13,15 @@
 //! `common::MockLlmBackend` is a copy of `tau-runtime/tests/common/mock_llm.rs`.
 //! See that file's header for the duplication rationale.
 //!
-//! # Implementation note: task.* and run.note virtual tools
+//! # task.* and run.note virtual tools
 //!
-//! `capability_satisfies` in `tau-runtime/src/capability.rs` does not have
-//! match arms for `Capability::TaskList` or `Capability::Plan` (discovered
-//! during T9). As a result, any LLM turn that emits `task.*` or `run.note`
-//! tool calls would hit a capability-denial hard stop and cause the run to
-//! fail. These tests are therefore scoped to `agent.<kind>.spawn`-only
-//! flows (no task list management), which is the path exercised by the
-//! existing T8 skill-spawn tests as well.
-//!
-//! The task.* and run.note paths ARE valid virtual tools; the gap in
-//! capability_satisfies is a separate pre-existing bug that should be fixed
-//! in a follow-up task. The patterns here validate the core multi-agent
-//! spawning mechanics end-to-end.
+//! `capability_satisfies` (in `tau-runtime/src/capability.rs`) now has
+//! match arms for `Capability::TaskList { mode }` and `Capability::Plan
+//! { mode }` (PR #81), so `task.*` and `run.note` virtual-tool calls
+//! pass the runtime's capability gate. They are exercised by the two
+//! tests at the bottom of this file (`task_list_create_claim_complete_flow`
+//! and `run_note_write_flow`); the original five pattern tests
+//! (A–E) deliberately stay scoped to `agent.<kind>.spawn`.
 //!
 //! # Capability grants
 //!
@@ -525,5 +520,214 @@ async fn pattern_e_plan_revise_loop() {
         snapshot.agents_spawned, 1,
         "1 worker must be spawned; got {}",
         snapshot.agents_spawned
+    );
+}
+
+// ---------------------------------------------------------------------------
+// task.* virtual tools: create → claim → complete
+// ---------------------------------------------------------------------------
+
+/// Build a manifest granting a single non-spawn capability via raw
+/// `kind`/`mode` keys (TOML-friendly). Used for `task.*` and `run.note`
+/// flows where no `agent.spawn` capability is needed.
+fn manifest_with_capability(kind: &str, mode: &str) -> tau_domain::PackageManifest {
+    let toml_body = format!(
+        r#"
+name        = "orchestrator"
+version     = "0.1.0"
+description = "orchestrator agent"
+authors     = []
+source      = "https://example.com/orchestrator.git"
+kind        = "tool"
+dependencies = []
+
+[[capabilities]]
+kind = "{kind}"
+mode = "{mode}"
+"#
+    );
+    common::manifest_from_toml(&toml_body)
+}
+
+/// Single-agent flow exercising the `task.*` virtual tools.
+///
+/// The TaskList in `RunState` uses deterministic, zero-padded
+/// per-scope sequence ids (see `task_list.rs::create`): the first
+/// top-level task is `"01"`, so the script can hard-code the id
+/// returned by `task.create` and reuse it for `task.claim` /
+/// `task.complete`.
+///
+/// Mock turn sequence:
+///
+///   Orchestrator turn 1: tool_call task.create({description:"do thing X"})
+///   Orchestrator turn 2: tool_call task.claim({task_id:"01"})
+///   Orchestrator turn 3: tool_call task.complete({task_id:"01", result_summary:"thing X done"})
+///   Orchestrator turn 4: text "all tasks complete"
+///
+/// Manifest grants `Capability::TaskList { mode: "manage" }`, which the
+/// runtime's `capability_satisfies` treats as ⊇ `write` (the level the
+/// `task.create`/`claim`/`complete` calls require) and ⊇ `read`.
+///
+/// Assertions:
+///   - snapshot.status == Completed
+///   - snapshot.task_list contains exactly one task in `TaskStatus::Done`
+///     with the expected description and result_summary
+#[tokio::test]
+async fn task_list_create_claim_complete_flow() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+
+    let backend = common::MockLlmBackend::new("test-llm")
+        // Turn 1: create the task. id is deterministic -> "01".
+        .add_tool_call_json(
+            "task.create",
+            serde_json::json!({ "description": "do thing X" }),
+        )
+        // Turn 2: claim the task we just created.
+        .add_tool_call_json("task.claim", serde_json::json!({ "task_id": "01" }))
+        // Turn 3: complete the task with a result_summary.
+        .add_tool_call_json(
+            "task.complete",
+            serde_json::json!({ "task_id": "01", "result_summary": "thing X done" }),
+        )
+        // Turn 4: end with plain text so the run can complete.
+        .add_text("all tasks complete");
+
+    let runtime = Arc::new(
+        Runtime::builder()
+            .with_llm_backend(backend)
+            .build()
+            .expect("build runtime"),
+    );
+
+    // `manage` ⊇ `write` ⊇ `read`, so a single manage grant covers
+    // create + claim + complete (all of which require `write`).
+    let manifest = manifest_with_capability("task_list", "manage");
+    let agent_def = common::agent_def(
+        "orchestrator",
+        "Orchestrator",
+        "orchestrator@0.1.0",
+        "test-llm",
+    );
+    let initial = common::user_message("create, claim, and complete one task");
+
+    let snapshot = runtime
+        .spawn_root_agent(
+            agent_def,
+            manifest,
+            initial,
+            RunBudget::default(),
+            tmp.path().to_path_buf(),
+        )
+        .await
+        .expect("spawn_root_agent must succeed");
+
+    assert_eq!(
+        snapshot.status,
+        tau_ports::RunStatus::Completed,
+        "run must complete; got {:?}",
+        snapshot.status
+    );
+    assert_eq!(
+        snapshot.task_list.len(),
+        1,
+        "exactly 1 task must be present; got {}",
+        snapshot.task_list.len()
+    );
+    let task = &snapshot.task_list[0];
+    assert_eq!(task.id, "01", "task id must be the deterministic \"01\"");
+    assert_eq!(task.description, "do thing X");
+    assert_eq!(
+        task.status,
+        tau_ports::TaskStatus::Done,
+        "task must end in Done; got {:?}",
+        task.status
+    );
+    assert_eq!(task.result_summary.as_deref(), Some("thing X done"));
+}
+
+// ---------------------------------------------------------------------------
+// run.note virtual tool: append to the run plan
+// ---------------------------------------------------------------------------
+
+/// Single-agent flow exercising the `run.note` virtual tool.
+///
+/// Note: the virtual-tool registry exposes a single `run.note` tool that
+/// appends `args.text` to the run's plan/scratchpad; reads happen via the
+/// separate `run.plan` tool (capability `Plan { mode: "read" }`). This
+/// test writes two notes via `run.note` (requires `Plan { mode: "write" }`)
+/// and then ends with a plain text turn — the manifest grants
+/// `Plan { mode: "write" }`, which `capability_satisfies` treats as ⊇ `read`,
+/// but we deliberately don't issue a `run.plan` read so the test stays
+/// focused on the write path the user asked to exercise.
+///
+/// Mock turn sequence:
+///
+///   Orchestrator turn 1: tool_call run.note({text:"hypothesis: X causes Y"})
+///   Orchestrator turn 2: tool_call run.note({text:"checked: hypothesis holds"})
+///   Orchestrator turn 3: text "notes recorded and read"
+///
+/// Assertions:
+///   - snapshot.status == Completed
+///   - snapshot.plan contains both note texts (proves write went through)
+#[tokio::test]
+async fn run_note_write_flow() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+
+    let backend = common::MockLlmBackend::new("test-llm")
+        // Turn 1: write the first note.
+        .add_tool_call_json(
+            "run.note",
+            serde_json::json!({ "text": "hypothesis: X causes Y" }),
+        )
+        // Turn 2: write the second note.
+        .add_tool_call_json(
+            "run.note",
+            serde_json::json!({ "text": "checked: hypothesis holds" }),
+        )
+        // Turn 3: end with plain text.
+        .add_text("notes recorded and read");
+
+    let runtime = Arc::new(
+        Runtime::builder()
+            .with_llm_backend(backend)
+            .build()
+            .expect("build runtime"),
+    );
+
+    let manifest = manifest_with_capability("plan", "write");
+    let agent_def = common::agent_def(
+        "orchestrator",
+        "Orchestrator",
+        "orchestrator@0.1.0",
+        "test-llm",
+    );
+    let initial = common::user_message("jot down some notes");
+
+    let snapshot = runtime
+        .spawn_root_agent(
+            agent_def,
+            manifest,
+            initial,
+            RunBudget::default(),
+            tmp.path().to_path_buf(),
+        )
+        .await
+        .expect("spawn_root_agent must succeed");
+
+    assert_eq!(
+        snapshot.status,
+        tau_ports::RunStatus::Completed,
+        "run must complete; got {:?}",
+        snapshot.status
+    );
+    assert!(
+        snapshot.plan.contains("hypothesis: X causes Y"),
+        "plan must contain the first note; got {:?}",
+        snapshot.plan
+    );
+    assert!(
+        snapshot.plan.contains("checked: hypothesis holds"),
+        "plan must contain the second note; got {:?}",
+        snapshot.plan
     );
 }
