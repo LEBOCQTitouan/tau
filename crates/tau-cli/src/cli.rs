@@ -542,6 +542,13 @@ pub enum SkillSubcommand {
     List(SkillListArgs),
     /// Show detail for one installed skill.
     Show(SkillShowArgs),
+    /// Import an Anthropic-format skill source as a tau-skill directory
+    /// (Skills-5). Synthesizes a tau.toml; does NOT install. Run
+    /// `tau install <output-dir>` afterwards.
+    Import(SkillImportArgs),
+    /// Export an installed skill to a vanilla Anthropic-format directory
+    /// (Skills-5). Drops tau.toml + capabilities.
+    Export(SkillExportArgs),
 }
 
 /// Arguments for `tau skill list`.
@@ -569,6 +576,44 @@ pub struct SkillShowArgs {
     /// grep, diff, less.
     #[arg(long, requires = "body")]
     pub raw: bool,
+}
+
+/// Arguments for `tau skill import`.
+#[derive(Debug, clap::Args)]
+pub struct SkillImportArgs {
+    /// Source URL or local path to import from (an Anthropic-format skill
+    /// directory or git URL). Local paths are copied; https/git@ URLs are
+    /// cloned with `git clone`.
+    pub source: String,
+
+    /// Output directory to write the synthesized tau-skill into.
+    #[arg(long, short)]
+    pub output: PathBuf,
+
+    /// Overwrite an existing output directory.
+    #[arg(long)]
+    pub force: bool,
+}
+
+/// Arguments for `tau skill export`.
+#[derive(Debug, clap::Args)]
+pub struct SkillExportArgs {
+    /// Name of the installed skill to export.
+    pub name: String,
+
+    /// Output directory.
+    #[arg(long, short)]
+    pub output: PathBuf,
+
+    /// Fail (instead of silently dropping) if anything tau-specific
+    /// would be lost in the Anthropic-format export (e.g.
+    /// capabilities or requires_skills).
+    #[arg(long)]
+    pub strict: bool,
+
+    /// Overwrite an existing output directory.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[cfg(test)]
