@@ -323,7 +323,7 @@ jobs:
           OWNER="${GITHUB_REPOSITORY_OWNER}"
           REPO="${GITHUB_REPOSITORY#*/}"
           URL="https://${OWNER}.github.io/${REPO}/${DEST}/"
-          gh pr comment "$PR" --body "📖 Docs preview deployed: <$URL>"
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "📖 Docs preview deployed: <$URL>"
 
   cleanup-preview:
     name: cleanup preview
@@ -365,4 +365,4 @@ jobs:
           PR: ${{ needs.decide.outputs.pr_number }}
           DEST: ${{ needs.decide.outputs.destination }}
         run: |
-          gh pr comment "$PR" --body "🧹 Docs preview \`${DEST}\` cleaned up." || true
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "🧹 Docs preview \`${DEST}\` cleaned up." || true
