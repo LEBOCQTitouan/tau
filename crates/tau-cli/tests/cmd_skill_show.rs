@@ -52,7 +52,7 @@ const CRITIC_SKILL_MD: &str = "---\nname: critic\ndescription: Reviews drafts fo
 /// TOML does not allow adding keys to a table after an array-of-tables
 /// sub-element is opened.
 fn critic_lockfile_toml() -> String {
-    "schema_version = 5\n\
+    "schema_version = 6\n\
      generated_by_tau_version = \"0.0.0\"\n\
      generated_at = \"2026-05-12T10:00:00Z\"\n\n\
      [[package]]\n\
@@ -310,7 +310,7 @@ fn show_unknown_name_no_installed_skills() {
     // make_critic_scope helper always seeds a critic package.
     std::fs::write(
         dir.path().join("tau-lock.toml"),
-        "schema_version = 5\n\
+        "schema_version = 6\n\
          generated_by_tau_version = \"0.0.0\"\n\
          generated_at = \"2026-05-12T10:00:00Z\"\n",
     )

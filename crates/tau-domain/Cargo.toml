@@ -25,5 +25,6 @@ test-fixtures = []
 [dev-dependencies]
 proptest    = { workspace = true }
 serde_json  = { version = "1", features = ["float_roundtrip"] }
+tempfile    = { workspace = true }
 toml        = { workspace = true }
 walkdir     = { workspace = true }

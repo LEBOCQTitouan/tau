@@ -30,6 +30,7 @@ pub mod scope;
 pub mod skill_check;
 pub mod skill_resolve;
 pub mod source_list;
+pub mod synthesize;
 pub mod tree_hash;
 pub mod update;
 pub mod verify;
@@ -40,7 +41,7 @@ pub use error::{
 pub use install::{
     install, install_with_options, uninstall, BuildOptions, InstallOptions, InstalledPackage,
 };
-pub use lockfile::{LockFile, LockedPackage, LockedPlugin, LockedVersion};
+pub use lockfile::{LockFile, LockedPackage, LockedPlugin, LockedVersion, SynthesizedSource};
 pub use manifest::read_manifest;
 pub use registry::{get, list};
 pub use resolve::{
@@ -51,6 +52,10 @@ pub use scope::{Scope, ScopeConfig, ScopeKind};
 pub use skill_check::cross_check_skill_package;
 pub use skill_resolve::{find_installed_skill, FindSkillError, InstalledSkill};
 pub use source_list::{list_versions_at_source, SourceListError};
+pub use synthesize::{synthesize_anthropic_skill, SynthesizeError};
 pub use tree_hash::{sha256_of_file, tree_hash, FileHash, TreeHashError};
 pub use update::{update_package, UpdateError, UpdateResult};
-pub use verify::{verify, verify_all, VerifyError, VerifyReport, VerifyStatus};
+pub use verify::{
+    verify, verify_all, verify_all_with_options, AnthropicConformanceIssue, VerifyError,
+    VerifyReport, VerifyStatus,
+};

@@ -84,6 +84,7 @@ mod tests {
             }],
             plugin: None,
             skill: None,
+            synthesized_from: None,
         }
     }
 

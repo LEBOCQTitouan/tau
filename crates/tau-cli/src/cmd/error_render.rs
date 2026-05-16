@@ -286,6 +286,112 @@ pub fn render_install_error(err: &InstallError) -> String {
     }
 }
 
+/// Render an [`ImportError`] as a guided, human-readable error message.
+///
+/// Covers Skills-5 `tau skill import` error variants. Each variant
+/// surfaces a remediation hint so users can fix the issue immediately.
+///
+/// # Skills-5 Task 5
+pub fn render_import_error(err: &crate::cmd::skill::import::ImportError) -> String {
+    use crate::cmd::skill::import::ImportError;
+    match err {
+        ImportError::SourceAlreadyTauSkill { path } => {
+            format!(
+                "error: source already contains tau.toml\n\n  \
+                 Path: {}\n\n  \
+                 This is already a tau-native skill package. Use:\n    \
+                 tau install {}\n  \
+                 instead of `tau skill import`.\n",
+                path.display(),
+                path.display()
+            )
+        }
+        ImportError::NotASkillPackage { path } => {
+            format!(
+                "error: not a skill package\n\n  \
+                 Path: {}\n\n  \
+                 The directory has neither tau.toml nor SKILL.md.\n  \
+                 A valid Anthropic-format skill must contain a SKILL.md\n  \
+                 file with YAML frontmatter (name + description fields).\n",
+                path.display()
+            )
+        }
+        ImportError::OutputDirectoryExists { path } => {
+            format!(
+                "error: output directory already exists\n\n  \
+                 Path: {}\n\n  \
+                 Pass --force to overwrite:\n    \
+                 tau skill import <source> --output {} --force\n",
+                path.display(),
+                path.display()
+            )
+        }
+        ImportError::CloneFailed { detail } => {
+            format!(
+                "error: git clone failed\n\n  \
+                 {detail}\n\n  \
+                 Verify the source URL is correct and the repository is accessible.\n"
+            )
+        }
+        ImportError::Synthesize(e) => {
+            format!(
+                "error: manifest synthesis failed\n\n  \
+                 {e}\n\n  \
+                 Check that SKILL.md has valid YAML frontmatter with\n  \
+                 'name' and 'description' fields, and that the name contains\n  \
+                 only alphanumeric characters, hyphens, and underscores.\n"
+            )
+        }
+        other => format!("import error: {other}\n"),
+    }
+}
+
+/// Render an [`ExportError`] as a guided, human-readable error message.
+///
+/// Skills-5 Task 6 stub — export is not yet implemented; this render
+/// covers the type variants declared in the stub module.
+///
+/// # Skills-5 Task 5
+pub fn render_export_error(err: &crate::cmd::skill::export::ExportError) -> String {
+    use crate::cmd::skill::export::ExportError;
+    match err {
+        ExportError::SkillNotInstalled { name, suggestion } => {
+            let hint = match suggestion {
+                Some(s) => format!("\n\n  Did you mean: {s}?"),
+                None => String::new(),
+            };
+            format!(
+                "error: skill not installed: {name:?}{hint}\n\n  \
+                 Run `tau skill list` to see installed skills.\n"
+            )
+        }
+        ExportError::WouldDropMetadata { name, dropped } => {
+            let items = dropped
+                .iter()
+                .map(|d| format!("    - {d}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!(
+                "error: export would drop tau-specific metadata (skill {name:?})\n\n\
+                 {items}\n\n  \
+                 Remove --strict to proceed with a warning, or remove the\n  \
+                 tau-specific fields from the skill manifest first.\n"
+            )
+        }
+        ExportError::OutputDirectoryExists { path } => {
+            format!(
+                "error: output directory already exists\n\n  \
+                 Path: {}\n\n  \
+                 Pass --force to overwrite:\n    \
+                 tau skill export <name> --output {} --force\n",
+                path.display(),
+                path.display()
+            )
+        }
+        other => format!("export error: {other}\n"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
