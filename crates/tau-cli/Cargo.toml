@@ -39,7 +39,7 @@ uuid               = { workspace = true }
 anyhow             = "1"
 chrono             = { workspace = true }
 termimad           = "0.30"
-rustyline          = "14"
+rustyline          = "18"
 is-terminal        = "0.4"
 tempfile           = { workspace = true }
 

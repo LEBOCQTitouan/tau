@@ -21,7 +21,10 @@ use std::str::FromStr;
 
 use semver::Version;
 use tau_domain::PackageName;
-use tau_pkg::{verify, verify_all, LockFile, Scope, VerifyReport, VerifyStatus};
+use tau_pkg::{
+    verify, verify_all_with_options, AnthropicConformanceIssue, LockFile, Scope, VerifyReport,
+    VerifyStatus,
+};
 
 use crate::cli::VerifyArgs;
 use crate::output::Output;
@@ -44,7 +47,8 @@ pub async fn run(args: &VerifyArgs, output: &mut Output) -> anyhow::Result<()> {
             if !scope.lockfile_path().exists() {
                 vec![]
             } else {
-                verify_all(&scope).map_err(|e| anyhow::anyhow!("{}", e))?
+                verify_all_with_options(&scope, args.anthropic_strict)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?
             }
         }
         Some(pkg_str) => {
@@ -106,7 +110,9 @@ pub async fn run(args: &VerifyArgs, output: &mut Output) -> anyhow::Result<()> {
             VerifyStatus::Unverified => unverified_count += 1,
             VerifyStatus::TreeDrift { .. }
             | VerifyStatus::BinaryDrift { .. }
-            | VerifyStatus::Missing { .. } => drift_count += 1,
+            | VerifyStatus::Missing { .. }
+            | VerifyStatus::SkillContentDrift { .. }
+            | VerifyStatus::AnthropicConformance { .. } => drift_count += 1,
             // The enum is #[non_exhaustive] — any future variant is
             // treated conservatively as non-drift to avoid false exits.
             _ => unverified_count += 1,
@@ -201,6 +207,54 @@ fn emit_json_event(report: &VerifyReport, output: &mut Output) -> anyhow::Result
                 "path": path.to_string_lossy(),
             })
         }
+        VerifyStatus::SkillContentDrift {
+            name: skill_name,
+            expected,
+            got,
+        } => {
+            serde_json::json!({
+                "event": "verify_package",
+                "name": name,
+                "version": version,
+                "status": "drift",
+                "kind": "skill_content",
+                "skill_name": skill_name,
+                "expected": expected,
+                "actual": got,
+            })
+        }
+        VerifyStatus::AnthropicConformance { skill_name, issue } => {
+            let (issue_kind, detail) = match issue {
+                AnthropicConformanceIssue::MissingDescription => ("missing_description", None),
+                AnthropicConformanceIssue::EmptyBody => ("empty_body", None),
+                AnthropicConformanceIssue::MalformedFrontmatter { detail } => {
+                    ("malformed_frontmatter", Some(detail.as_str()))
+                }
+                _ => ("unknown_issue", None),
+            };
+            if let Some(d) = detail {
+                serde_json::json!({
+                    "event": "verify_package",
+                    "name": name,
+                    "version": version,
+                    "status": "drift",
+                    "kind": "anthropic_conformance",
+                    "skill_name": skill_name,
+                    "issue": issue_kind,
+                    "detail": d,
+                })
+            } else {
+                serde_json::json!({
+                    "event": "verify_package",
+                    "name": name,
+                    "version": version,
+                    "status": "drift",
+                    "kind": "anthropic_conformance",
+                    "skill_name": skill_name,
+                    "issue": issue_kind,
+                })
+            }
+        }
         // Future variants: emit as unverified.
         _ => {
             serde_json::json!({
@@ -261,6 +315,36 @@ fn emit_human_line(report: &VerifyReport, output: &mut Output) -> anyhow::Result
         VerifyStatus::Missing { path } => {
             output.human(&format!("{}\u{2717} drift (missing)", prefix))?;
             output.human(&format!("  path: {}", path.display()))?;
+        }
+        VerifyStatus::SkillContentDrift {
+            name: skill_name,
+            expected,
+            got,
+        } => {
+            output.human(&format!("{}\u{2717} drift (skill content)", prefix))?;
+            output.human(&format!("  skill: {}", skill_name))?;
+            output.human(&format!("  expected: {}", expected))?;
+            output.human(&format!("  actual:   {}", got))?;
+        }
+        VerifyStatus::AnthropicConformance { skill_name, issue } => {
+            output.human(&format!(
+                "{}\u{2717} AnthropicConformance (skill: {})",
+                prefix, skill_name
+            ))?;
+            match issue {
+                AnthropicConformanceIssue::MissingDescription => {
+                    output.human("  issue: description field is missing or empty")?;
+                }
+                AnthropicConformanceIssue::EmptyBody => {
+                    output.human("  issue: SKILL.md body is empty or whitespace-only")?;
+                }
+                AnthropicConformanceIssue::MalformedFrontmatter { detail } => {
+                    output.human(&format!("  issue: malformed frontmatter — {}", detail))?;
+                }
+                _ => {
+                    output.human("  issue: unknown conformance issue")?;
+                }
+            }
         }
         // Future variants: print as unverified.
         _ => {
