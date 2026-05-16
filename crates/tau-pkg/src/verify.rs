@@ -56,6 +56,34 @@ pub enum VerifyStatus {
         /// Actual SHA-256 (hex; from re-hashing the on-disk file).
         got: String,
     },
+
+    /// Skills-5: skill failed Anthropic-format conformance check
+    /// (triggered by the `--anthropic-strict` flag on `tau verify`).
+    AnthropicConformance {
+        /// Name of the affected skill package.
+        skill_name: String,
+        /// Specific conformance issue detected.
+        issue: AnthropicConformanceIssue,
+    },
+}
+
+/// Specific Anthropic-conformance issues raised by Skills-5's
+/// `tau verify --anthropic-strict` mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AnthropicConformanceIssue {
+    /// SKILL.md frontmatter is missing the required `description` field
+    /// (or it parsed as an empty/whitespace-only string).
+    MissingDescription,
+    /// SKILL.md body (after frontmatter strip) is empty or
+    /// whitespace-only.
+    EmptyBody,
+    /// SKILL.md frontmatter is malformed (YAML parse failed, missing
+    /// closing `---`, etc.).
+    MalformedFrontmatter {
+        /// Underlying parser error detail.
+        detail: String,
+    },
 }
 
 impl VerifyStatus {
@@ -67,6 +95,7 @@ impl VerifyStatus {
                 | VerifyStatus::BinaryDrift { .. }
                 | VerifyStatus::Missing { .. }
                 | VerifyStatus::SkillContentDrift { .. }
+                | VerifyStatus::AnthropicConformance { .. }
         )
     }
 }
@@ -257,12 +286,79 @@ pub fn verify(
 
 /// Verify every (package, version) pair in the lockfile.
 pub fn verify_all(scope: &Scope) -> Result<Vec<VerifyReport>, VerifyError> {
+    verify_all_with_options(scope, false)
+}
+
+/// Verify every (package, version) pair in the lockfile, with optional
+/// Anthropic-format conformance checking.
+///
+/// When `anthropic_strict` is `true`, every installed skill package is
+/// additionally checked for Anthropic SKILL.md conformance:
+///
+/// - frontmatter must be well-formed
+/// - `description` must be non-empty / non-whitespace
+/// - body must be non-empty / non-whitespace
+///
+/// Conformance failures are appended to the report as
+/// [`VerifyStatus::AnthropicConformance`] entries (one per package per
+/// issue). Non-skill packages are skipped.
+pub fn verify_all_with_options(
+    scope: &Scope,
+    anthropic_strict: bool,
+) -> Result<Vec<VerifyReport>, VerifyError> {
     let lockfile = LockFile::load(&scope.lockfile_path())?;
     let mut reports = Vec::new();
 
     for pkg in &lockfile.packages {
         for lv in &pkg.installed_versions {
             reports.push(verify(scope, &pkg.name, &lv.version)?);
+        }
+
+        if anthropic_strict && pkg.skill.is_some() {
+            let install_path = scope.package_dir(&pkg.name, &pkg.active_version);
+            let skill_md_path = install_path.join("SKILL.md");
+            let text = match std::fs::read_to_string(&skill_md_path) {
+                Ok(t) => t,
+                // Missing SKILL.md: the drift check above already caught
+                // this; skip the conformance check to avoid duplicate noise.
+                Err(_) => continue,
+            };
+            match tau_domain::parse_skill_md(&text) {
+                Err(e) => {
+                    reports.push(VerifyReport {
+                        name: pkg.name.clone(),
+                        version: pkg.active_version.clone(),
+                        status: VerifyStatus::AnthropicConformance {
+                            skill_name: pkg.name.to_string(),
+                            issue: AnthropicConformanceIssue::MalformedFrontmatter {
+                                detail: e.to_string(),
+                            },
+                        },
+                    });
+                }
+                Ok(content) => {
+                    if content.frontmatter.description.trim().is_empty() {
+                        reports.push(VerifyReport {
+                            name: pkg.name.clone(),
+                            version: pkg.active_version.clone(),
+                            status: VerifyStatus::AnthropicConformance {
+                                skill_name: pkg.name.to_string(),
+                                issue: AnthropicConformanceIssue::MissingDescription,
+                            },
+                        });
+                    }
+                    if content.body.trim().is_empty() {
+                        reports.push(VerifyReport {
+                            name: pkg.name.clone(),
+                            version: pkg.active_version.clone(),
+                            status: VerifyStatus::AnthropicConformance {
+                                skill_name: pkg.name.to_string(),
+                                issue: AnthropicConformanceIssue::EmptyBody,
+                            },
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -322,6 +418,7 @@ mod tests {
             }],
             plugin: None,
             skill: None,
+            synthesized_from: None,
         };
         lf.packages.push(pkg);
         lf.save(&scope.lockfile_path()).unwrap();
@@ -383,6 +480,129 @@ mod tests {
         let reports = verify_all(&scope).unwrap();
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].status, VerifyStatus::Ok);
+    }
+}
+
+#[cfg(test)]
+mod anthropic_strict_tests {
+    use super::*;
+    use crate::lockfile::{
+        LockFile, LockedPackage, LockedSkill, LockedVersion, SkillFrontmatterSnapshot,
+    };
+    use std::fs;
+    use std::time::{Duration, UNIX_EPOCH};
+    use tempfile::TempDir;
+
+    /// Build a minimal scope + lockfile that has a skill package installed.
+    ///
+    /// `skill_md_content` is written verbatim to
+    /// `<tau_dir>/packages/critic/0.1.0/SKILL.md`.
+    fn make_skill_scope(tmp: &std::path::Path, skill_md_content: &str) -> Scope {
+        let tau_dir = tmp.join(".tau");
+        fs::create_dir_all(&tau_dir).unwrap();
+        fs::write(
+            tau_dir.join("config.toml"),
+            "schema_version = 3\nkind = \"project\"\ncreated_at = \"2026-05-14T00:00:00Z\"\ncreated_by_tau_version = \"0.0.0\"\n\n[sandbox]\nrequired_tier = \"none\"\n",
+        )
+        .unwrap();
+
+        let install_dir = tau_dir.join("packages").join("critic").join("0.1.0");
+        fs::create_dir_all(&install_dir).unwrap();
+        fs::write(install_dir.join("SKILL.md"), skill_md_content).unwrap();
+
+        // Compute sha256 of the content so the drift check passes.
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(skill_md_content.as_bytes());
+        let sha = crate::tree_hash::to_hex_lower(&h.finalize());
+
+        let locked_pkg = LockedPackage {
+            name: "critic".parse().unwrap(),
+            active_version: "0.1.0".parse().unwrap(),
+            source: "https://example.com/critic.git".parse().unwrap(),
+            installed_versions: vec![LockedVersion {
+                version: "0.1.0".parse().unwrap(),
+                rev: None,
+                resolved_commit: "0".repeat(40),
+                sha256: String::new(), // no tree hash; Unverified is fine for these tests
+                installed_at: UNIX_EPOCH + Duration::from_secs(1_747_180_800),
+            }],
+            plugin: None,
+            skill: Some(LockedSkill::new(
+                sha,
+                SkillFrontmatterSnapshot {
+                    name: "critic".into(),
+                    description: "Reviews drafts.".into(),
+                },
+            )),
+            synthesized_from: None,
+        };
+
+        let mut lf = LockFile::default();
+        lf.packages.push(locked_pkg);
+        lf.save(&tmp.join("tau-lock.toml")).unwrap();
+
+        Scope::resolve(tmp).unwrap()
+    }
+
+    #[test]
+    fn anthropic_strict_passes_for_conformant_skill() {
+        let td = TempDir::new().unwrap();
+        let content =
+            "---\nname: critic\ndescription: Reviews drafts.\n---\n\nYou are a strict editor.\n";
+        let scope = make_skill_scope(td.path(), content);
+        let reports = verify_all_with_options(&scope, true).unwrap();
+        let conformance_issues: Vec<_> = reports
+            .iter()
+            .filter(|r| matches!(r.status, VerifyStatus::AnthropicConformance { .. }))
+            .collect();
+        assert!(
+            conformance_issues.is_empty(),
+            "expected no conformance issues, got: {conformance_issues:?}"
+        );
+    }
+
+    #[test]
+    fn anthropic_strict_flags_missing_description() {
+        let td = TempDir::new().unwrap();
+        // SKILL.md with whitespace-only description — parse succeeds but
+        // description.trim() is empty → MissingDescription.
+        let content = "---\nname: critic\ndescription: \"   \"\n---\n\nYou are a strict editor.\n";
+        let scope = make_skill_scope(td.path(), content);
+        let reports = verify_all_with_options(&scope, true).unwrap();
+        let issues: Vec<_> = reports
+            .iter()
+            .filter(|r| matches!(r.status, VerifyStatus::AnthropicConformance { .. }))
+            .collect();
+        assert_eq!(issues.len(), 1, "expected exactly one conformance issue");
+        assert!(
+            matches!(
+                &issues[0].status,
+                VerifyStatus::AnthropicConformance {
+                    issue: AnthropicConformanceIssue::MissingDescription,
+                    ..
+                }
+            ),
+            "expected MissingDescription, got {:?}",
+            issues[0].status
+        );
+    }
+
+    #[test]
+    fn anthropic_strict_off_does_not_run_conformance() {
+        let td = TempDir::new().unwrap();
+        // Same whitespace-only description that would trigger MissingDescription.
+        let content = "---\nname: critic\ndescription: \"   \"\n---\n\nYou are a strict editor.\n";
+        let scope = make_skill_scope(td.path(), content);
+        let reports = verify_all_with_options(&scope, false).unwrap();
+        let conformance_issues: Vec<_> = reports
+            .iter()
+            .filter(|r| matches!(r.status, VerifyStatus::AnthropicConformance { .. }))
+            .collect();
+        assert!(
+            conformance_issues.is_empty(),
+            "expected no conformance issues when strict=false, got: {conformance_issues:?}"
+        );
     }
 }
 

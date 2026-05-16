@@ -148,3 +148,35 @@ error message, the silent-kill happened. Recover by:
     podman ps   # zombie gate container probably still running
     podman rm -f <container-id>   # clean it up
     scripts/agent-push.sh         # try again the right way
+
+## Keeping PRs up-to-date with main
+
+Branch protection on `main` is `strict: true` — PRs must be up-to-date
+with `main` to merge. When other sessions land commits while your PR
+is open:
+
+    gh pr update-branch <PR#>
+
+adds a merge-commit from main into the PR branch via GitHub's "Update
+branch" button. No local rebase, no force-push, triggers one fresh CI
+run. Squash merge collapses the merge commit at merge time so history
+stays clean.
+
+Do NOT use `gh pr merge --auto` (auto-merge is disabled at repo
+level) or `gh pr merge --admin` (`enforce_admins: true` blocks admin
+bypass). The only sanctioned mergeability fix is `update-branch` (or a
+local rebase + `scripts/agent-push.sh`).
+
+## Lefthook tests can corrupt git identity
+
+The lefthook integration test suite writes `Test User
+<test@example.com>` to the worktree-local `[user]` config and does
+not always restore it. A subsequent commit then picks up that
+identity. Safe pattern for every agent-driven commit:
+
+    git -c user.name="<real>" -c user.email="<real>" \
+      commit --no-verify -m "..."
+
+`-c` overrides at the command level without persisting. Combined
+with `--no-verify` (acceptable for docs-only changes per the rules
+above), this also avoids re-triggering the corrupting test run.

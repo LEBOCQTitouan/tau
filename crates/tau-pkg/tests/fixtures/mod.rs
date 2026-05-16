@@ -19,6 +19,12 @@ pub fn git_available() -> bool {
         .unwrap_or(false)
 }
 
+/// Run a git command in `cwd`, panicking on failure. Public so that
+/// integration tests that need to build custom fixtures can reuse it.
+pub fn run_git_in(cwd: &Path, args: &[&str]) {
+    run_git(cwd, args);
+}
+
 fn run_git(cwd: &Path, args: &[&str]) {
     let output = Command::new("git")
         .args(args)
