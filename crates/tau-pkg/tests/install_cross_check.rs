@@ -509,13 +509,7 @@ fn install_force_after_cross_check_fix_succeeds() {
 
     // ── Step 1: install with a manifest that declares an unused capability ──
     let caps_unused = "capabilities = [\n  { kind = \"fs.read\", paths = [\"/tmp/**\"] },\n]";
-    let bare = make_relay_plugin_repo(
-        tmp.path(),
-        "force-plugin",
-        "0.1.0",
-        caps_unused,
-        echo_tool,
-    );
+    let bare = make_relay_plugin_repo(tmp.path(), "force-plugin", "0.1.0", caps_unused, echo_tool);
     let source = PackageSource::from_str(&fixtures::file_url(&bare)).unwrap();
 
     let err = install_with_options(&source, &scope, InstallOptions::default())
