@@ -24,7 +24,7 @@ landlock    = { workspace = true }
 libc        = { workspace = true }
 nix         = { workspace = true }
 seccompiler = { workspace = true }
-rtnetlink   = "0.14"
+rtnetlink   = "0.21"
 futures     = "0.3"
 
 [dev-dependencies]
