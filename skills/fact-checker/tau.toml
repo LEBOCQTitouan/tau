@@ -1,0 +1,13 @@
+name = "fact-checker"
+version = "0.1.0"
+description = "Validates factual claims against bundled reference materials."
+authors = ["tau contributors <dev@tau>"]
+source = "https://github.com/LEBOCQTitouan/tau.git"
+kind = "skill"
+dependencies = []
+
+[[capabilities]]
+kind = "fs.read"
+paths = ["${SKILL_DIR}/references/**"]
+
+[skill]
