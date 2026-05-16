@@ -30,11 +30,10 @@ pub fn synthesize_anthropic_skill(
             path: skill_md_path.display().to_string(),
             detail: e.to_string(),
         })?;
-    let parsed =
-        parse_skill_md(&text).map_err(|e| SynthesizeError::ParseSkillMd {
-            path: skill_md_path.display().to_string(),
-            detail: e.to_string(),
-        })?;
+    let parsed = parse_skill_md(&text).map_err(|e| SynthesizeError::ParseSkillMd {
+        path: skill_md_path.display().to_string(),
+        detail: e.to_string(),
+    })?;
     synthesize_manifest_from_skill_md(&parsed, source).map_err(|e| {
         SynthesizeError::DomainSynthesize {
             detail: e.to_string(),

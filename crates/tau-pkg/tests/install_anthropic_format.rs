@@ -9,8 +9,8 @@ mod fixtures;
 use std::str::FromStr;
 
 use tau_domain::PackageSource;
-use tau_pkg::{install_with_options, InstallError, InstallOptions, LockFile, Scope};
 use tau_pkg::SynthesizedSource;
+use tau_pkg::{install_with_options, InstallError, InstallOptions, LockFile, Scope};
 use tempfile::TempDir;
 
 /// Construct install options suitable for tests:
