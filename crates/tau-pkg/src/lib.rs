@@ -55,4 +55,7 @@ pub use source_list::{list_versions_at_source, SourceListError};
 pub use synthesize::{synthesize_anthropic_skill, SynthesizeError};
 pub use tree_hash::{sha256_of_file, tree_hash, FileHash, TreeHashError};
 pub use update::{update_package, UpdateError, UpdateResult};
-pub use verify::{verify, verify_all, VerifyError, VerifyReport, VerifyStatus};
+pub use verify::{
+    verify, verify_all, verify_all_with_options, AnthropicConformanceIssue, VerifyError,
+    VerifyReport, VerifyStatus,
+};
