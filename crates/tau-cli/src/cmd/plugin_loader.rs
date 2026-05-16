@@ -367,8 +367,15 @@ fn resolve_plugin<'a>(
 /// payload accepts arbitrary JSON; TOML scalars and tables map
 /// straightforwardly.
 fn agent_config_to_json(entry: &AgentEntry) -> serde_json::Value {
+    // Return `{}` (not `Null`) when no config is set: plugin config
+    // structs typically don't deserialize from JSON null (only from
+    // objects), so a Null here would cause the SDK runner's
+    // `serde_json::from_value::<P::Config>(...)` to fail with
+    // 'invalid type: null, expected struct ...', and the plugin would
+    // exit silently. An empty object lets every plugin with default-able
+    // config construct its defaults.
     if entry.config.is_empty() {
-        return serde_json::Value::Null;
+        return serde_json::Value::Object(serde_json::Map::new());
     }
     let mut map = serde_json::Map::with_capacity(entry.config.len());
     for (k, v) in &entry.config {
@@ -420,9 +427,12 @@ mod tests {
     }
 
     #[test]
-    fn agent_config_to_json_returns_null_when_empty() {
+    fn agent_config_to_json_returns_empty_object_when_empty() {
         let entry = make_entry(BTreeMap::new());
-        assert_eq!(agent_config_to_json(&entry), serde_json::Value::Null);
+        assert_eq!(
+            agent_config_to_json(&entry),
+            serde_json::Value::Object(serde_json::Map::new())
+        );
     }
 
     #[test]
