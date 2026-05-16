@@ -161,11 +161,14 @@ impl CountingTool {
             "properties": { "text": { "type": "string" } },
             "required": ["text"]
         });
-        let schema_value: Value = serde_json::from_str(
-            &serde_json::to_string(&schema_json).expect("serialize schema"),
-        )
-        .expect("round-trip schema into tau_domain::Value");
-        let schema = make_tool_spec(name.to_string(), format!("counting tool {name}"), schema_value);
+        let schema_value: Value =
+            serde_json::from_str(&serde_json::to_string(&schema_json).expect("serialize schema"))
+                .expect("round-trip schema into tau_domain::Value");
+        let schema = make_tool_spec(
+            name.to_string(),
+            format!("counting tool {name}"),
+            schema_value,
+        );
         Self {
             name: name.to_string(),
             schema,
@@ -257,17 +260,15 @@ async fn tool_args_validation_failure_yields_recoverable_tool_error() {
     //   Turn 2 = plain text "self-corrected" so the run reaches Completed
     //            rather than getting stuck on max_turns.
     let bad_args_json = serde_json::json!({ "foo": 1 });
-    let bad_args: Value = serde_json::from_str(
-        &serde_json::to_string(&bad_args_json).expect("serialize bad args"),
-    )
-    .expect("round-trip bad args into tau_domain::Value");
+    let bad_args: Value =
+        serde_json::from_str(&serde_json::to_string(&bad_args_json).expect("serialize bad args"))
+            .expect("round-trip bad args into tau_domain::Value");
     let llm = common::MockLlmBackend::new("gpt-4")
         .add_tool_call("strict-tool", bad_args)
         .add_text("after seeing the validation error I'll just describe it instead");
 
     let invoke_calls = Arc::new(AtomicUsize::new(0));
-    let tool: Arc<dyn DynTool> =
-        Arc::new(CountingTool::new("strict-tool", invoke_calls.clone()));
+    let tool: Arc<dyn DynTool> = Arc::new(CountingTool::new("strict-tool", invoke_calls.clone()));
 
     let runtime = Runtime::builder()
         .with_llm_backend(llm)
