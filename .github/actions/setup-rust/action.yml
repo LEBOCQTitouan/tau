@@ -77,9 +77,34 @@ runs:
     - name: Configure sccache env
       if: inputs.with-sccache == 'true' && runner.os != 'Windows'
       shell: bash
+      # Preflight the sccache server before exporting RUSTC_WRAPPER. If
+      # the GitHub Actions cache backend is unreachable (transient DNS
+      # resolution failures for
+      # results-receiver.actions.githubusercontent.com have been observed
+      # on the macOS runner pool), sccache --start-server exits non-zero
+      # and every subsequent rustc invocation would also fail under
+      # RUSTC_WRAPPER=sccache, breaking the whole job. Falling back to a
+      # plain rustc build keeps CI green at the cost of a one-job cache
+      # miss.
       run: |
-        echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+        export SCCACHE_GHA_ENABLED=true
+        ok=""
+        for attempt in 1 2 3; do
+          if sccache --start-server 2>/tmp/sccache-startup.log; then
+            ok=1
+            break
+          fi
+          echo "sccache --start-server attempt $attempt failed:" >&2
+          cat /tmp/sccache-startup.log >&2 || true
+          sccache --stop-server >/dev/null 2>&1 || true
+          sleep $((attempt * 3))
+        done
+        if [ -n "$ok" ]; then
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+        else
+          echo "::warning::sccache server failed to start after 3 attempts (likely GitHub Actions cache backend connectivity flake); continuing without sccache for this job"
+        fi
 
     - name: Install cargo-nextest
       if: inputs.with-nextest == 'true'
