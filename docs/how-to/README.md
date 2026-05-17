@@ -7,6 +7,12 @@ How-tos assume you understand the basics and are reaching for the right
 flag, the right command, or the right shape of a config block. They are
 short, focused, and named after the goal — not the feature.
 
+## Project & sandbox
+
+- [Configure the sandbox tier](configure-sandbox-tier.md) — the three
+  knobs (scope config, plugin manifest, `--no-sandbox`), what each
+  one controls, and quick recipes for common scenarios.
+
 ## Skills
 
 - [Install a skill](install-a-skill.md) — `tau install <source>` from
