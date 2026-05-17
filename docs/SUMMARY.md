@@ -16,21 +16,28 @@
 # Tutorials
 
 - [Overview](tutorials/README.md)
+- [Build your first skill](tutorials/build-your-first-skill.md)
 
 # How-to
 
 - [Overview](how-to/README.md)
+- [Install a skill](how-to/install-a-skill.md)
+- [Author a skill](how-to/author-a-skill.md)
+- [Export a skill](how-to/export-a-skill.md)
 
 # Reference
 
 - [Overview](reference/README.md)
 - [Sandbox platform support](reference/sandbox-platform-support.md)
+- [Skill manifest schema](reference/skill-manifest-schema.md)
 
 # Explanation
 
 - [Overview](explanation/README.md)
+- [Packages](explanation/packages.md)
 - [Escape hatches](explanation/escape-hatches.md)
 - [tau as language](explanation/tau-as-language.md)
+- [Two-layer skills](explanation/two-layer-skills.md)
 
 # Architecture decisions
 
@@ -65,6 +72,9 @@
 - [ADR-0026 — Skills install pipeline](decisions/0026-skills-install-pipeline.md)
 - [ADR-0027 — Skills discovery](decisions/0027-skills-discovery.md)
 - [ADR-0028 — Docs deployment](decisions/0028-docs-deployment.md)
+- [ADR-0028 — Skills runtime invocation](decisions/0028-skills-runtime-invocation.md)
+- [ADR-0029 — Skills Anthropic interop](decisions/0029-skills-anthropic-interop.md)
+- [ADR-0030 — Skills reference packages](decisions/0030-skills-reference-packages.md)
 
 # Project artifacts
 
