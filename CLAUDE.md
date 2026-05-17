@@ -180,3 +180,56 @@ identity. Safe pattern for every agent-driven commit:
 `-c` overrides at the command level without persisting. Combined
 with `--no-verify` (acceptable for docs-only changes per the rules
 above), this also avoids re-triggering the corrupting test run.
+
+# DOCS RULES — read before editing anything under `docs/`
+
+The published book is `mdbook build` + `mdbook-linkcheck` over the
+`docs/` tree, deployed to GitHub Pages by `.github/workflows/docs-deploy.yml`.
+`book.toml` sets `warning-policy = "error"` for linkcheck, so a single
+broken link fails the deploy job.
+
+## Rule: build the book locally before opening a docs PR
+
+Both binaries live at `~/.cargo/bin/{mdbook,mdbook-linkcheck}` but
+that directory is not on the agent runtime's PATH. Build with PATH
+prepended for the duration of the call, from the `docs/` directory:
+
+    cd docs && PATH="$HOME/.cargo/bin:$PATH" mdbook build
+
+A clean build produces only `[INFO]` lines and leaves a `docs/book/`
+tree (`book/html/` for the site, `book/linkcheck/` for the link
+report). Remove `docs/book/` before committing — it is gitignored, but
+worth `rm -rf docs/book` after verifying.
+
+If either binary is missing, install once (the user must invoke this,
+not the agent — `cargo install` of agent-chosen packages is denied):
+
+    cargo install mdbook --locked --version ^0.4
+    cargo install mdbook-linkcheck --locked --version ^0.7
+
+## Rule: every doc page must be in `SUMMARY.md`
+
+mdBook silently skips pages not listed in `docs/SUMMARY.md`. New
+ADRs, tutorials, how-tos, reference pages, and explanation pages all
+need a corresponding line. Linkcheck only verifies links between
+pages that *are* in SUMMARY, so a forgotten entry hides both the page
+and any broken outbound links it contains.
+
+## Rule: docs-only PRs may bypass the pre-push gate
+
+The lefthook deep gate is Rust-CI mirroring; it adds nothing to a
+docs-only change and the gate has its own silent-kill failure mode
+under `git push` (see AGENT PUSH RULES above). For pure
+`docs/**` + `.md` changes:
+
+    git push --no-verify
+
+is sanctioned. CI's `docs-deploy` job is the real gate. If the PR
+also touches Rust, follow AGENT PUSH RULES and run the full gate.
+
+## Rule: the live URL is `lebocqtitouan.github.io/tau/`
+
+The repository is `LEBOCQTitouan/tau` (capitalized). GitHub Pages
+lowercases the owner, so the deployed site is at
+`https://lebocqtitouan.github.io/tau/latest/`. `titouanlebocq.github.io`
+returns 404 — do not confuse the two when smoke-testing a deploy.
