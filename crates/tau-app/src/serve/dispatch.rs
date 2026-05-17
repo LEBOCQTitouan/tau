@@ -18,7 +18,6 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::task::LocalSet;
 use tracing::warn;
 
 /// Shared dispatcher state. Cheap to clone (all `Arc`/clone-safe inner).
@@ -43,7 +42,6 @@ impl Dispatcher {
     pub async fn run(
         self,
         mut in_rx: mpsc::Receiver<Inbound>,
-        local_set: &LocalSet,
     ) -> Result<()> {
         while let Some(frame) = in_rx.recv().await {
             match frame {
@@ -61,13 +59,13 @@ impl Dispatcher {
                     )
                     .await;
                 }
-                Inbound::Json(value) => self.handle_one(value, local_set).await,
+                Inbound::Json(value) => self.handle_one(value).await,
             }
         }
         Ok(())
     }
 
-    async fn handle_one(&self, value: Value, local_set: &LocalSet) {
+    async fn handle_one(&self, value: Value) {
         // Parse as Request.
         let req: Request = match serde_json::from_value(value) {
             Ok(r) => r,
@@ -127,8 +125,8 @@ impl Dispatcher {
         match req.method.as_str() {
             methods::META_HANDSHAKE => self.handle_handshake(req).await,
             methods::META_PING => self.handle_ping(req).await,
-            methods::RUNTIME_RUN => self.spawn_run(req, local_set, /*streaming=*/ false),
-            methods::RUNTIME_RUN_STREAMING => self.spawn_run(req, local_set, /*streaming=*/ true),
+            methods::RUNTIME_RUN => self.spawn_run(req, /*streaming=*/ false),
+            methods::RUNTIME_RUN_STREAMING => self.spawn_run(req, /*streaming=*/ true),
             methods::RUNTIME_CANCEL => self.handle_cancel(req).await,
             other => {
                 self.send_err(
@@ -204,11 +202,12 @@ impl Dispatcher {
         self.send_ok(req.id, json!({"cancelled": cancelled})).await;
     }
 
-    /// Spawn the per-request task on the LocalSet. Runtime streams are
-    /// non-`Send` so we must use `spawn_local`.
-    fn spawn_run(&self, req: Request, local_set: &LocalSet, streaming: bool) {
+    /// Spawn the per-request task. Runtime streams are non-`Send` so we must
+    /// use `spawn_local`. Works within any active LocalSet on the current
+    /// thread — `lifecycle::run` drives `Dispatcher::run` inside a LocalSet.
+    fn spawn_run(&self, req: Request, streaming: bool) {
         let this = self.clone();
-        local_set.spawn_local(async move {
+        tokio::task::spawn_local(async move {
             super::dispatch_run::execute(this, req, streaming).await;
         });
     }
