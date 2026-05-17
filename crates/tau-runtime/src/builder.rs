@@ -749,6 +749,27 @@ impl RuntimeBuilder {
             storages,
         })
     }
+
+    /// Build a [`Runtime`] that may have zero LLM backends.
+    ///
+    /// Unlike [`build`], this variant does **not** reject an empty backend
+    /// set. Use it in serve mode when the project tau.toml declares no agents
+    /// (the serve process still accepts `meta.handshake` and `meta.ping`;
+    /// any `runtime.run` call will return `-32010 UNKNOWN_AGENT` because no
+    /// agents are registered, which is correct behaviour).
+    ///
+    /// Name collisions within a kind are still rejected.
+    pub fn build_allow_empty(self) -> Result<Runtime, BuildError> {
+        let llm_backends = collect_llm_backends_by_name(self.llm_backends)?;
+        let (tools, tool_validators) = collect_tools_by_name(self.tools)?;
+        let storages = collect_storages_by_name(self.storages)?;
+        Ok(Runtime {
+            llm_backends,
+            tools,
+            tool_validators,
+            storages,
+        })
+    }
 }
 
 // Three separate collectors instead of one generic helper: closing

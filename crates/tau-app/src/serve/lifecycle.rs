@@ -192,7 +192,11 @@ async fn build_runtime(project: &Project) -> Result<tau_runtime::Runtime> {
         }
     }
 
-    builder.build().context("build Runtime")
+    // Use `build_allow_empty` so a project with zero agents still starts
+    // successfully. Serve mode accepts `meta.handshake` and `meta.ping` on
+    // any project; `runtime.run` calls will return -32010 UNKNOWN_AGENT
+    // which is the correct behaviour when no agents are defined.
+    builder.build_allow_empty().context("build Runtime")
 }
 
 /// Convert an agent's `[agents.<id>.config]` TOML sub-table to a
