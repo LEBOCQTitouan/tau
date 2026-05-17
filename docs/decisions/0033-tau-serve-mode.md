@@ -50,7 +50,12 @@ Ship v1 of serve mode as JSON-RPC 2.0 over NDJSON-framed stdio.
 
 ### CI gate
 
-- +1 required CI check: `test (tau-app serve / linux)` runs Layer 2 + Layer 3 tests. Total required checks gating `main` rises by 1.
+- No new CI job required. The existing `test-stable` job runs
+  `cargo nextest run --profile ci --workspace --all-targets`, which covers
+  `tau-app` (Layer 2 in-process tests) and `tau-cli` (Layer 3 e2e serve
+  tests) because both crates are workspace members. `CARGO_BIN_EXE_tau` is
+  populated automatically by nextest's binary build phase before the
+  integration tests run.
 
 ## Alternatives considered
 
