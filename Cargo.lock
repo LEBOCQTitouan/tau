@@ -3135,6 +3135,11 @@ version = "0.0.0"
 [[package]]
 name = "tau-observe"
 version = "0.0.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "tau-pkg"
