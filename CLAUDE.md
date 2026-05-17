@@ -265,3 +265,10 @@ as a transparent block, but its state machine occasionally
 mis-parses untyped fenced code blocks that *follow* a mermaid block.
 Use `[…]` (Unicode ellipsis) instead of `[...]` inside such blocks,
 or tag the fence with a language (` ```text `).
+
+Mermaid-label gotcha: Mermaid 11 (what `mdbook-mermaid install`
+bundles) interprets `1.` / `2.` prefixes in node and subgraph labels
+as ordered-list markdown syntax, which renders as a literal
+`Unsupported markdown: list` string in the page. Use `(1)`, `(2)`
+or `Step 1`, `Step 2` instead. Same applies to `*` bullets at the
+start of labels.

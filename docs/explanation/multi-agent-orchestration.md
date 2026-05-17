@@ -57,27 +57,27 @@ primitives compose without special-casing:
 
 ```mermaid
 flowchart LR
-    subgraph linear["1. Linear"]
+    subgraph linear["(1) Linear"]
         A1[Agent A] --> B1[Agent B] --> C1[Agent C]
     end
-    subgraph wp["2. Worker pool"]
+    subgraph wp["(2) Worker pool"]
         S2((Supervisor))
-        S2 -->|task 1| W2a[Worker]
-        S2 -->|task 2| W2b[Worker]
-        S2 -->|task 3| W2c[Worker]
+        S2 -->|task| W2a[Worker]
+        S2 -->|task| W2b[Worker]
+        S2 -->|task| W2c[Worker]
     end
-    subgraph pr["3. Plan-revise"]
+    subgraph pr["(3) Plan-revise"]
         O3((Orchestrator))
         O3 -->|plan| O3
         O3 --> S3[Sub-task] --> R3{revise?}
         R3 -->|yes| O3
     end
-    subgraph sc["4. Supervisor / critic"]
+    subgraph sc["(4) Supervisor / critic"]
         SP4[Supervisor] -->|produce| P4[Producer]
         SP4 -->|review| C4[Critic]
         C4 -->|verdict| SP4
     end
-    subgraph hier["5. Hierarchical"]
+    subgraph hier["(5) Hierarchical"]
         H5[L1] --> H5a[L2]
         H5a --> H5b[L3]
     end
