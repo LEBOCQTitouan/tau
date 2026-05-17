@@ -115,6 +115,8 @@ pub enum Command {
     /// Inspect installed skill packages (list, show).
     #[command(subcommand)]
     Skill(SkillSubcommand),
+    /// Start serve mode: accept JSON-RPC requests over stdio.
+    Serve(ServeArgs),
 }
 
 /// `tau plugin <action>` — debug-tier helpers per spec §9.
@@ -620,6 +622,30 @@ pub struct SkillExportArgs {
     /// Overwrite an existing output directory.
     #[arg(long)]
     pub force: bool,
+}
+
+/// Arguments for `tau serve`.
+#[derive(Args, Debug)]
+pub struct ServeArgs {
+    /// Path to the tau project directory. Defaults to the current directory.
+    #[arg(long, value_name = "PATH")]
+    pub project: Option<std::path::PathBuf>,
+
+    /// Maximum concurrent in-flight runs. Defaults to 8.
+    #[arg(long, value_name = "N")]
+    pub max_concurrent: Option<usize>,
+
+    /// Initiate graceful shutdown after no message activity for this many seconds.
+    #[arg(long, value_name = "SECS")]
+    pub idle_timeout: Option<u64>,
+
+    /// Write "tau-serve ready" to stderr after startup completes.
+    #[arg(long)]
+    pub ready_on_stderr: bool,
+
+    /// Seconds to wait for in-flight tasks during graceful shutdown.
+    #[arg(long, value_name = "SECS", default_value_t = 5)]
+    pub shutdown_grace: u64,
 }
 
 #[cfg(test)]
