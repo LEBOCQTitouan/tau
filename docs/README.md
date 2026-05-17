@@ -14,14 +14,16 @@ ADRs.
 
 ## Where to start
 
-- New to tau? Start with `tutorials/` (currently empty — see
-  [`ROADMAP.md`](../ROADMAP.md) for status).
-- Want to do a specific thing? Look in `how-to/`.
-- Need a fact about a flag, type, or protocol? Look in `reference/`.
+- New to tau? Start with [`tutorials/`](tutorials/) — currently
+  [Build your first skill](tutorials/build-your-first-skill.md) is the
+  recommended entry point.
+- Want to do a specific thing? Look in [`how-to/`](how-to/).
+- Need a fact about a flag, type, or protocol? Look in
+  [`reference/`](reference/).
 - Want the why? Read [`../CONSTITUTION.md`](../CONSTITUTION.md) and
-  the docs under `explanation/`.
+  the docs under [`explanation/`](explanation/).
 - Want the history of a decision? Read the relevant ADR in
-  `decisions/`.
+  [`decisions/`](decisions/).
 
 ## Process artifacts
 

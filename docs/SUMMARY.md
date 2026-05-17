@@ -71,6 +71,9 @@
 - [ADR-0026 — Skills install pipeline](decisions/0026-skills-install-pipeline.md)
 - [ADR-0027 — Skills discovery](decisions/0027-skills-discovery.md)
 - [ADR-0028 — Docs deployment](decisions/0028-docs-deployment.md)
+- [ADR-0028 — Skills runtime invocation](decisions/0028-skills-runtime-invocation.md)
+- [ADR-0029 — Skills Anthropic interop](decisions/0029-skills-anthropic-interop.md)
+- [ADR-0030 — Skills reference packages](decisions/0030-skills-reference-packages.md)
 
 # Project artifacts
 
