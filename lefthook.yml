@@ -210,14 +210,16 @@ pre-push:
             cargo test --workspace --doc --target-dir $TARGET
             echo "::endgroup::"
 
-            # ─── 6. test (conformance) ────────────────────────────
-            # CI runs the conformance suite against each HTTP plugin
-            # individually via its `--test conformance` integration test.
-            echo "::group::test-conformance"
-            for plugin in anthropic ollama openai; do
-              cargo nextest run -p "$plugin" --test conformance --target-dir $TARGET
-            done
+            # ─── 6. test (conformance) — parallel ─────────────────
+            # Three independent test binaries (--test conformance per
+            # plugin crate). Build phases queue briefly on the cargo
+            # lock; test executions overlap.
+            echo "::group::conformance-launch"
+            T_CONF_A=$(_par conformance-anthropic cargo nextest run -p anthropic --test conformance --target-dir $TARGET)
+            T_CONF_O=$(_par conformance-ollama    cargo nextest run -p ollama    --test conformance --target-dir $TARGET)
+            T_CONF_P=$(_par conformance-openai    cargo nextest run -p openai    --test conformance --target-dir $TARGET)
             echo "::endgroup::"
+            _wait_all "$T_CONF_A" "$T_CONF_O" "$T_CONF_P"
 
             # ─── 7. test (tau-runtime e2e) ────────────────────────
             echo "::group::test-tau-runtime-e2e"
