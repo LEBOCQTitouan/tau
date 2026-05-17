@@ -28,6 +28,7 @@
 # Reference
 
 - [Overview](reference/README.md)
+- [Package manifest schema](reference/package-manifest-schema.md)
 - [Sandbox platform support](reference/sandbox-platform-support.md)
 - [Skill manifest schema](reference/skill-manifest-schema.md)
 
@@ -35,6 +36,7 @@
 
 - [Overview](explanation/README.md)
 - [Packages](explanation/packages.md)
+- [Sandboxing](explanation/sandboxing.md)
 - [Escape hatches](explanation/escape-hatches.md)
 - [tau as language](explanation/tau-as-language.md)
 - [Two-layer skills](explanation/two-layer-skills.md)
