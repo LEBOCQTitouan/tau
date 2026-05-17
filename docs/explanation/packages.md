@@ -66,7 +66,7 @@ runtime:
 |---|---|---|
 | `llm-backend` | An implementation of the LLM trait — sends messages, receives streams. Required for any agent to run (G4 + ADR-0006). | `@tau/anthropic`, `@tau/openai`, `@tau/ollama` |
 | `tool` | Callable functionality an agent can invoke (fs.read, shell, http). Tools live behind capability gates. | `@tau/fs`, `@tau/shell` |
-| `skill` | A reusable behaviour (an instruction document + optional bundled files + optional sub-tool refs). See [Two-layer skills](two-layer-skills.md). | `critic`, `pr-reviewer`, your own |
+| `skill` | A reusable behaviour (an instruction document + optional bundled files + optional sub-tool refs). See [Two-layer skills](two-layer-skills.md). | your own — no bundled reference skills ship today |
 | `pipeline` | Coordinates multiple agents through a methodology. *Not* a general-purpose workflow engine (NG5). | `stature` (downstream) |
 | `mcp-server` | A Model Context Protocol server exposed to agents as a tool surface (G10). | any MCP server, wrapped |
 | `storage` | A persistence backend for state plugins need beyond a single invocation (memory plugins, log sinks). | future |
