@@ -11,7 +11,7 @@ on disk. Lockfile records the provenance.
 
 ## From a local path
 
-    $ tau install ./skills/critic
+    $ tau install ./path/to/my-skill
 
 Local paths work like git URLs but skip the clone step. Useful when
 developing a skill or shipping one with your project.
@@ -38,15 +38,14 @@ SKILL.md. Edit `./my-skill/tau.toml` (e.g. add capabilities), then:
     $ tau skill list
     Name      Version  Source
     ──────────────────────────────────────
-    critic    0.1.0    https://github.com/...
+    my-skill  0.1.0    https://github.com/...
 
-    $ tau skill show critic
-    Name: critic
+    $ tau skill show my-skill
+    Name: my-skill
     Version: 0.1.0
-    Description: Reviews drafts for clarity, completeness, and
-                 rhetorical quality.
+    Description: ...
     Capabilities: (none)
 
 ## Uninstall
 
-    $ tau uninstall critic
+    $ tau uninstall my-skill
