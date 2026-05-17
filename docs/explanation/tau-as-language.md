@@ -42,6 +42,20 @@ was never going to work" errors that surface mid-run today.
 
 ## What is a "tau program"?
 
+```mermaid
+flowchart LR
+    subgraph S["source"]
+        T["project tau.toml<br/>agent decls<br/>capability overrides"]
+        P["plugin packages<br/>each with tau.toml<br/>+ CAPABILITIES"]
+        L["lockfile<br/>resolved versions<br/>+ tree hashes"]
+    end
+    S --> C{{"<code>tau check</code> +<br/><code>tau build --target &lt;triple&gt;</code>"}}
+    C --> B["bundle.tau<br/>(content-hashed)<br/>pinned versions +<br/>effective capabilities +<br/>target triple"]
+    B --> R["<code>tau run --bundle</code><br/>on a host matching<br/>the pinned target"]
+    T -.-> P
+    P -.-> L
+```
+
 The tau-language **source** for a project is the union of:
 
 1. **Project `tau.toml`** — agent declarations, `[[requires.tools]]`
