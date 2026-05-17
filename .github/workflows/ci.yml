@@ -14,10 +14,14 @@ on:
       - '*.md'
       - '.github/workflows/docs-*.yml'
 
-# Cancel superseded runs on the same ref.
+# Cancel superseded runs on the same ref EXCEPT on main, where the
+# Swatinem rust-cache save-step only runs (see
+# .github/actions/setup-rust/action.yml `save-if`). Cancelling a
+# main run mid-cache-write means the cache write never completes
+# and subsequent PRs restore from a stale cache.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
