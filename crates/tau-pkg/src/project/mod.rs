@@ -9,6 +9,7 @@
 //! `[workspace]` precedent that justifies the shared filename.
 
 pub mod agent;
+#[allow(clippy::module_inception)]
 pub mod project;
 
 pub use agent::{build_agent_definition, AgentResolutionError};
