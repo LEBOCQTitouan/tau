@@ -20,6 +20,22 @@ mod tracing_init;
 
 pub use options::ServeOptions;
 
+// Test-only re-exports. `#[doc(hidden)]` keeps them out of the public
+// API surface (docs + semver) while `pub` allows integration tests in
+// `tests/` to reach them.
+#[doc(hidden)]
+pub use cancel::CancelRegistry;
+#[doc(hidden)]
+pub use dispatch::Dispatcher;
+#[doc(hidden)]
+pub use framing::Inbound;
+#[doc(hidden)]
+pub use handshake::HandshakeState;
+#[doc(hidden)]
+pub use project::Project;
+#[doc(hidden)]
+pub use protocol::{Outbound, RequestId};
+
 use anyhow::Result;
 
 /// Run the serve loop until shutdown.

@@ -35,4 +35,6 @@ libc = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["json"] }
+tau-ports = { workspace = true, features = ["test-fixtures"] }
+tau-runtime = { workspace = true }
 tempfile = { workspace = true }

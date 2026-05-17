@@ -49,7 +49,7 @@ impl Project {
     pub async fn load(root: &Path) -> Result<Self> {
         let root = std::fs::canonicalize(root)
             .with_context(|| format!("canonicalize project root {}", root.display()))?;
-        let config = ProjectConfig::from_path(&root)
+        let config = ProjectConfig::from_path(root.join("tau.toml"))
             .with_context(|| format!("parse tau.toml at {}", root.display()))?;
         let scope = Scope::resolve(&root).with_context(|| "compute scope for project root")?;
         Ok(Self { root, scope, config })

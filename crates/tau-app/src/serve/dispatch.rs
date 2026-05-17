@@ -212,6 +212,7 @@ impl Dispatcher {
         });
     }
 
+    /// Send a successful JSON-RPC 2.0 response to the writer task.
     pub async fn send_ok(&self, id: RequestId, result: Value) {
         let _ = self
             .out_tx
@@ -223,6 +224,7 @@ impl Dispatcher {
             .await;
     }
 
+    /// Send an error JSON-RPC 2.0 response to the writer task.
     pub async fn send_err(
         &self,
         id: RequestId,
@@ -244,6 +246,7 @@ impl Dispatcher {
             .await;
     }
 
+    /// Send a server-initiated JSON-RPC 2.0 notification to the writer task.
     pub async fn send_notification(&self, method: &str, params: Value) {
         let _ = self
             .out_tx
