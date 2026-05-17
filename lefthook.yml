@@ -78,17 +78,17 @@ pre-push:
       #                                  spawn nested containers)
       #
       # Coverage — every Linux CI job is reproduced inside this single
-      # container so local pre-push gives the same answer as remote CI:
+      # container so local pre-push gives the same answer as remote CI.
+      # Stages marked PARALLEL run concurrently via _par/_wait_all.
+      #   0. setup                     — PARALLEL: apt-deps | nextest-install | rustup-1.91
       #   1. msrv-check / linux        — cargo check at MSRV (rust 1.91)
       #   2. test-fixtures-ports/linux — cargo nextest -p tau-ports --features test-fixtures
       #   3. feature-flag-matrix/linux — cargo check per-crate --no-default-features
-      #   4. build-fixtures / linux    — release binaries (consumed by jobs 6, 7, 8, 10)
+      #   4. build-fixtures / linux    — release binaries (consumed by stages 6, 7, 8)
       #   5. test-stable / linux       — cargo nextest --workspace --all-targets + doctests
-      #   6. test (conformance)        — plugin conformance suite
-      #   7. test (tau-runtime e2e)    — runtime e2e tests
-      #   8. test (sandbox-native e2e) — sandbox-native e2e tests
-      #   9. xtask-plugin-images       — DooD-built per-plugin Docker images
-      #  10. test (tau-plugin-compat)  — integration-tests feature
+      #   6. test (conformance)        — PARALLEL: anthropic | ollama | openai
+      #   7. xtask-plugin-images       — DooD-built per-plugin Docker images (prereq for stage 8)
+      #   8. e2e                       — PARALLEL: tau-runtime | tau-sandbox-native | tau-plugin-compat
       #
       # Cost: ~3-4 min warm, ~15-20 min cold. Bypass for emergencies:
       # `git push --no-verify`.
@@ -221,17 +221,9 @@ pre-push:
             echo "::endgroup::"
             _wait_all "$T_CONF_A" "$T_CONF_O" "$T_CONF_P"
 
-            # ─── 7. test (tau-runtime e2e) ────────────────────────
-            echo "::group::test-tau-runtime-e2e"
-            cargo nextest run -p tau-runtime --features integration-tests --tests --target-dir $TARGET
-            echo "::endgroup::"
-
-            # ─── 8. test (tau-sandbox-native e2e) ─────────────────
-            echo "::group::test-tau-sandbox-native-e2e"
-            cargo nextest run -p tau-sandbox-native --features integration-tests --tests --target-dir $TARGET
-            echo "::endgroup::"
-
-            # ─── 9. xtask-plugin-images (DooD) ────────────────────
+            # ─── 7. xtask-plugin-images (DooD) ────────────────────
+            # MUST run before the parallel e2e block because
+            # test-plugin-compat consumes images built by xtask.
             # The container has /var/run/podman.sock bind-mounted; xtask
             # uses TAU_CONTAINER_RUNTIME=podman + the bind-mounted socket
             # for nested container spawn. `--target-dir` is a cargo
@@ -240,8 +232,14 @@ pre-push:
             cargo run --target-dir $TARGET -p xtask -- build-plugin-images
             echo "::endgroup::"
 
-            # ─── 10. test (tau-plugin-compat / linux) ─────────────
-            echo "::group::test-plugin-compat"
-            cargo nextest run -p tau-plugin-compat --features integration-tests --tests --target-dir $TARGET
+            # ─── 8. e2e tests — parallel ──────────────────────────
+            # Three independent crate test runs with --features
+            # integration-tests. Build phases queue briefly on the
+            # cargo lock; test executions overlap.
+            echo "::group::e2e-launch"
+            T_E2E_RT=$(_par e2e-tau-runtime         cargo nextest run -p tau-runtime         --features integration-tests --tests --target-dir $TARGET)
+            T_E2E_SB=$(_par e2e-tau-sandbox-native  cargo nextest run -p tau-sandbox-native  --features integration-tests --tests --target-dir $TARGET)
+            T_E2E_PC=$(_par e2e-tau-plugin-compat   cargo nextest run -p tau-plugin-compat   --features integration-tests --tests --target-dir $TARGET)
             echo "::endgroup::"
+            _wait_all "$T_E2E_RT" "$T_E2E_SB" "$T_E2E_PC"
           '
