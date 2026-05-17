@@ -117,21 +117,25 @@ pre-push:
             TARGET=target/lefthook-podman
 
             # _par <label> <cmd...>  → background <cmd>, capture combined
-            # output to /tmp/par-<label>.log, print "<pid>:<label>:<log>"
-            # so the caller can collect tokens for _wait_all.
+            # output to /tmp/par-<label>.log, append "<pid>:<label>:<log>"
+            # to the _PAR_TOKENS global. Call this directly (NOT inside
+            # $(...) — command substitution forks a subshell whose
+            # children cannot be `wait`-ed by the outer shell).
+            _PAR_TOKENS=()
             _par() {
               local label=$1; shift
               local log=/tmp/par-$label.log
               ( "$@" ) >"$log" 2>&1 &
-              echo "$!:$label:$log"
+              _PAR_TOKENS+=("$!:$label:$log")
             }
 
-            # _wait_all <token...>  → wait for every "pid:label:log" token
-            # in order, replay each log inside ::group::<label>...::endgroup::
-            # blocks, return 1 if any stage exited non-zero.
+            # _wait_all  → wait for every token in _PAR_TOKENS, replay
+            # each log inside ::group::<label>...::endgroup:: blocks in
+            # launch order, reset the array, return 1 if any stage
+            # exited non-zero.
             _wait_all() {
               local fail=0
-              for tok in "$@"; do
+              for tok in "${_PAR_TOKENS[@]}"; do
                 local pid=${tok%%:*}; local rest=${tok#*:}
                 local label=${rest%%:*}; local log=${rest#*:}
                 if ! wait "$pid"; then fail=1; fi
@@ -139,6 +143,7 @@ pre-push:
                 cat "$log"
                 echo "::endgroup::"
               done
+              _PAR_TOKENS=()
               return $fail
             }
 
@@ -147,9 +152,8 @@ pre-push:
             # independent of each other and of cargo. Run them
             # concurrently via _par/_wait_all to save the difference
             # between sum(setup tasks) and max(setup tasks).
-            echo "::group::setup-launch"
-            T_APT=$(_par apt-deps bash -c "apt-get update -qq && apt-get install -y -qq iproute2 nftables podman")
-            T_NEXTEST=$(_par nextest-install bash -c '"'"'
+            _par apt-deps bash -c "apt-get update -qq && apt-get install -y -qq iproute2 nftables podman"
+            _par nextest-install bash -c '"'"'
               if ! command -v cargo-nextest >/dev/null; then
                 ARCH=$(uname -m)
                 case "$ARCH" in
@@ -158,10 +162,9 @@ pre-push:
                 esac
                 curl -LsSf "$NEXTEST_URL" | tar zxf - -C /usr/local/cargo/bin
               fi
-            '"'"')
-            T_RUSTUP=$(_par rustup-1.91 rustup toolchain install 1.91 --profile minimal --no-self-update)
-            echo "::endgroup::"
-            _wait_all "$T_APT" "$T_NEXTEST" "$T_RUSTUP"
+            '"'"'
+            _par rustup-1.91 rustup toolchain install 1.91 --profile minimal --no-self-update
+            _wait_all
 
             # ─── 1. msrv-check / linux ────────────────────────────
             # CI MSRV pin is 1.91 (see ci.yml). The 1.91 toolchain was
@@ -214,12 +217,10 @@ pre-push:
             # Three independent test binaries (--test conformance per
             # plugin crate). Build phases queue briefly on the cargo
             # lock; test executions overlap.
-            echo "::group::conformance-launch"
-            T_CONF_A=$(_par conformance-anthropic cargo nextest run -p anthropic --test conformance --target-dir $TARGET)
-            T_CONF_O=$(_par conformance-ollama    cargo nextest run -p ollama    --test conformance --target-dir $TARGET)
-            T_CONF_P=$(_par conformance-openai    cargo nextest run -p openai    --test conformance --target-dir $TARGET)
-            echo "::endgroup::"
-            _wait_all "$T_CONF_A" "$T_CONF_O" "$T_CONF_P"
+            _par conformance-anthropic cargo nextest run -p anthropic --test conformance --target-dir $TARGET
+            _par conformance-ollama    cargo nextest run -p ollama    --test conformance --target-dir $TARGET
+            _par conformance-openai    cargo nextest run -p openai    --test conformance --target-dir $TARGET
+            _wait_all
 
             # ─── 7. xtask-plugin-images (DooD) ────────────────────
             # MUST run before the parallel e2e block because
@@ -236,10 +237,8 @@ pre-push:
             # Three independent crate test runs with --features
             # integration-tests. Build phases queue briefly on the
             # cargo lock; test executions overlap.
-            echo "::group::e2e-launch"
-            T_E2E_RT=$(_par e2e-tau-runtime         cargo nextest run -p tau-runtime         --features integration-tests --tests --target-dir $TARGET)
-            T_E2E_SB=$(_par e2e-tau-sandbox-native  cargo nextest run -p tau-sandbox-native  --features integration-tests --tests --target-dir $TARGET)
-            T_E2E_PC=$(_par e2e-tau-plugin-compat   cargo nextest run -p tau-plugin-compat   --features integration-tests --tests --target-dir $TARGET)
-            echo "::endgroup::"
-            _wait_all "$T_E2E_RT" "$T_E2E_SB" "$T_E2E_PC"
+            _par e2e-tau-runtime         cargo nextest run -p tau-runtime         --features integration-tests --tests --target-dir $TARGET
+            _par e2e-tau-sandbox-native  cargo nextest run -p tau-sandbox-native  --features integration-tests --tests --target-dir $TARGET
+            _par e2e-tau-plugin-compat   cargo nextest run -p tau-plugin-compat   --features integration-tests --tests --target-dir $TARGET
+            _wait_all
           '
