@@ -140,6 +140,21 @@ Each scope owns its own:
 
 ## The install lifecycle: install → lock → verify → run
 
+```mermaid
+flowchart TD
+    S[("git URL / file://<br/>source")] --> C["1. clone to temp"]
+    C --> P["2. parse + validate<br/>tau.toml"]
+    P --> X["3. sandbox cross-check<br/>scope ⨯ plugin tier"]
+    X --> D["4. resolve dependencies<br/>recursive fetch"]
+    D --> H["5. hash content +<br/>write to packages/&lt;name&gt;/"]
+    H --> Q{"6. prompt consent<br/>(G14)"}
+    Q -->|"accept"| LF[("lockfile entry<br/>written")]
+    Q -.->|"abort"| Z[(install fails)]
+    LF -.->|"<code>tau verify</code><br/>(later)"| H2["rehash on disk"]
+    H2 -->|"match"| OK[(ok)]
+    H2 -.->|"drift"| Z2[(SkillContentDrift)]
+```
+
 A successful `tau install <source>` performs roughly the following:
 
 1. **Clone** the source into a temp location (tau-pkg).

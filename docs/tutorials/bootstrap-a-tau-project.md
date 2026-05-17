@@ -164,6 +164,35 @@ lockfile is the resolved truth, hashed and version-pinned.
 
 ## Step 5: understand the agent loop (conceptual)
 
+```mermaid
+sequenceDiagram
+    actor User
+    participant CLI as <code>tau chat</code>
+    participant Kernel as Runtime kernel
+    participant Sandbox as Sandbox adapter
+    participant LLM as LLM-backend<br/>plugin
+    participant Tool as Tool plugin
+
+    User->>CLI: tau chat example
+    CLI->>CLI: load tau.toml + lockfile
+    CLI->>Sandbox: resolve adapter per plugin
+    Sandbox->>LLM: spawn (wrapped)
+    Sandbox->>Tool: spawn (wrapped)
+    loop until /exit
+        User->>CLI: prompt
+        CLI->>Kernel: Message
+        Kernel->>LLM: completion request
+        LLM-->>Kernel: stream tokens + tool calls
+        Kernel->>Tool: tool.call (capability-checked)
+        Tool-->>Kernel: result
+        Kernel-->>CLI: tokens
+        CLI-->>User: rendered output
+    end
+    User->>CLI: /exit
+    CLI->>LLM: kill (drop)
+    CLI->>Tool: kill (drop)
+```
+
 Here's what would happen on a fully-wired `tau chat example`:
 
 1. **Load `tau.toml`**: parse `[agents.example]`.
