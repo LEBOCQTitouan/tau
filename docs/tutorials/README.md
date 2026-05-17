@@ -10,6 +10,10 @@ arc over completeness.
 
 ## Available tutorials
 
+- [Bootstrap a tau project](bootstrap-a-tau-project.md) — `tau init`,
+  read the generated `tau.toml`, discover the CLI verbs, and trace
+  what each step of the agent loop does. Start here if you have
+  never used tau before.
 - [Build your first skill](build-your-first-skill.md) — author a
   `praise-poet` skill from scratch: `SKILL.md` + `tau.toml`, install it
   locally, invoke it from an agent, and export it for an Anthropic
