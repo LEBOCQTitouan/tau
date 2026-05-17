@@ -40,6 +40,7 @@
 - [Packages](explanation/packages.md)
 - [Capabilities and consent](explanation/capabilities-and-consent.md)
 - [Sandboxing](explanation/sandboxing.md)
+- [Multi-agent orchestration](explanation/multi-agent-orchestration.md)
 - [Escape hatches](explanation/escape-hatches.md)
 - [tau as language](explanation/tau-as-language.md)
 - [Two-layer skills](explanation/two-layer-skills.md)

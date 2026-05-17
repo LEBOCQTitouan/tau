@@ -28,6 +28,11 @@ specific decision at a specific date.
   (`none` / `light` / `strict`), the adapter set per platform, the
   four-layer enforcement model, and what sandboxing is *not*
   designed to do.
+- [Multi-agent orchestration](multi-agent-orchestration.md) — six
+  entities, three channels, six invariants, and the five
+  tree-topology patterns the kernel composes (linear, worker-pool,
+  plan-revise, supervisor/critic, hierarchical). What this rules
+  out and why.
 - [Tau as language](tau-as-language.md) — the framing that "tau is a
   language for installing and running agents," what that buys, and
   what it costs.
