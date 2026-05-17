@@ -18,13 +18,24 @@ use tokio::task::LocalSet;
 pub struct Harness {
     pub in_tx: mpsc::Sender<Inbound>,
     pub out_rx: mpsc::Receiver<Outbound>,
+    /// Exposed so tests can pre-register in-flight tokens (e.g. concurrency tests).
+    pub cancel_reg: CancelRegistry,
     /// Keeps the dispatcher thread alive until Harness is dropped.
-    _dispatcher_thread: std::thread::JoinHandle<()>,
+    /// Public so shutdown tests can `.join()` on it after sending Eof.
+    pub dispatcher_thread: std::thread::JoinHandle<()>,
 }
 
 impl Harness {
-    /// Build a Harness from a fixture project directory.
+    /// Build a Harness from a fixture project directory with `max_concurrent = 8`.
     pub async fn new(fixture_dir: PathBuf) -> Self {
+        Self::with_options(fixture_dir, 8).await
+    }
+
+    /// Build a Harness with a custom `max_concurrent` cap.
+    ///
+    /// Used by concurrency tests to set a tight cap (e.g. 1) and observe
+    /// the `-32004 SERVER_BUSY` error when the cap is reached.
+    pub async fn with_options(fixture_dir: PathBuf, max_concurrent: usize) -> Self {
         let (in_tx, in_rx) = mpsc::channel::<Inbound>(32);
         let (out_tx, out_rx) = mpsc::channel::<Outbound>(64);
 
@@ -41,12 +52,16 @@ impl Harness {
                 .expect("build runtime"),
         );
 
+        // Shared cancel_reg: exposed on Harness so tests can pre-register
+        // in-flight tokens to simulate a saturated concurrency cap.
+        let cancel_reg = CancelRegistry::default();
+
         let dispatcher = Dispatcher {
             project,
             runtime,
             handshake: HandshakeState::default(),
-            cancel_reg: CancelRegistry::default(),
-            max_concurrent: 8,
+            cancel_reg: cancel_reg.clone(),
+            max_concurrent,
             out_tx,
         };
 
@@ -68,8 +83,17 @@ impl Harness {
         Self {
             in_tx,
             out_rx,
-            _dispatcher_thread: thread,
+            cancel_reg,
+            dispatcher_thread: thread,
         }
+    }
+
+    /// Perform a successful handshake. Must be called before any runtime.*
+    /// method. Returns the handshake response (panics if none arrives).
+    pub async fn handshake(&mut self) {
+        self.send_raw(r#"{"jsonrpc":"2.0","id":0,"method":"meta.handshake","params":{"protocol_version":1}}"#).await;
+        let resp = self.recv().await.expect("handshake response");
+        assert_eq!(resp["result"]["protocol_version"], 1, "handshake failed: {resp}");
     }
 
     /// Send a raw JSON line to the dispatcher.
@@ -78,9 +102,22 @@ impl Harness {
         let _ = self.in_tx.send(Inbound::Json(v)).await;
     }
 
+    /// Send an `Inbound::Eof` to signal clean shutdown.
+    pub async fn send_eof(&self) {
+        let _ = self.in_tx.send(Inbound::Eof).await;
+    }
+
     /// Receive the next outbound message, with a 500 ms timeout.
     pub async fn recv(&mut self) -> Option<Value> {
         match tokio::time::timeout(Duration::from_millis(500), self.out_rx.recv()).await {
+            Ok(Some(out)) => serde_json::to_value(&out).ok(),
+            _ => None,
+        }
+    }
+
+    /// Receive the next outbound message, with a custom timeout.
+    pub async fn recv_timeout(&mut self, ms: u64) -> Option<Value> {
+        match tokio::time::timeout(Duration::from_millis(ms), self.out_rx.recv()).await {
             Ok(Some(out)) => serde_json::to_value(&out).ok(),
             _ => None,
         }
