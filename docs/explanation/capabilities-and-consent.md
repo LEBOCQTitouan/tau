@@ -50,14 +50,18 @@ This is the most important distinction in the model. The package
 manifest *declares* capabilities the plugin *needs*. The lockfile,
 after user consent, records what was *granted*. These can differ.
 
-```
-┌─────────────────┐     install     ┌─────────────────┐
-│ tau.toml        │ ──────────────► │ Lockfile        │
-│ (declared)      │   user consents │ (granted)       │
-│ fs.read, net... │                 │ fs.read, net... │
-└─────────────────┘                 └─────────────────┘
-       (need)                              (grant)
-```
+```mermaid
+flowchart LR
+    M["tau.toml<br/><i>declared</i><br/>fs.read, net.http, …"]
+    P{{"<code>tau install</code><br/>user consents?"}}
+    L["lockfile<br/><i>granted</i><br/>(possibly narrowed)"]
+    O["project override<br/><code>[agents.&lt;id&gt;]</code>"]
+    R["runtime<br/>+ kernel"]
+    M -->|"need"| P
+    P -->|"yes"| L
+    P -.->|"no — abort"| X[(install fails)]
+    O -.->|"narrows"| L
+    L -->|"grant"| R
 
 A plugin author publishes `tau.toml` saying "I need `fs.read` on
 `${PROJECT}/**` and `net.http` to `api.example.com`". `tau install`
@@ -132,14 +136,14 @@ When the resolver picks a sandbox adapter (ADR-0015 Decision 4), it
 doesn't reason about individual paths or hostnames — it reasons
 about *shapes*. The `CapabilityShape` enum erases payload details:
 
-```
-fs.read paths=[...]      ──► FilesystemRead
-fs.write paths=[...]     ──► FilesystemWrite
-fs.exec paths=[...]      ──► ProcessExec
-net.http hosts=[...]     ──► NetworkHttp
-agent.spawn ...          ──► AgentSpawn
-skill.spawn ...          ──► SkillSpawn
-Custom { name=... }      ──► Custom { name }
+```text
+fs.read paths=[…]        ──► FilesystemRead
+fs.write paths=[…]       ──► FilesystemWrite
+fs.exec paths=[…]        ──► ProcessExec
+net.http hosts=[…]       ──► NetworkHttp
+agent.spawn …            ──► AgentSpawn
+skill.spawn …            ──► SkillSpawn
+Custom { name=… }        ──► Custom { name }
 ```
 
 Adapters advertise the shapes they can satisfy. The resolver checks
