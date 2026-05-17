@@ -186,7 +186,7 @@ pre-push:
             echo "::endgroup::"
 
             # ─── 4. build-fixtures / linux ────────────────────────
-            # Release binaries consumed by jobs 6, 7, 8, 10.
+            # Release binaries consumed by stages 6, 7, 8.
             echo "::group::build-fixtures"
             cargo build --release \
               -p anthropic -p ollama -p openai \
