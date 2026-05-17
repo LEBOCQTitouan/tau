@@ -33,7 +33,6 @@ on:
   pull_request:
   merge_group:
     types: [checks_requested]
-    branches: [main]
 
 concurrency:
   group: ci-summary-${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
