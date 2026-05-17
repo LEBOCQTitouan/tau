@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use tau_domain::{AgentDefinition, AgentId, PackageId, PackageManifest, PackageName, Value};
-use tau_pkg::{ManifestReadError, RegistryError, Scope};
+use crate::{ManifestReadError, RegistryError, Scope};
 
 use super::project::{AgentEntry, PromptEntry};
 
@@ -166,14 +166,14 @@ pub fn build_agent_definition(
         })?;
 
     // Step 2: list installed packages.
-    let installed = tau_pkg::list(scope).map_err(|source| AgentResolutionError::Registry {
+    let installed = crate::list(scope).map_err(|source| AgentResolutionError::Registry {
         agent_id: entry.id.clone(),
         source,
     })?;
 
     // Filter to packages with the requested name. If none match, the
     // package isn't installed at all.
-    let matching: Vec<&tau_pkg::LockedPackage> = installed
+    let matching: Vec<&crate::LockedPackage> = installed
         .iter()
         .filter(|pkg| pkg.name == pkg_name)
         .collect();
@@ -209,7 +209,7 @@ pub fn build_agent_definition(
     let manifest_path = scope
         .package_dir(&pkg_name, &resolved_version)
         .join("tau.toml");
-    let manifest = tau_pkg::read_manifest(&manifest_path).map_err(|source| {
+    let manifest = crate::read_manifest(&manifest_path).map_err(|source| {
         AgentResolutionError::ManifestRead {
             agent_id: entry.id.clone(),
             source,
@@ -327,7 +327,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::config::project::{AgentEntry, PromptEntry, RequiresEntry};
+    use crate::project::project::{AgentEntry, PromptEntry, RequiresEntry};
 
     // ---- helpers ----
 
@@ -593,13 +593,13 @@ generated_at = "{now_rfc3339}"
         }
     }
 
-    /// Build a `tau_pkg::RequiredTool` for use in tests.
+    /// Build a `crate::RequiredTool` for use in tests.
     ///
     /// Task 5 will lift this helper into `tests/common/mod.rs` for
     /// cross-test reuse. Placed here temporarily.
-    fn make_required_tool(name: &str, source_url: &str, version: &str) -> tau_pkg::RequiredTool {
+    fn make_required_tool(name: &str, source_url: &str, version: &str) -> crate::RequiredTool {
         use std::str::FromStr;
-        tau_pkg::RequiredTool::new(
+        crate::RequiredTool::new(
             tau_domain::PackageName::from_str(name).unwrap(),
             tau_domain::PackageSource::from_str(source_url).unwrap(),
             semver::VersionReq::parse(version).unwrap(),

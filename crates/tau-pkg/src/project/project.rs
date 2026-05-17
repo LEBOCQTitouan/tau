@@ -176,7 +176,35 @@ pub struct AgentEntry {
     /// check runs at `tau run` time (in tau-runtime) and at
     /// `tau list --capabilities` rendering time. Empty = no override
     /// (effective grant = package manifest verbatim).
-    pub capability_overrides: Vec<tau_runtime::capability_override::CapabilityOverride>,
+    pub capability_overrides: Vec<crate::capability_override::CapabilityOverride>,
+}
+
+impl AgentEntry {
+    /// Construct an `AgentEntry`. Required because the struct is
+    /// `#[non_exhaustive]` — callers outside this crate cannot use
+    /// struct-literal syntax.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        id: String,
+        display_name: String,
+        package: String,
+        llm_backend: String,
+        requires: RequiresEntry,
+        config: BTreeMap<String, toml::Value>,
+        prompt: PromptEntry,
+        capability_overrides: Vec<crate::capability_override::CapabilityOverride>,
+    ) -> Self {
+        Self {
+            id,
+            display_name,
+            package,
+            llm_backend,
+            requires,
+            config,
+            prompt,
+            capability_overrides,
+        }
+    }
 }
 
 /// Validated `requires` sub-table.
@@ -186,7 +214,7 @@ pub struct RequiresEntry {
     /// Required tool packages with explicit source + optional version
     /// constraint. Resolved + installed at `tau run`/`tau chat`/`tau resolve`
     /// time via `tau_pkg::resolve_requires_tools`.
-    pub tools: Vec<tau_pkg::RequiredTool>,
+    pub tools: Vec<crate::RequiredTool>,
 }
 
 /// Validated prompt selection. `system` and `system_file` are mutually
@@ -331,7 +359,7 @@ fn validate_agent(id: String, raw: UncheckedAgent) -> Result<AgentEntry, Project
     // at `tau run` time (Task 5) and at `tau list --capabilities`
     // rendering time (Task 9); here we only validate parse-local
     // invariants (duplicate kinds).
-    let capability_overrides: Vec<tau_runtime::capability_override::CapabilityOverride> = raw
+    let capability_overrides: Vec<crate::capability_override::CapabilityOverride> = raw
         .capabilities
         .iter()
         .map(unchecked_to_capability_override)
@@ -364,7 +392,7 @@ fn validate_agent(id: String, raw: UncheckedAgent) -> Result<AgentEntry, Project
     let requires = match raw.requires {
         None => RequiresEntry::default(),
         Some(r) => {
-            let mut tools: Vec<tau_pkg::RequiredTool> = Vec::with_capacity(r.tools.len());
+            let mut tools: Vec<crate::RequiredTool> = Vec::with_capacity(r.tools.len());
             for raw_tool in r.tools {
                 let name = tau_domain::PackageName::from_str(&raw_tool.name).map_err(|e| {
                     ProjectConfigError::AgentValidation {
@@ -387,7 +415,7 @@ fn validate_agent(id: String, raw: UncheckedAgent) -> Result<AgentEntry, Project
                         }
                     })?,
                 };
-                tools.push(tau_pkg::RequiredTool::new(
+                tools.push(crate::RequiredTool::new(
                     name,
                     raw_tool.source,
                     version_req,
@@ -416,8 +444,8 @@ fn validate_agent(id: String, raw: UncheckedAgent) -> Result<AgentEntry, Project
 
 fn unchecked_to_capability_override(
     raw: &UncheckedCapabilityOverride,
-) -> tau_runtime::capability_override::CapabilityOverride {
-    use tau_runtime::capability_override::CapabilityOverride;
+) -> crate::capability_override::CapabilityOverride {
+    use crate::capability_override::CapabilityOverride;
 
     // Fold the kind-specific allow_* / deny_* fields into a single
     // `(allow, deny)` pair. The runtime cap_kind() picks the right

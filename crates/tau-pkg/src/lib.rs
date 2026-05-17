@@ -18,11 +18,13 @@
 //!
 //! See `docs/decisions/0004-tau-pkg.md` for the design rationale.
 
+pub mod capability_override;
 pub mod error;
 pub(crate) mod git;
 pub mod install;
 pub mod lockfile;
 pub mod manifest;
+pub mod project;
 pub mod registry;
 pub mod resolve;
 pub mod sandbox_check;
@@ -58,4 +60,8 @@ pub use update::{update_package, UpdateError, UpdateResult};
 pub use verify::{
     verify, verify_all, verify_all_with_options, AnthropicConformanceIssue, VerifyError,
     VerifyReport, VerifyStatus,
+};
+pub use project::{
+    build_agent_definition, AgentEntry, AgentResolutionError, ProjectConfig, ProjectConfigError,
+    PromptEntry, RequiresEntry,
 };
