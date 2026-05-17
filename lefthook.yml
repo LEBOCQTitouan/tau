@@ -108,18 +108,6 @@ pre-push:
           docker.io/library/rust:1.82-bookworm \
           bash -c '
             set -e
-            apt-get update -qq
-            apt-get install -y -qq iproute2 nftables podman
-
-            # Install cargo-nextest (not bundled with the rust image).
-            if ! command -v cargo-nextest >/dev/null; then
-              ARCH=$(uname -m)
-              case "$ARCH" in
-                aarch64) NEXTEST_URL="https://get.nexte.st/latest/linux-arm" ;;
-                *)       NEXTEST_URL="https://get.nexte.st/latest/linux" ;;
-              esac
-              curl -LsSf "$NEXTEST_URL" | tar zxf - -C /usr/local/cargo/bin
-            fi
 
             # Use --target-dir (not CARGO_TARGET_DIR env) so child `cargo build`
             # calls spawned by tests are not redirected to the wrong path.
@@ -154,12 +142,31 @@ pre-push:
               return $fail
             }
 
+            # ─── 0. parallel setup ────────────────────────────────
+            # apt-get, cargo-nextest, and rustup MSRV install are
+            # independent of each other and of cargo. Run them
+            # concurrently via _par/_wait_all to save the difference
+            # between sum(setup tasks) and max(setup tasks).
+            echo "::group::setup-launch"
+            T_APT=$(_par apt-deps bash -c "apt-get update -qq && apt-get install -y -qq iproute2 nftables podman")
+            T_NEXTEST=$(_par nextest-install bash -c '"'"'
+              if ! command -v cargo-nextest >/dev/null; then
+                ARCH=$(uname -m)
+                case "$ARCH" in
+                  aarch64) NEXTEST_URL="https://get.nexte.st/latest/linux-arm" ;;
+                  *)       NEXTEST_URL="https://get.nexte.st/latest/linux" ;;
+                esac
+                curl -LsSf "$NEXTEST_URL" | tar zxf - -C /usr/local/cargo/bin
+              fi
+            '"'"')
+            T_RUSTUP=$(_par rustup-1.91 rustup toolchain install 1.91 --profile minimal --no-self-update)
+            echo "::endgroup::"
+            _wait_all "$T_APT" "$T_NEXTEST" "$T_RUSTUP"
+
             # ─── 1. msrv-check / linux ────────────────────────────
-            # CI MSRV pin is 1.91 (see ci.yml). Install + use rustup
-            # to invoke it inline so we do not pollute the default
-            # toolchain in the persistent volume.
+            # CI MSRV pin is 1.91 (see ci.yml). The 1.91 toolchain was
+            # installed in Stage 0 in parallel with apt-deps.
             echo "::group::msrv-check"
-            rustup toolchain install 1.91 --profile minimal --no-self-update >/dev/null
             cargo +1.91 check --workspace --all-targets --locked --target-dir $TARGET
             echo "::endgroup::"
 
