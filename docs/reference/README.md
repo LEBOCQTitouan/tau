@@ -18,14 +18,18 @@ Reference content split:
 
 ## Pages
 
+- [Package manifest schema](package-manifest-schema.md) — full
+  schema for `tau.toml`: top-level fields, `[plugin]`, `[sandbox]`,
+  every `[[capabilities]]` variant and its payload, validation rules,
+  and reserved param names.
+- [Skill manifest schema](skill-manifest-schema.md) — the
+  `kind = "skill"` specifics that layer on top of the package
+  manifest: the `[skill]` block, `SKILL.md` frontmatter,
+  `${SKILL_DIR}` substitution, and lockfile entries.
 - [Sandbox platform support](sandbox-platform-support.md) — the kernel
   features required by tau's native sandbox adapter, the distros
   tested in CI, and the known limitations of the current v0.1
   enforcement.
-- [Skill manifest schema](skill-manifest-schema.md) — complete schema
-  for tau skill packages: `tau.toml` layout for `kind = "skill"`, the
-  `[skill]` block, `SKILL.md` frontmatter, every capability shape, the
-  `${SKILL_DIR}` substitution rules, and lockfile entries.
 
 ## See also
 
