@@ -16,6 +16,7 @@ preferred-dark-theme = "navy"
 git-repository-url = "https://github.com/titouanlebocq/tau"
 edit-url-template = "https://github.com/titouanlebocq/tau/edit/main/docs/{path}"
 no-section-label = true
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
 
 [output.html.search]
 enable = true
@@ -38,3 +39,8 @@ exclude = [
   "superpowers/.*",
   "retrospectives/.*",
 ]
+
+[preprocessor]
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"

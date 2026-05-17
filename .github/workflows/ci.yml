@@ -40,6 +40,32 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    # Detect whether the PR touches anything other than test code, so the
+    # heavy integration jobs (build-fixtures-linux, test-conformance,
+    # test-tau-plugin-compat, the two e2e jobs) can be skipped on
+    # tests-only PRs.
+    #
+    # `tests_only` is true ONLY if every changed file matches the listed
+    # patterns — `predicate-quantifier: every` enforces this. Source-code
+    # or Cargo.toml changes flip it to false and the heavy jobs run as
+    # before. dorny/paths-filter uses the action's own logic; no untrusted
+    # github.event interpolation is involved.
+    name: detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      tests_only: ${{ steps.filter.outputs.tests_only }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          predicate-quantifier: 'every'
+          filters: |
+            tests_only:
+              - 'crates/**/tests/**'
+              - 'crates/**/benches/**'
+
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
@@ -167,7 +193,12 @@ jobs:
           done
 
   build-fixtures-linux:
+    # Skip on tests-only PRs — downstream integration jobs that consume
+    # these binaries are also gated below. fmt/clippy/msrv/test-stable
+    # still run.
     name: build-fixtures / linux
+    needs: changes
+    if: needs.changes.outputs.tests_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -235,7 +266,8 @@ jobs:
 
   test-conformance:
     name: test (conformance)
-    needs: build-fixtures-linux
+    needs: [changes, build-fixtures-linux]
+    if: needs.changes.outputs.tests_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -256,7 +288,8 @@ jobs:
 
   test-tau-plugin-compat:
     name: test (tau-plugin-compat / linux)
-    needs: build-fixtures-linux
+    needs: [changes, build-fixtures-linux]
+    if: needs.changes.outputs.tests_only != 'true'
     runs-on: ubuntu-latest
     env:
       # GHA Linux runners ship both podman and docker. The xtask + adapter
@@ -299,7 +332,8 @@ jobs:
 
   test-tau-sandbox-native-e2e:
     name: test (tau-sandbox-native e2e / linux)
-    needs: build-fixtures-linux
+    needs: [changes, build-fixtures-linux]
+    if: needs.changes.outputs.tests_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -319,7 +353,8 @@ jobs:
 
   test-tau-runtime-e2e:
     name: test (tau-runtime e2e / linux)
-    needs: build-fixtures-linux
+    needs: [changes, build-fixtures-linux]
+    if: needs.changes.outputs.tests_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

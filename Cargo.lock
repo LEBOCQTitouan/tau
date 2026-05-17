@@ -94,6 +94,7 @@ dependencies = [
 name = "anthropic"
 version = "0.0.0"
 dependencies = [
+ "assert_matches",
  "async-stream",
  "eventsource-stream",
  "futures-core",

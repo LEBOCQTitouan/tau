@@ -3,6 +3,7 @@
 mod common;
 
 use anthropic_plugin_lib::plugin::AnthropicPlugin;
+use assert_matches::assert_matches;
 use common::cassette;
 use tau_plugin_sdk::Configure;
 use tau_ports::{LlmBackend, LlmError};
@@ -77,9 +78,7 @@ async fn complete_429_exhausted_returns_rate_limited() {
         AnthropicPlugin::from_config(common::test_config_with_retry(server.uri().into(), 3, 0))
             .unwrap();
     let err = plugin.complete(common::sample_request()).await.unwrap_err();
-    let LlmError::RateLimited { .. } = err else {
-        panic!("expected RateLimited, got {err:?}");
-    };
+    assert_matches!(err, LlmError::RateLimited { .. });
     assert_eq!(server.received_requests().len(), 3);
 }
 
@@ -90,12 +89,14 @@ async fn complete_401_auth_failure_does_not_retry() {
         AnthropicPlugin::from_config(common::test_config_with_retry(server.uri().into(), 3, 0))
             .unwrap();
     let err = plugin.complete(common::sample_request()).await.unwrap_err();
-    let LlmError::Auth { ref message } = err else {
-        panic!("expected Auth, got {err:?}");
-    };
-    assert!(
-        message.contains("invalid x-api-key"),
-        "unexpected error message: {message}",
+    assert_matches!(
+        &err,
+        LlmError::Auth { message } => {
+            assert!(
+                message.contains("invalid x-api-key"),
+                "unexpected error message: {message}",
+            );
+        }
     );
     assert_eq!(server.received_requests().len(), 1, "401 must not retry");
 }
@@ -107,12 +108,14 @@ async fn complete_400_bad_request_does_not_retry() {
         AnthropicPlugin::from_config(common::test_config_with_retry(server.uri().into(), 3, 0))
             .unwrap();
     let err = plugin.complete(common::sample_request()).await.unwrap_err();
-    let LlmError::InvalidRequest { ref reason } = err else {
-        panic!("expected InvalidRequest, got {err:?}");
-    };
-    assert!(
-        reason.contains("anthropic bad request"),
-        "unexpected error reason: {reason}",
+    assert_matches!(
+        &err,
+        LlmError::InvalidRequest { reason } => {
+            assert!(
+                reason.contains("anthropic bad request"),
+                "unexpected error reason: {reason}",
+            );
+        }
     );
     assert_eq!(server.received_requests().len(), 1, "400 must not retry");
 }
