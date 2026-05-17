@@ -18,11 +18,13 @@
 //!
 //! See `docs/decisions/0004-tau-pkg.md` for the design rationale.
 
+pub mod capability_override;
 pub mod error;
 pub(crate) mod git;
 pub mod install;
 pub mod lockfile;
 pub mod manifest;
+pub mod project;
 pub mod registry;
 pub mod resolve;
 pub mod sandbox_check;
@@ -43,6 +45,10 @@ pub use install::{
 };
 pub use lockfile::{LockFile, LockedPackage, LockedPlugin, LockedVersion, SynthesizedSource};
 pub use manifest::read_manifest;
+pub use project::{
+    build_agent_definition, AgentEntry, AgentResolutionError, ProjectConfig, ProjectConfigError,
+    PromptEntry, RequiresEntry,
+};
 pub use registry::{get, list};
 pub use resolve::{
     resolve_requires_tools, PlannedInstall, RequiredTool, ResolutionPlan, ResolveError,

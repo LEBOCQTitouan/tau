@@ -414,16 +414,16 @@ mod tests {
     use crate::config::project::{PromptEntry, RequiresEntry};
 
     fn make_entry(config: BTreeMap<String, toml::Value>) -> AgentEntry {
-        AgentEntry {
-            id: "reviewer".into(),
-            display_name: "Code Reviewer".into(),
-            package: "code-reviewer@^0.1".into(),
-            llm_backend: "anthropic".into(),
-            requires: RequiresEntry::default(),
+        AgentEntry::new(
+            "reviewer".into(),
+            "Code Reviewer".into(),
+            "code-reviewer@^0.1".into(),
+            "anthropic".into(),
+            RequiresEntry::default(),
             config,
-            prompt: PromptEntry::None,
-            capability_overrides: Vec::new(),
-        }
+            PromptEntry::None,
+            Vec::new(),
+        )
     }
 
     #[test]
