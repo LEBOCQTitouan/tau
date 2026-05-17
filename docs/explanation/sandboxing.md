@@ -98,13 +98,22 @@ A static `AdapterRegistration` slice in `tau-runtime::sandbox::resolver`
 lists every adapter built on the current target with the tiers and
 capability *shapes* it can satisfy. At spawn time the resolver:
 
-1. Builds a `SandboxPlan` for the plugin (intersect plugin's declared
-   `[sandbox] required_tier` with the scope's `required_tier`).
-2. Walks the registry asking each registered adapter "can you
-   probe up and satisfy this plan on this host?".
-3. Returns the first match, or fails with a guided diagnostic
-   ("native adapter probed Unavailable: kernel < 5.13; container
-   adapter probed Unavailable: docker not on PATH").
+```mermaid
+flowchart TD
+    A["scope required_tier"] --> P["build<br/>SandboxPlan"]
+    B["plugin required_tier"] --> P
+    C["declared<br/>CapabilityShapes"] --> P
+    P --> W["walk adapter registry"]
+    W --> N{"native?<br/>probe ok"}
+    N -->|yes| OK[("use native")]
+    N -->|no| D{"darwin?<br/>probe ok"}
+    D -->|yes| OK2[("use darwin")]
+    D -->|no| K{"container?<br/>probe ok"}
+    K -->|yes| OK3[("use container")]
+    K -->|no| PT{"required_tier<br/>= none?"}
+    PT -->|yes| OK4[("use passthrough")]
+    PT -->|no| FAIL[("error: no adapter<br/>can satisfy plan")]
+```
 
 The user never writes "fall back to X then Y" priority chains.
 Declarative requirements + registry probe + resolver. Bazel
@@ -115,6 +124,22 @@ chain model was rejected).
 
 Sandboxing is not one step; it is four. Each layer catches a
 different class of mismatch.
+
+```mermaid
+flowchart TB
+    L1["Layer 1 — Manifest declaration<br/><code>tau.toml</code> [[capabilities]] + [sandbox]"]
+    L2["Layer 2 — Install-time cross-check<br/>manifest ↔ binary describe_capabilities"]
+    L3["Layer 3 — Pre-flight resolution<br/>SandboxPlan + adapter registry probe"]
+    L4["Layer 4 — Kernel enforcement<br/>landlock / seccomp / SBPL / proxy / AppContainer"]
+    L1 -->|"author<br/>claim"| L2
+    L2 -->|"lockfile<br/>granted"| L3
+    L3 -->|"adapter<br/>chosen"| L4
+    L1 -.->|"InstallError::CrossCheck"| F1[(install aborts)]
+    L2 -.->|"resolver: no adapter"| F2[(spawn aborts)]
+    L4 -.->|"EACCES / SIGSYS / 403"| F3[("error returned<br/>to agent")]
+```
+
+Each layer catches a different class of mismatch:
 
 **Layer 1 — Manifest declaration.** The package's `tau.toml` carries
 a `[sandbox] required_tier` plus a `[[capabilities]]` block.

@@ -6,8 +6,13 @@
 > globally or per-project — with skills, tools, MCP servers, LLM
 > backends, and pipelines provided as installable packages.
 
-**Status:** Phase 0 — bootstrap. Nothing to install yet. See
-[`ROADMAP.md`](ROADMAP.md) for what is shipping next.
+**Status:** Phase 1 — runnable runtime. The package manager,
+plugin-loading, three real LLM-backend plugins, two real tool plugins,
+capability override, transitive dependency resolution, streaming, REPL
+persistence, sandboxing (Linux + macOS), workflows, multi-agent
+orchestration, and Skills are shipped or in flight. Distribution of
+installable plugin packages over public URLs is the next surface to
+firm up. See [`ROADMAP.md`](ROADMAP.md) for the live status.
 
 ## What tau is
 

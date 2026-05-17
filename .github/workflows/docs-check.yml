@@ -28,13 +28,15 @@ jobs:
           path: |
             ~/.cargo/bin/mdbook
             ~/.cargo/bin/mdbook-linkcheck
-          key: mdbook-${{ runner.os }}-mdbook-0.4-linkcheck-0.7
+            ~/.cargo/bin/mdbook-mermaid
+          key: mdbook-${{ runner.os }}-mdbook-0.4-linkcheck-0.7-mermaid-0.14
 
       - name: Install mdBook
         if: steps.cache-mdbook.outputs.cache-hit != 'true'
         run: |
           cargo install mdbook --locked --version ^0.4
           cargo install mdbook-linkcheck --locked --version ^0.7
+          cargo install mdbook-mermaid --locked --version ^0.14
 
       - name: Build docs
         working-directory: docs

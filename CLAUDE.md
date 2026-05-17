@@ -233,3 +233,35 @@ The repository is `LEBOCQTitouan/tau` (capitalized). GitHub Pages
 lowercases the owner, so the deployed site is at
 `https://lebocqtitouan.github.io/tau/latest/`. `titouanlebocq.github.io`
 returns 404 — do not confuse the two when smoke-testing a deploy.
+
+## Rule: Mermaid diagrams via `mdbook-mermaid` (pinned `^0.14`)
+
+`book.toml` declares the `mermaid` preprocessor; both docs CI
+workflows (`docs-check.yml` and `docs-deploy.yml`) install
+`mdbook-mermaid ^0.14`. The 0.14 series is the last that supports
+mdBook 0.4 — newer mdbook-mermaid (0.15+) requires mdBook 0.5+ and
+fails at the preprocessor wire protocol with "Unable to parse the
+input". Do not bump mdbook-mermaid past 0.14 without also bumping
+mdBook + mdbook-linkcheck.
+
+Local install (one-time):
+
+    cargo install mdbook-mermaid --locked --version "^0.14"
+
+Authoring a diagram:
+
+    ```mermaid
+    flowchart LR
+        A[Node] --> B[Other]
+    ```
+
+Two assets are vendored in `docs/` and committed:
+`mermaid.min.js` (~2.6 MB) and `mermaid-init.js`. They are referenced
+from `book.toml`'s `additional-js`. Do not delete them — the browser
+needs them to render the diagrams.
+
+linkcheck gotcha: pulldown-cmark sees mdbook-mermaid's HTML output
+as a transparent block, but its state machine occasionally
+mis-parses untyped fenced code blocks that *follow* a mermaid block.
+Use `[…]` (Unicode ellipsis) instead of `[...]` inside such blocks,
+or tag the fence with a language (` ```text `).

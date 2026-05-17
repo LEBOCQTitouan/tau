@@ -66,7 +66,7 @@ runtime:
 |---|---|---|
 | `llm-backend` | An implementation of the LLM trait — sends messages, receives streams. Required for any agent to run (G4 + ADR-0006). | `@tau/anthropic`, `@tau/openai`, `@tau/ollama` |
 | `tool` | Callable functionality an agent can invoke (fs.read, shell, http). Tools live behind capability gates. | `@tau/fs`, `@tau/shell` |
-| `skill` | A reusable behaviour (an instruction document + optional bundled files + optional sub-tool refs). See [Two-layer skills](two-layer-skills.md). | `critic`, `pr-reviewer`, your own |
+| `skill` | A reusable behaviour (an instruction document + optional bundled files + optional sub-tool refs). See [Two-layer skills](two-layer-skills.md). | your own — no bundled reference skills ship today |
 | `pipeline` | Coordinates multiple agents through a methodology. *Not* a general-purpose workflow engine (NG5). | `stature` (downstream) |
 | `mcp-server` | A Model Context Protocol server exposed to agents as a tool surface (G10). | any MCP server, wrapped |
 | `storage` | A persistence backend for state plugins need beyond a single invocation (memory plugins, log sinks). | future |
@@ -139,6 +139,21 @@ Each scope owns its own:
 - `packages/<name>/` — the actual installed artifacts.
 
 ## The install lifecycle: install → lock → verify → run
+
+```mermaid
+flowchart TD
+    S[("git URL / file://<br/>source")] --> C["1. clone to temp"]
+    C --> P["2. parse + validate<br/>tau.toml"]
+    P --> X["3. sandbox cross-check<br/>scope ⨯ plugin tier"]
+    X --> D["4. resolve dependencies<br/>recursive fetch"]
+    D --> H["5. hash content +<br/>write to packages/&lt;name&gt;/"]
+    H --> Q{"6. prompt consent<br/>(G14)"}
+    Q -->|"accept"| LF[("lockfile entry<br/>written")]
+    Q -.->|"abort"| Z[(install fails)]
+    LF -.->|"<code>tau verify</code><br/>(later)"| H2["rehash on disk"]
+    H2 -->|"match"| OK[(ok)]
+    H2 -.->|"drift"| Z2[(SkillContentDrift)]
+```
 
 A successful `tau install <source>` performs roughly the following:
 
