@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-05-17-tau-serve-mode-design.md`
 
-**ADR (to write):** `docs/decisions/0031-tau-serve-mode.md` (per Constitution QG18).
+**ADR (to write):** `docs/decisions/0033-tau-serve-mode.md` (per Constitution QG18).
 
 ---
 
@@ -48,8 +48,8 @@
 | `crates/tau-cli/src/cmd/mod.rs` | MODIFY | Register `serve` subcommand. |
 | `crates/tau-cli/src/main.rs` | MODIFY | Wire serve subcommand into clap dispatch. |
 | `crates/tau-cli/Cargo.toml` | MODIFY | Add `tau-app` dep. |
-| `docs/decisions/0031-tau-serve-mode.md` | NEW | ADR. |
-| `docs/decisions/README.md` | MODIFY | Index entry for ADR-0031. |
+| `docs/decisions/0033-tau-serve-mode.md` | NEW | ADR. |
+| `docs/decisions/README.md` | MODIFY | Index entry for ADR-0033. |
 | `ROADMAP.md` | MODIFY | Mark §15 shipped; add closing entry. |
 | `.github/workflows/ci.yml` | MODIFY | +1 job: `test (tau-app serve / linux)`. |
 | `.lefthook.yml` | MODIFY | Add the same job to the pre-push deep-gate. |
@@ -109,7 +109,7 @@ Replace the existing 5-line stub with:
 //! second public API surface (Constitution G6 / QG12).
 //!
 //! See spec at `docs/superpowers/specs/2026-05-17-tau-serve-mode-design.md`
-//! and ADR-0031.
+//! and ADR-0033.
 
 pub mod serve;
 ```
@@ -1999,7 +1999,7 @@ If `tau-app` is not in `[workspace.dependencies]`, add it there in the workspace
 ```rust
 //! `tau serve` — start serve mode (JSON-RPC over stdio).
 //!
-//! See ADR-0031 and `docs/superpowers/specs/2026-05-17-tau-serve-mode-design.md`.
+//! See ADR-0033 and `docs/superpowers/specs/2026-05-17-tau-serve-mode-design.md`.
 
 use anyhow::Result;
 use clap::Args;
@@ -2725,14 +2725,14 @@ git commit -m "test(tau-app): Layer 3 e2e subprocess tests"
 
 ---
 
-## Task 18: ADR-0031 + roadmap update
+## Task 18: ADR-0033 + roadmap update
 
 **Files:**
-- Create: `docs/decisions/0031-tau-serve-mode.md`
+- Create: `docs/decisions/0033-tau-serve-mode.md`
 - Modify: `docs/decisions/README.md`
 - Modify: `ROADMAP.md`
 
-- [ ] **Step 1: Write `docs/decisions/0031-tau-serve-mode.md`**
+- [ ] **Step 1: Write `docs/decisions/0033-tau-serve-mode.md`**
 
 Use the existing ADR template (`docs/decisions/template.md`) and fill in:
 
@@ -2753,7 +2753,7 @@ Use the existing ADR template (`docs/decisions/template.md`) and fill in:
 Add an index entry:
 
 ```markdown
-| 0031 | [Tau serve mode v1](0031-tau-serve-mode.md) | Accepted | 2026-05-17 |
+| 0031 | [Tau serve mode v1](0033-tau-serve-mode.md) | Accepted | 2026-05-17 |
 ```
 
 - [ ] **Step 3: Update `ROADMAP.md` §15**
@@ -2763,7 +2763,7 @@ Find the §15 entry in the "Tier 4 — operational quality" section and replace 
 ```markdown
 15. **Serve mode** (JSON-RPC over stdio) ✅ Shipped 2026-05-17 — see
     [spec](docs/superpowers/specs/2026-05-17-tau-serve-mode-design.md)
-    and [ADR-0031](docs/decisions/0031-tau-serve-mode.md).
+    and [ADR-0033](docs/decisions/0033-tau-serve-mode.md).
     `tau serve` exposes runtime.run + runtime.run_streaming as JSON-RPC
     2.0 over NDJSON-framed stdio. 5 methods + 1 server-initiated
     notification in v1. One `Runtime` per process, parallel concurrent
@@ -2778,8 +2778,8 @@ Also add a short note at the top of "Current phase" that Phase 1 is complete and
 - [ ] **Step 4: Commit**
 
 ```bash
-git add docs/decisions/0031-tau-serve-mode.md docs/decisions/README.md ROADMAP.md
-git commit -m "docs(adr): ADR-0031 tau serve mode v1 + roadmap update"
+git add docs/decisions/0033-tau-serve-mode.md docs/decisions/README.md ROADMAP.md
+git commit -m "docs(adr): ADR-0033 tau serve mode v1 + roadmap update"
 ```
 
 ---
@@ -2856,7 +2856,7 @@ If the deep-gate cold-starts and exceeds time budget, follow CLAUDE.md AGENT PUS
 - [ ] **Step 2: Open PR**
 
 ```bash
-gh pr create --title "feat: tau serve mode v1 (Phase 1 §15 + ADR-0031)" --body "$(cat <<'EOF'
+gh pr create --title "feat: tau serve mode v1 (Phase 1 §15 + ADR-0033)" --body "$(cat <<'EOF'
 ## Summary
 
 - New `tau serve` subcommand: JSON-RPC 2.0 over NDJSON-framed stdio.
@@ -2866,13 +2866,13 @@ gh pr create --title "feat: tau serve mode v1 (Phase 1 §15 + ADR-0031)" --body 
 - Parallel concurrent runs over `tokio::task::LocalSet` (Runtime streams are non-`Send`); cap 8 by default.
 - Cancellation via `tokio_util::CancellationToken`.
 - Graceful shutdown on SIGTERM/SIGINT/stdin-EOF/parent-death (PDEATHSIG on Linux).
-- ADR-0031 records the protocol surface as a SemVer-stable public commitment per Constitution G6/QG12.
+- ADR-0033 records the protocol surface as a SemVer-stable public commitment per Constitution G6/QG12.
 
 Closes Phase 1 §15. Phase 2 (tau as a compiled language) is now the active phase.
 
 Spec: `docs/superpowers/specs/2026-05-17-tau-serve-mode-design.md`
 Plan: `docs/superpowers/plans/2026-05-17-tau-serve-mode.md`
-ADR: `docs/decisions/0031-tau-serve-mode.md`
+ADR: `docs/decisions/0033-tau-serve-mode.md`
 
 ## Test plan
 
@@ -2929,7 +2929,7 @@ Per memory `feedback_branch_protection_workflow`: branch protection is `strict: 
 | §8.5 Idle timeout | Task 12 (option in struct; wiring optional follow-up) |
 | §8.6 Exit codes | Task 14 (CLI exit mapping); Task 12 (anyhow propagation) |
 | §8.7 Logging to stderr | Task 12 |
-| §9 ADR-0031 | Task 18 |
+| §9 ADR-0033 | Task 18 |
 | §10 Testing (3 layers + CI) | Tasks 15, 16, 17, 19 |
 | §11 Risks | implicit; idle-timeout-during-run noted in spec §11 |
 | §12 Open impl questions | resolved in Tasks 13, 14 |

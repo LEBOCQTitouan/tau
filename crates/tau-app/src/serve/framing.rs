@@ -56,8 +56,7 @@ pub async fn reader_task(tx: mpsc::Sender<Inbound>) -> Result<()> {
 pub async fn writer_task(mut rx: mpsc::Receiver<Outbound>) -> Result<()> {
     let mut stdout = tokio::io::stdout();
     while let Some(out) = rx.recv().await {
-        let mut line = serde_json::to_string(&out)
-            .context("serialize outbound message")?;
+        let mut line = serde_json::to_string(&out).context("serialize outbound message")?;
         line.push('\n');
         stdout
             .write_all(line.as_bytes())
@@ -87,11 +86,8 @@ mod tests {
         drop(tx); // close so writer exits
 
         // Smoke check: writer task completes without deadlock within timeout.
-        let res = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            writer_task(rx),
-        )
-        .await;
+        let res =
+            tokio::time::timeout(std::time::Duration::from_millis(200), writer_task(rx)).await;
         assert!(res.is_ok());
     }
 }

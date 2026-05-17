@@ -19,8 +19,7 @@ fn tau_bin() -> PathBuf {
 }
 
 fn fixture_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/e2e-handshake-only")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/e2e-handshake-only")
 }
 
 fn spawn_serve() -> (
@@ -59,11 +58,17 @@ fn recv_line(reader: &mut BufReader<std::process::ChildStdout>) -> Value {
 fn ping_before_handshake() {
     let (mut child, mut stdin, mut reader) = spawn_serve();
 
-    send_line(&mut stdin, r#"{"jsonrpc":"2.0","id":1,"method":"meta.ping"}"#);
+    send_line(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"meta.ping"}"#,
+    );
     let resp = recv_line(&mut reader);
 
     assert_eq!(resp["id"], 1, "unexpected response: {resp}");
-    assert_eq!(resp["result"]["ok"], true, "ping returned unexpected body: {resp}");
+    assert_eq!(
+        resp["result"]["ok"], true,
+        "ping returned unexpected body: {resp}"
+    );
 
     drop(stdin);
     let _ = child.wait();
@@ -112,11 +117,17 @@ fn ping_after_handshake() {
     let _ = recv_line(&mut reader);
 
     // Now ping.
-    send_line(&mut stdin, r#"{"jsonrpc":"2.0","id":11,"method":"meta.ping"}"#);
+    send_line(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":11,"method":"meta.ping"}"#,
+    );
     let resp = recv_line(&mut reader);
 
     assert_eq!(resp["id"], 11, "unexpected response: {resp}");
-    assert_eq!(resp["result"]["ok"], true, "ping returned unexpected body: {resp}");
+    assert_eq!(
+        resp["result"]["ok"], true,
+        "ping returned unexpected body: {resp}"
+    );
 
     drop(stdin);
     let _ = child.wait();

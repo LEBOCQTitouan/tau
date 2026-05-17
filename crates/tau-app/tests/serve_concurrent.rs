@@ -35,7 +35,10 @@ async fn run_rejected_when_cap_reached() {
     h.send_raw(r#"{"jsonrpc":"2.0","id":40,"method":"runtime.run","params":{"agent":"any","prompt":"hello"}}"#).await;
     let resp = h.recv().await.expect("no response");
     assert_eq!(resp["id"], 40);
-    assert_eq!(resp["error"]["code"], -32004, "expected SERVER_BUSY, got: {resp}");
+    assert_eq!(
+        resp["error"]["code"], -32004,
+        "expected SERVER_BUSY, got: {resp}"
+    );
     assert!(
         resp["error"]["data"]["max_concurrent"].as_u64() == Some(1),
         "expected max_concurrent=1 in error data, got: {resp}"
@@ -53,7 +56,10 @@ async fn streaming_rejected_when_cap_reached() {
     h.send_raw(r#"{"jsonrpc":"2.0","id":41,"method":"runtime.run_streaming","params":{"agent":"any","prompt":"hello"}}"#).await;
     let resp = h.recv().await.expect("no response");
     assert_eq!(resp["id"], 41);
-    assert_eq!(resp["error"]["code"], -32004, "expected SERVER_BUSY, got: {resp}");
+    assert_eq!(
+        resp["error"]["code"], -32004,
+        "expected SERVER_BUSY, got: {resp}"
+    );
 }
 
 /// After the in-flight token is removed from the registry, the next
@@ -74,5 +80,8 @@ async fn run_allowed_after_slot_freed() {
     let resp = h.recv().await.expect("no response");
     assert_eq!(resp["id"], 42);
     // Should be UNKNOWN_AGENT (-32010), not SERVER_BUSY (-32004).
-    assert_eq!(resp["error"]["code"], -32010, "expected UNKNOWN_AGENT after slot freed, got: {resp}");
+    assert_eq!(
+        resp["error"]["code"], -32010,
+        "expected UNKNOWN_AGENT after slot freed, got: {resp}"
+    );
 }

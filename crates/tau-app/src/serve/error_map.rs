@@ -25,12 +25,13 @@ pub fn from_runtime_error(err: &RuntimeError) -> ErrorObject {
         };
     }
     match err {
-        RuntimeError::LlmBackendNotRegistered { .. }
-        | RuntimeError::ToolNotRegistered { .. } => ErrorObject {
-            code: error_codes::UNKNOWN_AGENT,
-            message: err.to_string(),
-            data: Some(json!({"kind": "UnknownAgent"})),
-        },
+        RuntimeError::LlmBackendNotRegistered { .. } | RuntimeError::ToolNotRegistered { .. } => {
+            ErrorObject {
+                code: error_codes::UNKNOWN_AGENT,
+                message: err.to_string(),
+                data: Some(json!({"kind": "UnknownAgent"})),
+            }
+        }
         RuntimeError::PluginContractViolation { .. }
         | RuntimeError::PluginSpawnFailed { .. }
         | RuntimeError::PluginHandshakeFailed { .. }
@@ -39,12 +40,13 @@ pub fn from_runtime_error(err: &RuntimeError) -> ErrorObject {
             message: err.to_string(),
             data: Some(json!({"kind": "PluginError"})),
         },
-        RuntimeError::SandboxValidationFailed { .. }
-        | RuntimeError::SandboxWrapFailed { .. } => ErrorObject {
-            code: error_codes::CAPABILITY_DENIED,
-            message: err.to_string(),
-            data: Some(json!({"kind": "SandboxError"})),
-        },
+        RuntimeError::SandboxValidationFailed { .. } | RuntimeError::SandboxWrapFailed { .. } => {
+            ErrorObject {
+                code: error_codes::CAPABILITY_DENIED,
+                message: err.to_string(),
+                data: Some(json!({"kind": "SandboxError"})),
+            }
+        }
         RuntimeError::CapabilityOverrideExpands { .. } => ErrorObject {
             code: error_codes::RUNTIME_ERROR,
             message: err.to_string(),

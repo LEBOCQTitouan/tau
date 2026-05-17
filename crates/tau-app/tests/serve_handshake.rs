@@ -25,7 +25,10 @@ async fn happy_handshake() {
 #[tokio::test]
 async fn version_mismatch() {
     let mut h = Harness::new(fixture_dir()).await;
-    h.send_raw(r#"{"jsonrpc":"2.0","id":1,"method":"meta.handshake","params":{"protocol_version":999}}"#).await;
+    h.send_raw(
+        r#"{"jsonrpc":"2.0","id":1,"method":"meta.handshake","params":{"protocol_version":999}}"#,
+    )
+    .await;
     let resp = h.recv().await.expect("no response");
     assert_eq!(resp["error"]["code"], -32000);
 }
@@ -33,7 +36,10 @@ async fn version_mismatch() {
 #[tokio::test]
 async fn pre_handshake_runtime_call_rejected() {
     let mut h = Harness::new(fixture_dir()).await;
-    h.send_raw(r#"{"jsonrpc":"2.0","id":1,"method":"runtime.run","params":{"agent":"x","prompt":"y"}}"#).await;
+    h.send_raw(
+        r#"{"jsonrpc":"2.0","id":1,"method":"runtime.run","params":{"agent":"x","prompt":"y"}}"#,
+    )
+    .await;
     let resp = h.recv().await.expect("no response");
     assert_eq!(resp["error"]["code"], -32002);
 }
@@ -41,9 +47,15 @@ async fn pre_handshake_runtime_call_rejected() {
 #[tokio::test]
 async fn double_handshake_rejected() {
     let mut h = Harness::new(fixture_dir()).await;
-    h.send_raw(r#"{"jsonrpc":"2.0","id":1,"method":"meta.handshake","params":{"protocol_version":1}}"#).await;
+    h.send_raw(
+        r#"{"jsonrpc":"2.0","id":1,"method":"meta.handshake","params":{"protocol_version":1}}"#,
+    )
+    .await;
     let _ = h.recv().await;
-    h.send_raw(r#"{"jsonrpc":"2.0","id":2,"method":"meta.handshake","params":{"protocol_version":1}}"#).await;
+    h.send_raw(
+        r#"{"jsonrpc":"2.0","id":2,"method":"meta.handshake","params":{"protocol_version":1}}"#,
+    )
+    .await;
     let resp = h.recv().await.expect("no response");
     assert_eq!(resp["error"]["code"], -32003);
 }
@@ -51,7 +63,8 @@ async fn double_handshake_rejected() {
 #[tokio::test]
 async fn ping_works_before_handshake() {
     let mut h = Harness::new(fixture_dir()).await;
-    h.send_raw(r#"{"jsonrpc":"2.0","id":1,"method":"meta.ping"}"#).await;
+    h.send_raw(r#"{"jsonrpc":"2.0","id":1,"method":"meta.ping"}"#)
+        .await;
     let resp = h.recv().await.expect("no response");
     assert_eq!(resp["result"]["ok"], true);
 }

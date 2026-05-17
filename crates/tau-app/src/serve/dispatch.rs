@@ -39,10 +39,7 @@ pub struct Dispatcher {
 
 impl Dispatcher {
     /// Main dispatch loop. Runs until `in_rx` closes (EOF / shutdown).
-    pub async fn run(
-        self,
-        mut in_rx: mpsc::Receiver<Inbound>,
-    ) -> Result<()> {
+    pub async fn run(self, mut in_rx: mpsc::Receiver<Inbound>) -> Result<()> {
         while let Some(frame) = in_rx.recv().await {
             match frame {
                 Inbound::Eof => break,
@@ -108,13 +105,16 @@ impl Dispatcher {
         }
 
         // Concurrency cap (only for runtime.run / runtime.run_streaming).
-        let is_runtime_run = req.method == methods::RUNTIME_RUN
-            || req.method == methods::RUNTIME_RUN_STREAMING;
+        let is_runtime_run =
+            req.method == methods::RUNTIME_RUN || req.method == methods::RUNTIME_RUN_STREAMING;
         if is_runtime_run && self.cancel_reg.len() >= self.max_concurrent {
             self.send_err(
                 req.id,
                 error_codes::SERVER_BUSY,
-                format!("Server busy: max_concurrent_runs={} reached", self.max_concurrent),
+                format!(
+                    "Server busy: max_concurrent_runs={} reached",
+                    self.max_concurrent
+                ),
                 Some(json!({"max_concurrent": self.max_concurrent})),
             )
             .await;
@@ -225,13 +225,7 @@ impl Dispatcher {
     }
 
     /// Send an error JSON-RPC 2.0 response to the writer task.
-    pub async fn send_err(
-        &self,
-        id: RequestId,
-        code: i32,
-        message: String,
-        data: Option<Value>,
-    ) {
+    pub async fn send_err(&self, id: RequestId, code: i32, message: String, data: Option<Value>) {
         let _ = self
             .out_tx
             .send(Outbound::Error(ErrorResponse {

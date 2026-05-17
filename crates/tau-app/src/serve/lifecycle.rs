@@ -24,9 +24,7 @@ pub async fn run(opts: ServeOptions) -> Result<()> {
             .context("load project")?,
     );
 
-    let runtime = build_runtime(&project)
-        .await
-        .context("build runtime")?;
+    let runtime = build_runtime(&project).await.context("build runtime")?;
 
     let (in_tx, in_rx) = mpsc::channel(64);
     let (out_tx, out_rx) = mpsc::channel(256);
@@ -120,10 +118,7 @@ async fn build_runtime(project: &Project) -> Result<tau_runtime::Runtime> {
         if seen_llm_backends.insert(entry.llm_backend.clone()) {
             let pkg_name: tau_domain::PackageName =
                 entry.llm_backend.parse().with_context(|| {
-                    format!(
-                        "invalid LLM backend package name {:?}",
-                        entry.llm_backend
-                    )
+                    format!("invalid LLM backend package name {:?}", entry.llm_backend)
                 })?;
             let pkg = lockfile.find(&pkg_name).ok_or_else(|| {
                 anyhow::anyhow!(
@@ -228,9 +223,9 @@ fn toml_to_json(v: toml::Value) -> serde_json::Value {
         toml::Value::Array(arr) => {
             serde_json::Value::Array(arr.into_iter().map(toml_to_json).collect())
         }
-        toml::Value::Table(t) => serde_json::Value::Object(
-            t.into_iter().map(|(k, v)| (k, toml_to_json(v))).collect(),
-        ),
+        toml::Value::Table(t) => {
+            serde_json::Value::Object(t.into_iter().map(|(k, v)| (k, toml_to_json(v))).collect())
+        }
     }
 }
 

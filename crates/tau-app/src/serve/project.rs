@@ -52,7 +52,11 @@ impl Project {
         let config = ProjectConfig::from_path(root.join("tau.toml"))
             .with_context(|| format!("parse tau.toml at {}", root.display()))?;
         let scope = Scope::resolve(&root).with_context(|| "compute scope for project root")?;
-        Ok(Self { root, scope, config })
+        Ok(Self {
+            root,
+            scope,
+            config,
+        })
     }
 
     /// Resolve an agent id to `(AgentDefinition, PackageManifest)`.
@@ -62,21 +66,14 @@ impl Project {
     ///   The dispatcher (Task 10) maps this to JSON-RPC `-32010 Unknown agent`.
     /// - Package not installed / version not satisfied / manifest invalid:
     ///   flows through the standard `AgentResolutionError` path.
-    pub fn resolve(
-        &self,
-        agent_id: &str,
-    ) -> Result<(AgentDefinition, PackageManifest)> {
-        let entry = self
-            .config
-            .agents
-            .get(agent_id)
-            .ok_or_else(|| {
-                anyhow!(
-                    "agent not found: {:?} is not defined in {}",
-                    agent_id,
-                    self.root.display()
-                )
-            })?;
+    pub fn resolve(&self, agent_id: &str) -> Result<(AgentDefinition, PackageManifest)> {
+        let entry = self.config.agents.get(agent_id).ok_or_else(|| {
+            anyhow!(
+                "agent not found: {:?} is not defined in {}",
+                agent_id,
+                self.root.display()
+            )
+        })?;
         build_agent_definition(entry, &self.root, &self.scope)
             .map_err(|e: AgentResolutionError| anyhow!(e))
     }

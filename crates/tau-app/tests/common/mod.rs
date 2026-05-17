@@ -91,9 +91,15 @@ impl Harness {
     /// Perform a successful handshake. Must be called before any runtime.*
     /// method. Returns the handshake response (panics if none arrives).
     pub async fn handshake(&mut self) {
-        self.send_raw(r#"{"jsonrpc":"2.0","id":0,"method":"meta.handshake","params":{"protocol_version":1}}"#).await;
+        self.send_raw(
+            r#"{"jsonrpc":"2.0","id":0,"method":"meta.handshake","params":{"protocol_version":1}}"#,
+        )
+        .await;
         let resp = self.recv().await.expect("handshake response");
-        assert_eq!(resp["result"]["protocol_version"], 1, "handshake failed: {resp}");
+        assert_eq!(
+            resp["result"]["protocol_version"], 1,
+            "handshake failed: {resp}"
+        );
     }
 
     /// Send a raw JSON line to the dispatcher.

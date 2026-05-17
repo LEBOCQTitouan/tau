@@ -29,7 +29,10 @@ async fn run_unknown_agent_returns_32010() {
     h.send_raw(r#"{"jsonrpc":"2.0","id":10,"method":"runtime.run","params":{"agent":"no-such-agent","prompt":"hello"}}"#).await;
     let resp = h.recv().await.expect("no response");
     assert_eq!(resp["id"], 10);
-    assert_eq!(resp["error"]["code"], -32010, "expected UNKNOWN_AGENT, got: {resp}");
+    assert_eq!(
+        resp["error"]["code"], -32010,
+        "expected UNKNOWN_AGENT, got: {resp}"
+    );
     assert!(
         resp["error"]["data"]["agent_id"] == "no-such-agent",
         "expected agent_id in error data, got: {resp}"
@@ -42,10 +45,16 @@ async fn run_missing_prompt_returns_32602() {
     let mut h = Harness::new(fixture_dir()).await;
     h.handshake().await;
 
-    h.send_raw(r#"{"jsonrpc":"2.0","id":11,"method":"runtime.run","params":{"agent":"some-agent"}}"#).await;
+    h.send_raw(
+        r#"{"jsonrpc":"2.0","id":11,"method":"runtime.run","params":{"agent":"some-agent"}}"#,
+    )
+    .await;
     let resp = h.recv().await.expect("no response");
     assert_eq!(resp["id"], 11);
-    assert_eq!(resp["error"]["code"], -32602, "expected INVALID_PARAMS, got: {resp}");
+    assert_eq!(
+        resp["error"]["code"], -32602,
+        "expected INVALID_PARAMS, got: {resp}"
+    );
 }
 
 /// `runtime.run` with a missing `agent` param returns -32602 INVALID_PARAMS.
@@ -54,10 +63,14 @@ async fn run_missing_agent_param_returns_32602() {
     let mut h = Harness::new(fixture_dir()).await;
     h.handshake().await;
 
-    h.send_raw(r#"{"jsonrpc":"2.0","id":12,"method":"runtime.run","params":{"prompt":"hello"}}"#).await;
+    h.send_raw(r#"{"jsonrpc":"2.0","id":12,"method":"runtime.run","params":{"prompt":"hello"}}"#)
+        .await;
     let resp = h.recv().await.expect("no response");
     assert_eq!(resp["id"], 12);
-    assert_eq!(resp["error"]["code"], -32602, "expected INVALID_PARAMS, got: {resp}");
+    assert_eq!(
+        resp["error"]["code"], -32602,
+        "expected INVALID_PARAMS, got: {resp}"
+    );
 }
 
 /// `runtime.run` with a null params value returns -32602 INVALID_PARAMS.
@@ -67,8 +80,12 @@ async fn run_null_params_returns_32602() {
     let mut h = Harness::new(fixture_dir()).await;
     h.handshake().await;
 
-    h.send_raw(r#"{"jsonrpc":"2.0","id":13,"method":"runtime.run","params":null}"#).await;
+    h.send_raw(r#"{"jsonrpc":"2.0","id":13,"method":"runtime.run","params":null}"#)
+        .await;
     let resp = h.recv().await.expect("no response");
     assert_eq!(resp["id"], 13);
-    assert_eq!(resp["error"]["code"], -32602, "expected INVALID_PARAMS, got: {resp}");
+    assert_eq!(
+        resp["error"]["code"], -32602,
+        "expected INVALID_PARAMS, got: {resp}"
+    );
 }

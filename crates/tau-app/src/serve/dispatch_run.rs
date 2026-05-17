@@ -94,18 +94,34 @@ pub async fn execute(disp: Dispatcher, req: Request, streaming: bool) {
     let initial = Message::new(
         Address::User,
         Address::User,
-        MessagePayload::Text {
-            content: prompt,
-        },
+        MessagePayload::Text { content: prompt },
     );
 
     let opts = RunOptions::default();
     let cancel = disp.cancel_reg.register(req.id.clone());
 
     let result: Result<(), tau_runtime::RuntimeError> = if streaming {
-        execute_streaming(&disp, req.id.clone(), agent_def, manifest, initial, opts, cancel).await
+        execute_streaming(
+            &disp,
+            req.id.clone(),
+            agent_def,
+            manifest,
+            initial,
+            opts,
+            cancel,
+        )
+        .await
     } else {
-        execute_batch(&disp, req.id.clone(), agent_def, manifest, initial, opts, cancel).await
+        execute_batch(
+            &disp,
+            req.id.clone(),
+            agent_def,
+            manifest,
+            initial,
+            opts,
+            cancel,
+        )
+        .await
     };
 
     disp.cancel_reg.forget(&req.id);
@@ -270,11 +286,19 @@ async fn emit_event(
     // dep graph (serde feature not enabled). Use Debug formatting / manual extraction.
     let (kind, data) = match event {
         RunEvent::TextDelta { delta } => ("TextDelta", json!({"text": delta})),
-        RunEvent::ToolCallStarted { id: call_id, name, args } => (
+        RunEvent::ToolCallStarted {
+            id: call_id,
+            name,
+            args,
+        } => (
             "ToolCallStarted",
             json!({"tool": name, "args": args, "call_id": call_id}),
         ),
-        RunEvent::ToolCallCompleted { id: call_id, name, result } => {
+        RunEvent::ToolCallCompleted {
+            id: call_id,
+            name,
+            result,
+        } => {
             let result_json = match result {
                 Ok(tool_result) => {
                     // ToolResult has no Serialize; extract content manually.

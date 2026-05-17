@@ -26,8 +26,7 @@ fn tau_bin() -> PathBuf {
 }
 
 fn fixture_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/e2e-handshake-only")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/e2e-handshake-only")
 }
 
 fn spawn_serve() -> (

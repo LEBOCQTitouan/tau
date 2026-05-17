@@ -2,6 +2,12 @@
 //!
 //! Standard JSON-RPC 2.0 codes plus tau-namespaced codes in the
 //! "Server error" reserved range (-32000 to -32099) per spec §6.
+//!
+//! Some constants are not yet referenced by code in this PR
+//! (`INTERNAL_ERROR`, `PROJECT_ERROR`) — they reserve protocol numbers
+//! for future variants. Suppress the unused-const lint at module level.
+
+#![allow(dead_code)]
 
 // Standard JSON-RPC 2.0 codes.
 /// Invalid JSON received on the wire.
