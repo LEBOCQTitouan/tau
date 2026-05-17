@@ -33,6 +33,10 @@ specific decision at a specific date.
   tree-topology patterns the kernel composes (linear, worker-pool,
   plan-revise, supervisor/critic, hierarchical). What this rules
   out and why.
+- [Workflows](workflows.md) — the external-script-driven
+  counterpart to in-run orchestration. Deterministic linear
+  pipelines authored in TOML, persisted as JSONL, resumable. When
+  to reach for a workflow vs in-run orchestration.
 - [Tau as language](tau-as-language.md) — the framing that "tau is a
   language for installing and running agents," what that buys, and
   what it costs.

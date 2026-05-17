@@ -18,10 +18,17 @@ Reference content split:
 
 ## Pages
 
+- [Glossary](glossary.md) — single-page normative definitions for
+  the vocabulary used across the book (`capability`, `grant`,
+  `port`, `kind`, `adapter`, `tier`, `shape`, …). Each entry
+  links to where the concept is treated in detail.
 - [Package manifest schema](package-manifest-schema.md) — full
-  schema for `tau.toml`: top-level fields, `[plugin]`, `[sandbox]`,
-  every `[[capabilities]]` variant and its payload, validation rules,
-  and reserved param names.
+  schema for the *package-side* `tau.toml`: top-level fields,
+  `[plugin]`, `[sandbox]`, every `[[capabilities]]` variant and its
+  payload, validation rules, and reserved param names.
+- [Project manifest schema](project-manifest-schema.md) — the
+  *project-side* `tau.toml` that `tau init` scaffolds: `[project]`,
+  `[agents.<id>]`, prompts, capability overrides, `requires.tools`.
 - [Skill manifest schema](skill-manifest-schema.md) — the
   `kind = "skill"` specifics that layer on top of the package
   manifest: the `[skill]` block, `SKILL.md` frontmatter,
