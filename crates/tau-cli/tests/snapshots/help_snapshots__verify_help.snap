@@ -1,5 +1,6 @@
 ---
 source: crates/tau-cli/tests/help_snapshots.rs
+assertion_line: 106
 expression: s
 ---
 Verify installed packages against the lockfile (spec §3)
@@ -16,6 +17,9 @@ Options:
 
       --global
           Use global scope
+
+      --anthropic-strict
+          Skills-5: in addition to the standard drift check, validate each installed skill against the Anthropic Agent Skills spec (non-empty description, non-empty body, well-formed frontmatter)
 
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)

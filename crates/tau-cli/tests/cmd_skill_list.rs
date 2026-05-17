@@ -4,15 +4,17 @@
 //! invocation). Uses a project scope: create `<tmp>/.tau/` so that
 //! `Scope::resolve(&cwd)` finds it when `current_dir` is `<tmp>`.
 //!
-//! Test list (6 tests, 2 insta snapshots):
-//! 1. `list_human_three_skills`              — column-aligned table, 3 skills alphabetical.
-//! 2. `list_human_empty_state`               — "no skills installed." + hint.
-//! 3. `list_json_three_skills`               — `--json` flag, assert via JSON parse.
-//! 4. `list_lockfile_schema_too_new_errors`  — schema_version=99 → SchemaTooNew (exit 2).
-//! 5. `list_lockfile_malformed_toml_errors`  — garbage TOML → parse error (exit 2).
-//! 6. `list_plugin_only_lockfile_shows_empty`— plugin packages filtered out → empty state.
+//! Test list (5 test fns, 6 cases, 2 insta snapshots):
+//! 1. `list_three_skills[human|json]`         — parametrized format-parity pilot:
+//!    same 3-skill fixture; `human` snapshots stdout, `json` asserts via
+//!    JSON parse.
+//! 2. `list_human_empty_state`                — "no skills installed." + hint.
+//! 3. `list_lockfile_schema_too_new_errors`   — schema_version=99 → SchemaTooNew (exit 2).
+//! 4. `list_lockfile_malformed_toml_errors`   — garbage TOML → parse error (exit 2).
+//! 5. `list_plugin_only_lockfile_shows_empty` — plugin packages filtered out → empty state.
 
 use assert_cmd::Command;
+use rstest::rstest;
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -29,7 +31,7 @@ use tempfile::TempDir;
 /// sub-element is opened.
 fn v5_lockfile_toml(skills: &[(&str, &str, &str)]) -> String {
     let mut s = String::from(
-        "schema_version = 5\n\
+        "schema_version = 6\n\
          generated_by_tau_version = \"0.0.0\"\n\
          generated_at = \"2026-05-12T10:00:00Z\"\n\n",
     );
@@ -98,17 +100,24 @@ fn run_skill_list(scope_root: &std::path::Path, extra_args: &[&str]) -> std::pro
 // Tests
 // ---------------------------------------------------------------------------
 
-/// Populated lockfile with 3 skills. Snapshots human output.
-/// Expects column-aligned NAME/VERSION/DESCRIPTION header + 3 alphabetical rows.
-#[test]
-fn list_human_three_skills() {
+/// Format-parity pilot (rstest): same 3-skill fixture, two output formats.
+///
+/// - `human` case: snapshots stdout (column-aligned table, 3 alphabetical rows).
+/// - `json`  case: asserts via JSON parse (length + alphabetical ordering).
+///
+/// This is the **only** parametrized pair in `cmd_skill_list`; the empty-state
+/// test below remains standalone because no JSON counterpart exists.
+#[rstest]
+#[case::human(&[], "list_human_three_skills")]
+#[case::json(&["--json"], "")]
+fn list_three_skills(#[case] extra_args: &[&str], #[case] snapshot_name: &str) {
     let skills = [
         ("fact-check", "0.2.0", "Verifies factual claims."),
         ("proofread", "1.0.0", "Proofreads prose for grammar."),
         ("critic", "0.1.0", "Reviews drafts for quality."),
     ];
     let dir = make_scope_with_skills(&skills);
-    let output = run_skill_list(dir.path(), &[]);
+    let output = run_skill_list(dir.path(), extra_args);
 
     assert!(
         output.status.success(),
@@ -117,7 +126,32 @@ fn list_human_three_skills() {
     );
 
     let stdout = String::from_utf8(output.stdout).unwrap();
-    insta::assert_snapshot!("list_human_three_skills", stdout);
+
+    if snapshot_name.is_empty() {
+        // JSON case: parse-and-assert (no snapshot).
+        let parsed: Value = serde_json::from_str(stdout.trim()).expect("valid JSON");
+        let skill_arr = parsed["skills"].as_array().expect("skills is an array");
+        assert_eq!(skill_arr.len(), 3, "expected 3 skills in JSON output");
+        // Items are alphabetical: critic < fact-check < proofread.
+        assert_eq!(
+            parsed["skills"][0]["name"],
+            Value::String("critic".into()),
+            "first skill should be 'critic' (alphabetical)"
+        );
+        assert_eq!(
+            parsed["skills"][1]["name"],
+            Value::String("fact-check".into()),
+            "second skill should be 'fact-check' (alphabetical)"
+        );
+        assert_eq!(
+            parsed["skills"][2]["name"],
+            Value::String("proofread".into()),
+            "third skill should be 'proofread' (alphabetical)"
+        );
+    } else {
+        // Human case: snapshot.
+        insta::assert_snapshot!(snapshot_name, stdout);
+    }
 }
 
 /// Empty lockfile — no skill packages installed.
@@ -135,41 +169,6 @@ fn list_human_empty_state() {
 
     let stdout = String::from_utf8(output.stdout).unwrap();
     insta::assert_snapshot!("list_human_empty_state", stdout);
-}
-
-/// Populated lockfile with 2 skills. `--json` flag. Assert via JSON parse.
-/// `parsed["skills"][0]["name"] == "critic"`, length == 2.
-#[test]
-fn list_json_three_skills() {
-    let skills = [
-        ("proofread", "1.0.0", "Proofreads prose for grammar."),
-        ("critic", "0.1.0", "Reviews drafts for quality."),
-    ];
-    let dir = make_scope_with_skills(&skills);
-    let output = run_skill_list(dir.path(), &["--json"]);
-
-    assert!(
-        output.status.success(),
-        "expected success; stderr={}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let parsed: Value = serde_json::from_str(stdout.trim()).expect("valid JSON");
-
-    let skill_arr = parsed["skills"].as_array().expect("skills is an array");
-    assert_eq!(skill_arr.len(), 2, "expected 2 skills in JSON output");
-    // Items are alphabetical — critic < proofread.
-    assert_eq!(
-        parsed["skills"][0]["name"],
-        Value::String("critic".into()),
-        "first skill should be 'critic' (alphabetical)"
-    );
-    assert_eq!(
-        parsed["skills"][1]["name"],
-        Value::String("proofread".into()),
-        "second skill should be 'proofread' (alphabetical)"
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +240,7 @@ fn list_plugin_only_lockfile_shows_empty() {
     // Inline setup — a plugin-only entry (no [package.skill] table). The
     // v5_lockfile_toml helper always emits skill entries, so we write this
     // by hand.
-    let toml = "schema_version = 5\n\
+    let toml = "schema_version = 6\n\
                 generated_by_tau_version = \"0.0.0\"\n\
                 generated_at = \"2026-05-12T10:00:00Z\"\n\n\
                 [[package]]\n\

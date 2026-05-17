@@ -1,0 +1,102 @@
+name: CI summary
+
+# Branch-protection-required aggregate check.
+#
+# Previously this workflow used `workflow_run` to read CI's
+# conclusion after CI completed. That has a documented GitHub
+# Actions limitation: `workflow_run` events fire reliably only for
+# runs on the DEFAULT branch's history, NOT for feature branches
+# from PR pushes. Net effect: on a PR, only the provisional
+# `pull_request`-triggered ci-summary fired (always reporting
+# success), and the workflow_run-triggered authoritative run never
+# came. PR #92 (fs4 1.x bump) merged with broken Rust CI because of
+# this — ci-summary said success while CI itself failed.
+#
+# This version polls the GitHub API directly for the CI workflow's
+# run on the PR's HEAD SHA and reports the authoritative outcome
+# from within a single `pull_request`-triggered job. Self-contained;
+# no reliance on workflow_run propagation.
+#
+# Behavior:
+# - Wait up to ~25 min for the CI workflow run on this SHA to complete.
+# - If no CI run appears within 2 min, assume ci.yml's paths-ignore
+#   skipped the workflow entirely (docs-only PR) → success.
+# - On `cancelled`, keep waiting — a successor run is expected
+#   (concurrency:cancel-in-progress on ci.yml). Don't report success
+#   prematurely; that's how PR #92 landed broken.
+# - On `success`, `skipped`, or `neutral`, report success.
+# - On `failure`, `timed_out`, `action_required`, or anything else,
+#   report failure.
+
+on:
+  pull_request:
+
+concurrency:
+  group: ci-summary-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci-summary:
+    name: ci-summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Poll CI workflow run on this SHA until terminal
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          echo "Waiting for CI workflow run on $SHA in $REPO."
+
+          paths_ignore_grace=120
+
+          start=$SECONDS
+          while true; do
+            elapsed=$((SECONDS - start))
+
+            run_json=$(gh api \
+              "repos/$REPO/actions/runs?head_sha=$SHA&event=pull_request&per_page=10" \
+              --jq '.workflow_runs[] | select(.name=="CI") | {id, status, conclusion}' \
+              | head -1)
+
+            if [[ -z "$run_json" ]]; then
+              if [[ $elapsed -lt $paths_ignore_grace ]]; then
+                echo "[${elapsed}s] No CI run yet — waiting for it to register..."
+                sleep 15
+                continue
+              fi
+              echo "[${elapsed}s] No CI run after ${paths_ignore_grace}s grace — treating as paths-ignore skip (docs-only PR)."
+              exit 0
+            fi
+
+            run_status=$(echo "$run_json" | jq -r '.status')
+            run_conclusion=$(echo "$run_json" | jq -r '.conclusion // ""')
+            run_id=$(echo "$run_json" | jq -r '.id')
+
+            if [[ "$run_status" != "completed" ]]; then
+              echo "[${elapsed}s] CI run $run_id is $run_status — waiting..."
+              sleep 30
+              continue
+            fi
+
+            case "$run_conclusion" in
+              success|skipped|neutral)
+                echo "CI run $run_id conclusion: $run_conclusion."
+                exit 0
+                ;;
+              cancelled)
+                echo "[${elapsed}s] CI run $run_id was cancelled — waiting for successor..."
+                sleep 30
+                continue
+                ;;
+              *)
+                echo "::error::CI run $run_id concluded with: $run_conclusion"
+                exit 1
+                ;;
+            esac
+          done

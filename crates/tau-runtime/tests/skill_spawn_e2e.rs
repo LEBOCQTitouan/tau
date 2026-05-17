@@ -116,7 +116,7 @@ fn write_scope_config(tau_dir: &Path) {
 fn write_lockfile_with_critic(project_root: &Path) {
     // Build the lockfile TOML directly. The `[[package]]` key is the serde
     // rename for `LockFile::packages` (see lockfile.rs `#[serde(rename = "package")]`).
-    let toml_str = r#"schema_version = 5
+    let toml_str = r#"schema_version = 6
 generated_by_tau_version = "0.0.0"
 generated_at = "2026-05-14T00:00:00Z"
 

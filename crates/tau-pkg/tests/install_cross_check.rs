@@ -32,6 +32,7 @@ mod fixtures;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::str::FromStr;
+use std::sync::OnceLock;
 
 use tau_domain::PackageSource;
 use tau_pkg::{install_with_options, InstallOptions, LockFile, Scope};
@@ -252,32 +253,322 @@ fn cross_check_fires_and_fails_for_non_protocol_binary() {
     );
 }
 
-// ── Test 4: install with matching manifest succeeds (ignore) ─────────────────
+// ── Tau-protocol fixture binary helpers ───────────────────────────────────────
 
-/// A plugin that correctly implements the tau protocol and whose
-/// `tool.describe_capabilities` matches the manifest's [[capabilities]]
-/// should install successfully with `required_shapes` populated.
+/// Build the workspace `echo-tool` binary once per test-process and return
+/// its canonicalized path. `echo-tool` (under `crates/tau-plugins/echo-tool`)
+/// is a real tau-protocol-compliant tool plugin — it implements
+/// `meta.handshake` + `tool.describe` + `tool.describe_capabilities` via the
+/// `tau-plugin-sdk` runner — so it satisfies the cross-check's wire-level
+/// expectations.
 ///
-/// `#[ignore]`'d pending sub-project D fixture binary (a real tau-protocol
-/// compliant binary wired into the test harness).
-#[test]
-#[ignore = "requires a tau-protocol-compliant fixture binary; \
-            pending sub-project D"]
-fn install_with_matching_manifest_succeeds_and_populates_required_shapes() {
-    // Placeholder — real implementation will use the sub-project D fixture.
-    todo!("implement once sub-project D fixture binary is available")
+/// Subsequent calls return the cached path without re-invoking cargo.
+fn ensure_echo_tool_built() -> &'static Path {
+    static ECHO_TOOL: OnceLock<PathBuf> = OnceLock::new();
+    ECHO_TOOL
+        .get_or_init(|| {
+            let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+            let status = Command::new(&cargo)
+                .args(["build", "--release", "-p", "echo-tool"])
+                .status()
+                .expect("spawning cargo to build echo-tool");
+            assert!(
+                status.success(),
+                "`cargo build --release -p echo-tool` failed: {status:?}",
+            );
+
+            let target_dir = if let Ok(dir) = std::env::var("CARGO_TARGET_DIR") {
+                if !dir.is_empty() {
+                    PathBuf::from(dir)
+                } else {
+                    locate_workspace_target()
+                }
+            } else {
+                locate_workspace_target()
+            };
+            let bin_name = format!("echo-tool{}", std::env::consts::EXE_SUFFIX);
+            let path = target_dir.join("release").join(&bin_name);
+            assert!(
+                path.exists(),
+                "expected built echo-tool at {}; did the build succeed?",
+                path.display()
+            );
+            std::fs::canonicalize(&path)
+                .unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()))
+        })
+        .as_path()
 }
 
-// ── Test 5: install_force after fix succeeds (ignore) ────────────────────────
+/// Locate the workspace `target/` dir by walking up from `CARGO_MANIFEST_DIR`
+/// (which points at `crates/tau-pkg/`).
+fn locate_workspace_target() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for ancestor in manifest_dir.ancestors() {
+        let candidate = ancestor.join("target");
+        if candidate.is_dir() {
+            return candidate;
+        }
+    }
+    panic!(
+        "could not locate workspace target/ dir from {}",
+        manifest_dir.display()
+    );
+}
+
+/// Create a bare git repo containing a minimal plugin package whose built
+/// binary re-execs into the pre-built `echo-tool` binary. From the
+/// cross-check's point of view the resulting binary speaks the tau protocol.
+///
+/// `capabilities_toml` is interpolated into the manifest verbatim — pass `""`
+/// to declare no capabilities, or a `[[capabilities]]` block to declare some.
+fn make_relay_plugin_repo(
+    parent: &Path,
+    name: &str,
+    version: &str,
+    capabilities_toml: &str,
+    real_binary: &Path,
+) -> PathBuf {
+    let bare = fixtures::make_bare_repo(parent, name);
+    let working = parent.join(format!("{name}-working"));
+    std::fs::create_dir_all(&working).unwrap();
+
+    run_git(&working, &["init", "-q", "-b", "main"]);
+    run_git(&working, &["config", "user.email", "test@example.com"]);
+    run_git(&working, &["config", "user.name", "Test User"]);
+
+    let source_url = fixtures::file_url(&bare);
+    let manifest = format!(
+        r#"name = "{name}"
+version = "{version}"
+description = "Relay fixture: re-execs into pre-built echo-tool"
+authors = ["Test <test@example.com>"]
+source = "{source_url}"
+kind = "tool"
+dependencies = []
+{capabilities_toml}
+
+[plugin]
+provides = "tool"
+kind     = "rust-cargo"
+bin      = "{name}"
+"#
+    );
+    std::fs::write(working.join("tau.toml"), manifest).unwrap();
+
+    // Standalone Cargo.toml — zero deps; relay is a tiny program.
+    let cargo_toml = format!(
+        r#"[package]
+name = "{name}"
+version = "{version}"
+edition = "2021"
+
+[[bin]]
+name = "{name}"
+path = "src/main.rs"
+
+[dependencies]
+"#
+    );
+    std::fs::write(working.join("Cargo.toml"), cargo_toml).unwrap();
+    std::fs::create_dir_all(working.join("src")).unwrap();
+
+    // Embed the real binary's path as a string literal. On Unix we use
+    // `CommandExt::exec` so the relay process is replaced in-place
+    // (no fork, no stdio plumbing). On non-Unix we spawn-and-wait,
+    // inheriting stdio.
+    let real_path = real_binary.to_string_lossy().replace('\\', "\\\\");
+    let main_rs = format!(
+        r##"use std::process::Command;
+
+#[cfg(unix)]
+fn main() {{
+    use std::os::unix::process::CommandExt;
+    let err = Command::new("{real_path}").args(std::env::args_os().skip(1)).exec();
+    eprintln!("relay: exec failed: {{err}}");
+    std::process::exit(127);
+}}
+
+#[cfg(not(unix))]
+fn main() {{
+    let status = Command::new("{real_path}")
+        .args(std::env::args_os().skip(1))
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .expect("spawn echo-tool relay child");
+    std::process::exit(status.code().unwrap_or(1));
+}}
+"##
+    );
+    std::fs::write(working.join("src").join("main.rs"), main_rs).unwrap();
+
+    run_git(&working, &["add", "."]);
+    run_git(&working, &["commit", "-q", "-m", "initial fixture commit"]);
+    run_git(
+        &working,
+        &["remote", "add", "origin", &bare.to_string_lossy()],
+    );
+    run_git(&working, &["push", "-q", "origin", "main"]);
+
+    bare
+}
+
+fn cargo_and_git_available() -> bool {
+    git_available()
+        && Command::new("cargo")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+}
+
+// ── Test 4: install with matching manifest succeeds ──────────────────────────
+
+/// A plugin that correctly implements the tau protocol and whose
+/// `tool.describe_capabilities` matches the manifest's `capabilities`
+/// should install successfully with `required_shapes` populated.
+///
+/// echo-tool's default `Tool::capabilities` returns `&[]`, so this test
+/// declares an empty capability list in the manifest — the cross-check
+/// compares both sides and finds them in agreement, returning an empty
+/// `Vec<CapabilityShape>` which is what we assert against
+/// `LockedPlugin::required_shapes`.
+#[test]
+fn install_with_matching_manifest_succeeds_and_populates_required_shapes() {
+    if !cargo_and_git_available() {
+        eprintln!("skipping: `git` or `cargo` not on PATH");
+        return;
+    }
+
+    let echo_tool = ensure_echo_tool_built();
+
+    let tmp = TempDir::new().unwrap();
+    let project_root = tmp.path().join("tau-home");
+    std::fs::create_dir_all(&project_root).unwrap();
+    let scope = Scope::new_project(&project_root).unwrap();
+
+    let bare = make_relay_plugin_repo(
+        tmp.path(),
+        "match-plugin",
+        "0.1.0",
+        "capabilities = []",
+        echo_tool,
+    );
+    let source = PackageSource::from_str(&fixtures::file_url(&bare)).unwrap();
+
+    let installed = install_with_options(&source, &scope, InstallOptions::default())
+        .expect("install with matching manifest should succeed");
+    assert_eq!(installed.name.as_str(), "match-plugin");
+
+    let lf = LockFile::load(&scope.lockfile_path()).unwrap();
+    let pkg = lf
+        .packages
+        .iter()
+        .find(|p| p.name.as_str() == "match-plugin")
+        .expect("package should be in lockfile");
+    let plugin = pkg
+        .plugin
+        .as_ref()
+        .expect("LockedPlugin should be Some after cross-check success");
+
+    // echo-tool exposes no capabilities; manifest declares none → shapes empty.
+    assert!(
+        plugin.required_shapes.is_empty(),
+        "required_shapes should be populated by the cross-check (empty for capability-free plugins); \
+         got {:?}",
+        plugin.required_shapes,
+    );
+}
+
+// ── Test 5: install_force after fix succeeds ─────────────────────────────────
 
 /// After a CrossCheck failure the user fixes the manifest and retries
-/// via `tau install --force`. This test scaffolds that flow.
+/// via `tau install --force`. The retry must succeed.
 ///
-/// `#[ignore]`'d for the same reason as test 4.
+/// Flow:
+///   1. Install a relay plugin whose manifest declares a capability the
+///      binary (echo-tool) does not request → cross-check fails with
+///      `ManifestDeclaresUnused`.
+///   2. Rewrite the upstream bare repo's tau.toml to drop the declaration,
+///      pushing a new commit on `main`.
+///   3. Re-install with `force = true` → cross-check passes, install succeeds.
 #[test]
-#[ignore = "requires a tau-protocol-compliant fixture binary; \
-            pending sub-project D"]
 fn install_force_after_cross_check_fix_succeeds() {
-    // Placeholder — real implementation will use the sub-project D fixture.
-    todo!("implement once sub-project D fixture binary is available")
+    if !cargo_and_git_available() {
+        eprintln!("skipping: `git` or `cargo` not on PATH");
+        return;
+    }
+
+    let echo_tool = ensure_echo_tool_built();
+
+    let tmp = TempDir::new().unwrap();
+    let project_root = tmp.path().join("tau-home");
+    std::fs::create_dir_all(&project_root).unwrap();
+    let scope = Scope::new_project(&project_root).unwrap();
+
+    // ── Step 1: install with a manifest that declares an unused capability ──
+    let caps_unused = "capabilities = [\n  { kind = \"fs.read\", paths = [\"/tmp/**\"] },\n]";
+    let bare = make_relay_plugin_repo(tmp.path(), "force-plugin", "0.1.0", caps_unused, echo_tool);
+    let source = PackageSource::from_str(&fixtures::file_url(&bare)).unwrap();
+
+    let err = install_with_options(&source, &scope, InstallOptions::default())
+        .expect_err("install should fail with CrossCheck for declared-but-unused capability");
+    assert!(
+        matches!(err, tau_pkg::InstallError::CrossCheck { .. }),
+        "expected InstallError::CrossCheck, got: {err:?}",
+    );
+
+    // Binary stays on disk after a CrossCheck failure (sub-project B contract).
+    let pkg_dir = scope.packages_dir().join("force-plugin").join("0.1.0");
+    assert!(
+        pkg_dir.exists(),
+        "package dir should remain on disk after CrossCheck failure",
+    );
+
+    // ── Step 2: rewrite tau.toml upstream, drop the bogus capability ─────────
+    let working = tmp.path().join("force-plugin-fix");
+    std::fs::create_dir_all(&working).unwrap();
+    run_git(&working, &["clone", "-q", &bare.to_string_lossy(), "."]);
+    run_git(&working, &["config", "user.email", "test@example.com"]);
+    run_git(&working, &["config", "user.name", "Test User"]);
+
+    let manifest_path = working.join("tau.toml");
+    // Normalize CRLF → LF so the literal `caps_unused` (which uses \n) matches
+    // on Windows, where `read_to_string` returns line endings as-stored (\r\n).
+    let body = std::fs::read_to_string(&manifest_path)
+        .unwrap()
+        .replace("\r\n", "\n");
+    let fixed = body.replace(caps_unused, "capabilities = []");
+    assert_ne!(body, fixed, "manifest rewrite must replace the cap block");
+    std::fs::write(&manifest_path, fixed).unwrap();
+    run_git(&working, &["add", "tau.toml"]);
+    run_git(
+        &working,
+        &["commit", "-q", "-m", "fix: drop unused capability"],
+    );
+    run_git(&working, &["push", "-q", "origin", "main"]);
+
+    // ── Step 3: re-install with force=true ───────────────────────────────────
+    let mut opts = InstallOptions::default();
+    opts.force = true;
+    let installed = install_with_options(&source, &scope, opts)
+        .expect("install --force after fix should succeed");
+    assert_eq!(installed.name.as_str(), "force-plugin");
+
+    let lf = LockFile::load(&scope.lockfile_path()).unwrap();
+    let pkg = lf
+        .packages
+        .iter()
+        .find(|p| p.name.as_str() == "force-plugin")
+        .expect("force-plugin should be in lockfile after force-install");
+    let plugin = pkg
+        .plugin
+        .as_ref()
+        .expect("LockedPlugin should be Some after successful retry");
+    assert!(
+        plugin.required_shapes.is_empty(),
+        "required_shapes should be empty after fix; got {:?}",
+        plugin.required_shapes,
+    );
 }

@@ -38,8 +38,8 @@ thiserror          = { workspace = true }
 uuid               = { workspace = true }
 anyhow             = "1"
 chrono             = { workspace = true }
-termimad           = "0.30"
-rustyline          = "14"
+termimad           = "0.34"
+rustyline          = "18"
 is-terminal        = "0.4"
 tempfile           = { workspace = true }
 
@@ -48,6 +48,7 @@ assert_cmd = "2"
 insta      = { version = "1", features = ["yaml", "json", "redactions"] }
 predicates = "3"
 proptest   = { workspace = true }
+rstest     = { workspace = true }
 tempfile   = "3"
 url        = { workspace = true }
 # test-fixtures feature needed by tests/common/mock_llm.rs (T9: orchestration pattern tests).

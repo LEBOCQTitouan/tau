@@ -275,6 +275,20 @@ pub enum InstallError {
         /// (so the user can see what to extend).
         declared_paths: Vec<String>,
     },
+    /// Skills-5: cloned source has neither `tau.toml` nor `SKILL.md`.
+    /// Not a recognized skill package format.
+    #[error("not a skill package: {path:?} has neither tau.toml nor SKILL.md ({detail})")]
+    NotASkillPackage {
+        /// The workspace directory that was inspected.
+        path: std::path::PathBuf,
+        /// Human-readable detail.
+        detail: String,
+    },
+
+    /// Skills-5: detected Anthropic format but SKILL.md synthesis failed.
+    #[error("synthesizing manifest for Anthropic-format source: {0}")]
+    SynthesizeFailed(#[from] crate::synthesize::SynthesizeError),
+
     /// Catch-all for install lifecycle failures not yet covered by typed variants.
     /// Use this only when the failure cannot be reported as `Git`, `Manifest`,
     /// `Registry`, `Scope`, `SourceManifestMismatch`, or `Locked`.

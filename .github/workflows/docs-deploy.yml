@@ -170,13 +170,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # mdbook git-repository-url edit-url links resolve cleanly
 
       - name: Cache mdBook binaries
         id: cache-mdbook
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/mdbook
@@ -222,7 +222,7 @@ jobs:
           cat docs/book/html/versions.json
 
       - name: Upload built site
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: site
           path: docs/book/html
@@ -247,7 +247,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: site
           path: site
@@ -274,6 +274,16 @@ jobs:
           <title>tau docs</title>
           <p>Redirecting to <a href="./latest/">/latest/</a>.</p>
           HTML
+          fi
+
+          # Stage versions.json at the root of the payload for
+          # release deploys. The build job writes it into
+          # site/versions.json (which also lands inside /vX/ harmlessly).
+          # The spec-intended consumer is a future version-picker UI
+          # reading /versions.json — copy to payload/versions.json so
+          # peaceiris uploads it at the gh-pages root.
+          if [[ "$MODE" == "release" && -f site/versions.json ]]; then
+            cp site/versions.json payload/versions.json
           fi
 
           # Release also publishes /latest/ as a copy of this build.
@@ -323,7 +333,7 @@ jobs:
           OWNER="${GITHUB_REPOSITORY_OWNER}"
           REPO="${GITHUB_REPOSITORY#*/}"
           URL="https://${OWNER}.github.io/${REPO}/${DEST}/"
-          gh pr comment "$PR" --body "📖 Docs preview deployed: <$URL>"
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "📖 Docs preview deployed: <$URL>"
 
   cleanup-preview:
     name: cleanup preview
@@ -365,4 +375,4 @@ jobs:
           PR: ${{ needs.decide.outputs.pr_number }}
           DEST: ${{ needs.decide.outputs.destination }}
         run: |
-          gh pr comment "$PR" --body "🧹 Docs preview \`${DEST}\` cleaned up." || true
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "🧹 Docs preview \`${DEST}\` cleaned up." || true

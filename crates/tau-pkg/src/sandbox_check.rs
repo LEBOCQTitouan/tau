@@ -122,6 +122,12 @@ pub async fn cross_check_plugin_capabilities(
         .unwrap_or_default()
         .as_nanos();
 
+    // Send `{}` rather than Null: plugin config structs typically don't
+    // accept null as the top-level value (only objects), so a Null here
+    // causes the SDK runner to fail config deserialization and exit
+    // silently — the host then sees EOF on the next read. An empty
+    // object lets every plugin with `#[derive(Default)]`-style configs
+    // construct their defaults.
     let handshake_req = HandshakeRequest::new(
         PROTOCOL_VERSION.to_string(),
         port,
@@ -130,10 +136,14 @@ pub async fn cross_check_plugin_capabilities(
             "install".to_string(),
             "cross-check".to_string(),
         ),
-        serde_json::Value::Null,
+        serde_json::Value::Object(serde_json::Map::new()),
     );
 
-    let params = rmp_serde::to_vec(&handshake_req)
+    // The wire shape for `meta.handshake` params is a 1-element array
+    // (`Vec<HandshakeRequest>`) per the SDK's matching decoder; see
+    // `tau_plugin_sdk::handshake::drive_handshake` and the parallel
+    // call site at `tau_runtime::plugin_host::handshake`.
+    let params = rmp_serde::to_vec(&vec![&handshake_req])
         .map_err(|e| CrossCheckError::HandshakeFailed(format!("encode handshake request: {e}")))?;
 
     let req_frame = Frame::Request {
