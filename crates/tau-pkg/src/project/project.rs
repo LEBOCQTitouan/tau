@@ -415,11 +415,7 @@ fn validate_agent(id: String, raw: UncheckedAgent) -> Result<AgentEntry, Project
                         }
                     })?,
                 };
-                tools.push(crate::RequiredTool::new(
-                    name,
-                    raw_tool.source,
-                    version_req,
-                ));
+                tools.push(crate::RequiredTool::new(name, raw_tool.source, version_req));
             }
             RequiresEntry { tools }
         }

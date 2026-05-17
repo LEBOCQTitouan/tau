@@ -45,6 +45,10 @@ pub use install::{
 };
 pub use lockfile::{LockFile, LockedPackage, LockedPlugin, LockedVersion, SynthesizedSource};
 pub use manifest::read_manifest;
+pub use project::{
+    build_agent_definition, AgentEntry, AgentResolutionError, ProjectConfig, ProjectConfigError,
+    PromptEntry, RequiresEntry,
+};
 pub use registry::{get, list};
 pub use resolve::{
     resolve_requires_tools, PlannedInstall, RequiredTool, ResolutionPlan, ResolveError,
@@ -60,8 +64,4 @@ pub use update::{update_package, UpdateError, UpdateResult};
 pub use verify::{
     verify, verify_all, verify_all_with_options, AnthropicConformanceIssue, VerifyError,
     VerifyReport, VerifyStatus,
-};
-pub use project::{
-    build_agent_definition, AgentEntry, AgentResolutionError, ProjectConfig, ProjectConfigError,
-    PromptEntry, RequiresEntry,
 };

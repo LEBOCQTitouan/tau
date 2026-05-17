@@ -12,8 +12,8 @@
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use tau_domain::{AgentDefinition, AgentId, PackageId, PackageManifest, PackageName, Value};
 use crate::{ManifestReadError, RegistryError, Scope};
+use tau_domain::{AgentDefinition, AgentId, PackageId, PackageManifest, PackageName, Value};
 
 use super::project::{AgentEntry, PromptEntry};
 
