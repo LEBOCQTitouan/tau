@@ -12,6 +12,7 @@ authors.workspace      = true
 tau-domain          = { workspace = true, features = ["serde"] }
 tau-ports           = { workspace = true, features = ["serde"] }
 tau-plugin-protocol = { workspace = true }
+tau-observe         = { workspace = true }
 serde              = { workspace = true }
 serde_json         = "1"
 rmp-serde          = { workspace = true }

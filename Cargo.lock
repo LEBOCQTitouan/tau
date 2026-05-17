@@ -3225,6 +3225,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tau-domain",
+ "tau-observe",
  "tau-plugin-protocol",
  "tau-ports",
  "thiserror 2.0.18",
