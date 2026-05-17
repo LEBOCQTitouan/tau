@@ -128,6 +128,32 @@ pre-push:
             unset CARGO_TARGET_DIR
             TARGET=target/lefthook-podman
 
+            # _par <label> <cmd...>  → background <cmd>, capture combined
+            # output to /tmp/par-<label>.log, print "<pid>:<label>:<log>"
+            # so the caller can collect tokens for _wait_all.
+            _par() {
+              local label=$1; shift
+              local log=/tmp/par-$label.log
+              ( "$@" ) >"$log" 2>&1 &
+              echo "$!:$label:$log"
+            }
+
+            # _wait_all <token...>  → wait for every "pid:label:log" token
+            # in order, replay each log inside ::group::<label>...::endgroup::
+            # blocks, return 1 if any stage exited non-zero.
+            _wait_all() {
+              local fail=0
+              for tok in "$@"; do
+                local pid=${tok%%:*}; local rest=${tok#*:}
+                local label=${rest%%:*}; local log=${rest#*:}
+                if ! wait "$pid"; then fail=1; fi
+                echo "::group::$label"
+                cat "$log"
+                echo "::endgroup::"
+              done
+              return $fail
+            }
+
             # ─── 1. msrv-check / linux ────────────────────────────
             # CI MSRV pin is 1.91 (see ci.yml). Install + use rustup
             # to invoke it inline so we do not pollute the default
