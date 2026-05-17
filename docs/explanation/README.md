@@ -16,6 +16,14 @@ specific decision at a specific date.
 
 ## Pages
 
+- [Packages](packages.md) — the unit of extension. What a package is,
+  the seven kinds, sources, scopes (global / project), and the
+  install → lock → verify → run lifecycle. Read this first if you're
+  new to the book.
+- [Sandboxing](sandboxing.md) — the tier model
+  (`none` / `light` / `strict`), the adapter set per platform, the
+  four-layer enforcement model, and what sandboxing is *not*
+  designed to do.
 - [Tau as language](tau-as-language.md) — the framing that "tau is a
   language for installing and running agents," what that buys, and
   what it costs.
