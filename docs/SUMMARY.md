@@ -28,6 +28,7 @@
 # Reference
 
 - [Overview](reference/README.md)
+- [Package manifest schema](reference/package-manifest-schema.md)
 - [Sandbox platform support](reference/sandbox-platform-support.md)
 - [Skill manifest schema](reference/skill-manifest-schema.md)
 
