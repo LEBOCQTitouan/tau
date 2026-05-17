@@ -20,6 +20,14 @@ specific decision at a specific date.
   the seven kinds, sources, scopes (global / project), and the
   install → lock → verify → run lifecycle. Read this first if you're
   new to the book.
+- [Capabilities and consent](capabilities-and-consent.md) — what a
+  capability is, declared-vs-granted, the consent prompt at install
+  time, project-side narrowing, and where the kernel enforces the
+  set.
+- [Sandboxing](sandboxing.md) — the tier model
+  (`none` / `light` / `strict`), the adapter set per platform, the
+  four-layer enforcement model, and what sandboxing is *not*
+  designed to do.
 - [Tau as language](tau-as-language.md) — the framing that "tau is a
   language for installing and running agents," what that buys, and
   what it costs.
