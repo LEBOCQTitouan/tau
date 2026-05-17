@@ -1,12 +1,12 @@
-//! Project-level `tau.toml` parser and validator. Distinct from the
-//! package-level `tau.toml` defined in tau-domain (per ADR-0002); see
-//! ADR-0007 for the Cargo `[package]` vs `[workspace]` precedent that
-//! justifies the shared filename.
+//! Re-exports the project-config module that now lives in `tau-pkg`.
 //!
-//! Per spec §3.2, §3.3, §3.4, §4.1.
+//! This shim preserves the existing `tau_cli::config::*` import paths
+//! for downstream code (integration tests, future external consumers).
+//! New code SHOULD use `tau_pkg::project::*` directly.
+//!
+//! See ADR-0029 (or its successor) for the refactor motivation.
 
-pub mod agent;
-pub mod project;
-
-pub use agent::{build_agent_definition, AgentResolutionError};
-pub use project::{AgentEntry, ProjectConfig, ProjectConfigError, PromptEntry, RequiresEntry};
+pub use tau_pkg::project::{
+    agent, build_agent_definition, project, AgentEntry, AgentResolutionError, ProjectConfig,
+    ProjectConfigError, PromptEntry, RequiresEntry,
+};
