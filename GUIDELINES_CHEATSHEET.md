@@ -44,7 +44,7 @@ All 59 guidelines, one line each. For the full text and rationale see `CONSTITUT
 - **QG3** No `unwrap`/`expect`/`panic` in library code (tests exempt).
 - **QG4** `#![forbid(unsafe_code)]` default; exceptions require ADR.
 - **QG5** Four test layers mandatory: unit, integration, doc, CLI; proptest for parsers; fuzz for IPC.
-- **QG6** CI runs Linux + macOS + Windows on stable + MSRV.
+- **QG6** CI runs Linux + macOS + Windows on stable; MSRV verified on Linux only.
 - **QG7** MSRV is stable-2, bumps are minor-version changes.
 - **QG8** Documentation follows Diátaxis.
 - **QG9** `#![deny(missing_docs)]` on library public items; broken intra-doc links fail CI.

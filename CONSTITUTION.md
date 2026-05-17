@@ -165,7 +165,7 @@ The rule: **no cheap shortcuts.** Not "every possible quality practice." The dis
 
 **QG5. Testing has four mandatory layers.** Unit tests inline with code. Integration tests in `tests/` per crate. Doc tests on all public API items. CLI behavioral tests via `assert_cmd`. Property-based tests (proptest) for parsers of external input: manifest files, IPC messages, user configuration. Fuzz targets for the IPC protocol. Coverage thresholds are not enforced numerically; every public behavior has a test.
 
-**QG6. CI runs the full platform matrix.** Linux, macOS, Windows on stable Rust and MSRV. Windows failures tracked but do not block Linux/macOS releases (per G15). Full feature-powerset testing added when and if feature combinations become non-trivial.
+**QG6. CI runs the full platform matrix on stable.** Linux, macOS, Windows on stable Rust. MSRV is verified on Linux only — MSRV is a rustc-version property, not an OS property, and OS-gated code paths are already exercised by stable-toolchain runs on their native OS. Windows failures tracked but do not block Linux/macOS releases (per G15). Full feature-powerset testing added when and if feature combinations become non-trivial.
 
 **QG7. MSRV is declared and conservative.** `Cargo.toml` declares MSRV at stable-2 (two stable releases behind latest). MSRV bumps are minor-version changes pre-1.0 and minor changes post-1.0, never silent patch bumps.
 
