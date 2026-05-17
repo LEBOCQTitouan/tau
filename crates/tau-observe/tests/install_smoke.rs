@@ -3,8 +3,8 @@
 //! (tracing-subscriber doesn't expose it), so this is a minimum-bar
 //! check that the global init path doesn't panic.
 
-use tau_observe::install::{install, Format, InstallOptions, Writer};
 use tau_observe::filter::env_or_directive;
+use tau_observe::install::{install, Format, InstallOptions, Writer};
 
 #[test]
 fn each_format_writer_combination_installs_without_panic() {

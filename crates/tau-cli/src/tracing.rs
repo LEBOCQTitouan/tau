@@ -50,7 +50,8 @@ pub fn install(cli: &Cli) {
     // The CLI does not propagate install errors; the only failure mode
     // is "already installed", which the underlying installer maps to a
     // no-op guard.
-    let _guard = observe_install(opts).expect("tau_observe::install never returns Err in current impl");
+    let _guard =
+        observe_install(opts).expect("tau_observe::install never returns Err in current impl");
 }
 
 #[cfg(test)]
