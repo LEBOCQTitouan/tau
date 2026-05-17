@@ -129,19 +129,19 @@ anyone using the Anthropic skill format and they'll be able to use
 your prompt.
 
 For skills that declare capabilities, `tau skill export` drops them
-with a warning (Anthropic format doesn't preserve capabilities).
-You'll see the warning if you export the bundled `fact-checker`
-reference skill:
+with a warning (Anthropic format doesn't preserve capabilities). If
+your skill had declared, say, `fs.read`, the export would emit:
 
-    $ ./target/release/tau skill export fact-checker --output ./out
+    $ ./target/release/tau skill export my-skill --output ./out
     note: 1 capabilities dropped on Anthropic export (fs.read);
           Anthropic format does not preserve capability declarations
 
 ## What's next
 
-- **Bundle reference files** with your skill — see the
-  `fact-checker` reference skill at `skills/fact-checker/` and the
-  [how-to on authoring](../how-to/author-a-skill.md).
+- **Bundle reference files** with your skill — the
+  [how-to on authoring](../how-to/author-a-skill.md) shows the
+  `${SKILL_DIR}` substitution pattern for reading bundled files at
+  invocation time.
 - **Declare capabilities** — fs.read, process.spawn, etc. The
   [reference page](../reference/skill-manifest-schema.md) covers the
   complete set.
