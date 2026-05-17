@@ -13,6 +13,7 @@ authors.workspace = true
 tau-runtime = { workspace = true }
 tau-domain = { workspace = true }
 tau-pkg = { workspace = true }
+tau-plugin-protocol = { workspace = true }
 tau-ports = { workspace = true }
 
 # External
@@ -25,6 +26,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "io-std", "signal", "time"] }
 tokio-util = { workspace = true }
+toml = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
