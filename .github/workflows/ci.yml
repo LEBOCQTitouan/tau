@@ -13,6 +13,12 @@ on:
       - 'docs/**'
       - '*.md'
       - '.github/workflows/docs-*.yml'
+  merge_group:
+    # Merge-queue runs. Same paths-ignore semantics — the queue tests
+    # the candidate merge against main; pure-docs PRs skip the matrix
+    # and ci-summary's grace-period logic reports success.
+    types: [checks_requested]
+    branches: [main]
 
 # Cancel superseded runs on the same ref.
 concurrency:
