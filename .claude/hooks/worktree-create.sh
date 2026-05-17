@@ -14,13 +14,12 @@ if [ -z "$name" ]; then
   exit 64
 fi
 
-# Validate name: kebab-case-ish, no path separators, no leading dot.
-case "$name" in
-  ""|.*|*/*|*..*)
-    echo "worktree-create.sh: invalid worktree name: $name" >&2
-    exit 64
-    ;;
-esac
+# Validate name: must start with alphanumeric and contain only alnum/./-/_.
+# Rejects empty, leading dot, path separators, .., spaces, and shell metacharacters.
+if ! printf '%s' "$name" | grep -qE '^[a-zA-Z0-9][a-zA-Z0-9._-]*$'; then
+  echo "worktree-create.sh: invalid worktree name '$name' (alphanumeric/dot/hyphen/underscore only, no leading dot)" >&2
+  exit 64
+fi
 
 worktree_root="${TAU_WORKTREE_DIR:-$HOME/code/tau-worktrees}"
 target="$worktree_root/$name"
@@ -45,7 +44,8 @@ esac
 mkdir -p "$worktree_root"
 
 # Idempotent: if the worktree already exists at $target, just print its path.
-if git -C "$repo_root" worktree list --porcelain | awk '/^worktree /{print $2}' | grep -Fxq "$target"; then
+# Use substr to handle paths containing spaces (awk's default $2 splits on whitespace).
+if git -C "$repo_root" worktree list --porcelain | awk '/^worktree /{print substr($0, 10)}' | grep -Fxq "$target"; then
   echo "$target"
   exit 0
 fi
