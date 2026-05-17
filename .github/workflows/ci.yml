@@ -110,18 +110,20 @@ jobs:
       - run: cargo test --workspace --doc
 
   msrv-check:
-    name: msrv-check / ${{ matrix.os == 'ubuntu-latest' && 'linux' || matrix.os == 'macos-latest' && 'macos' || 'windows' }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+    # MSRV is a rustc-version property, not an OS property. The only
+    # cfg(target_os)-gated code in this workspace lives in
+    # tau-sandbox-windows (scaffold) and tau-sandbox-darwin (real),
+    # both already covered by `test-stable` on their native OS.
+    # Cross-OS MSRV signal is not worth the ~14 Linux-equivalent
+    # runner minutes per CI run.
+    name: msrv-check / linux
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: "1.91"
-          shared-key: ${{ matrix.os }}-1.91
+          shared-key: linux-1.91
           with-sccache: true
           with-mold: true
       - run: cargo check --workspace --all-targets --locked
