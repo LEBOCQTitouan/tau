@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-17
 **Status:** Draft (pending user review)
-**ADR:** Will require ADR-0031 (per Constitution QG18) — see [§9 ADR scope](#9-adr-scope).
+**ADR:** Will require ADR-0033 (per Constitution QG18) — see [§9 ADR scope](#9-adr-scope).
 **Scope:** Phase 1 priority §15. The second public API surface of tau (alongside the `tau-runtime` Rust crate).
 **Roadmap entry:** [ROADMAP.md §15 Serve mode](../../../ROADMAP.md#tier-4--operational-quality).
 
@@ -348,7 +348,7 @@ stdout is flushed before exit.
 
 ## 9. ADR scope
 
-This spec requires **ADR-0031** per Constitution QG18 ("Changes to the serve-mode protocol require ADRs"). The ADR covers:
+This spec requires **ADR-0033** per Constitution QG18 ("Changes to the serve-mode protocol require ADRs"). The ADR covers:
 
 - Decision: ship serve mode v1 as JSON-RPC 2.0 over NDJSON-framed stdio with the method surface in §5.
 - Status: Accepted (assuming this spec is approved).

@@ -248,9 +248,11 @@ async fn wait_for_shutdown_signal() {
 
 /// On Linux, ask the kernel to deliver SIGTERM to us when our parent dies.
 #[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
 fn set_pdeathsig() {
     // SAFETY: prctl is async-signal-safe; the SIGTERM target is the
-    // current process which always exists.
+    // current process which always exists. This is the only unsafe
+    // block in tau-app — see the crate-level lib.rs note for context.
     unsafe {
         libc::prctl(
             libc::PR_SET_PDEATHSIG,
