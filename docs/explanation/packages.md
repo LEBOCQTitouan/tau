@@ -208,6 +208,8 @@ answer.
 
 - [`CONSTITUTION.md`](../../CONSTITUTION.md) — G1–G17 define the
   identity, NG1–NG12 the non-goals.
+- [Package manifest schema](../reference/package-manifest-schema.md)
+  — every field of `tau.toml` and the validation rules.
 - [ADR-0002](../decisions/0002-manifest-format.md) — the manifest
   field set and the canonicalization rules.
 - [ADR-0004](../decisions/0004-tau-pkg.md) — package manager design.
