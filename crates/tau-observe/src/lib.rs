@@ -6,4 +6,5 @@
 //! the "observe" verb of the four-verb core (G1).
 
 pub mod filter;
+pub mod install;
 pub mod vocabulary;
