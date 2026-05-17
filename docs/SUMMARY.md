@@ -34,6 +34,7 @@
 # Explanation
 
 - [Overview](explanation/README.md)
+- [Packages](explanation/packages.md)
 - [Escape hatches](explanation/escape-hatches.md)
 - [tau as language](explanation/tau-as-language.md)
 - [Two-layer skills](explanation/two-layer-skills.md)

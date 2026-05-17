@@ -16,6 +16,10 @@ specific decision at a specific date.
 
 ## Pages
 
+- [Packages](packages.md) — the unit of extension. What a package is,
+  the seven kinds, sources, scopes (global / project), and the
+  install → lock → verify → run lifecycle. Read this first if you're
+  new to the book.
 - [Tau as language](tau-as-language.md) — the framing that "tau is a
   language for installing and running agents," what that buys, and
   what it costs.
