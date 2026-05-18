@@ -1,0 +1,68 @@
+---
+source: crates/tau-cli/tests/help_snapshots.rs
+assertion_line: 64
+expression: s
+---
+Run pre-flight validation against the project (config, lockfile, packages, sandbox, plugins, skills). Aggregates existing validators into one CI/IDE-friendly verb
+
+Usage: tau check [OPTIONS] [CATEGORY]
+
+Arguments:
+  [CATEGORY]
+          Optional category — runs only the named check (one of: config, lockfile, packages, sandbox, plugins, skills). When omitted, runs all 6 categories
+          
+          [possible values: config, lockfile, packages, sandbox, plugins, skills]
+
+Options:
+      --fast
+          Reduce per-check I/O where a fast variant exists. No-op on categories without a fast variant (config, lockfile, packages)
+
+      --auto-resolve
+          Install missing required packages before running checks
+
+      --project <PATH>
+          Project root override. Default: cwd (walks up for tau.toml)
+
+      --json
+          Emit JSONL events to stdout. Mutually exclusive with --sarif
+
+      --sarif [<PATH>]
+          Emit SARIF 2.1.0 document. With path → write file; without → stdout. Mutually exclusive with --json
+
+  -v, --verbose...
+          Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
+
+  -q, --quiet
+          Suppress non-error output (sets tracing to WARN)
+
+      --debug
+          Show full error chain + DEBUG-level tracing on failures
+
+      --color <COLOR>
+          Color mode for terminal output
+
+          Possible values:
+          - always: Always emit ANSI color codes
+          - auto:   Auto-detect based on terminal capabilities
+          - never:  Never emit color codes
+          
+          [default: auto]
+
+      --record-protocol <PATH>
+          Mirror every plugin protocol frame to a JSONL file at this path.
+          
+          Useful for debugging plugin behavior and replaying via `tau plugin protocol decode <path>`. The recording is best-effort per spec §7.8: write/open failures are logged but never abort the invocation.
+
+      --no-sandbox
+          Disable sandboxing entirely for this invocation (shorthand for `--sandbox passthrough`). For development and one-off debugging. Auditable in shell history
+
+      --sandbox <SANDBOX>
+          Force a specific sandbox adapter kind, overriding the resolver. `--no-sandbox` is shorthand for `--sandbox passthrough`. Conflicts with `--no-sandbox` if both set
+
+          Possible values:
+          - native:      Linux landlock + seccomp + namespaces
+          - container:   Docker / Podman shell-out
+          - passthrough: No isolation (explicit opt-out)
+
+  -h, --help
+          Print help (see a summary with '-h')
