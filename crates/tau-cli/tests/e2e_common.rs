@@ -4,18 +4,23 @@
 
 #![allow(dead_code)]
 
-/// Ensure tau's global scope can be resolved.
+/// Ensure tau's global scope can be resolved without racing.
 ///
-/// Sets `$TAU_HOME` to a sensible existing directory if it's unset.
-/// Matches the pattern used by `crates/tau-cli/tests/cmd_resolve.rs`.
-/// The spawned `tau` subprocess inherits the env.
+/// `tau_pkg::Scope::global` reads `$TAU_HOME` and creates a default
+/// `config.toml` in it if missing. Parallel tests writing the same
+/// path on Windows produce "Access is denied". We point `$TAU_HOME`
+/// at a dedicated process-local tempdir initialized once, with the
+/// config.toml pre-created so no test races on writing it.
 pub fn ensure_home_env() {
-    if std::env::var_os("TAU_HOME").is_some() {
-        return;
-    }
-    let fallback = std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .or_else(|| std::env::var_os("TEMP"))
-        .unwrap_or_else(|| std::ffi::OsString::from("/tmp"));
-    std::env::set_var("TAU_HOME", fallback);
+    use std::sync::OnceLock;
+    static TAU_HOME_INIT: OnceLock<()> = OnceLock::new();
+    TAU_HOME_INIT.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("tau-serve-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create tau_home tempdir");
+        let cfg = dir.join("config.toml");
+        if !cfg.exists() {
+            let _ = std::fs::write(&cfg, "");
+        }
+        std::env::set_var("TAU_HOME", dir);
+    });
 }
