@@ -26,6 +26,8 @@
 - [Install a skill](how-to/install-a-skill.md)
 - [Author a skill](how-to/author-a-skill.md)
 - [Export a skill](how-to/export-a-skill.md)
+- [Write a tool plugin](how-to/write-a-tool-plugin.md)
+- [Propose an ADR](how-to/propose-an-adr.md)
 
 # Reference
 
@@ -44,6 +46,9 @@
 - [Sandboxing](explanation/sandboxing.md)
 - [Multi-agent orchestration](explanation/multi-agent-orchestration.md)
 - [Workflows](explanation/workflows.md)
+- [Architecture overview](explanation/architecture-overview.md)
+- [Crate map](explanation/crate-map.md)
+- [Testing strategy](explanation/testing-strategy.md)
 - [Escape hatches](explanation/escape-hatches.md)
 - [tau as language](explanation/tau-as-language.md)
 - [Two-layer skills](explanation/two-layer-skills.md)

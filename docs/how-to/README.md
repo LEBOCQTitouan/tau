@@ -25,6 +25,16 @@ short, focused, and named after the goal — not the feature.
   Anthropic SKILL.md format; `--strict`, `--force`, and the roundtrip
   guarantee for capability-less skills.
 
+## Contributing
+
+- [Write a tool plugin](write-a-tool-plugin.md) — eight-step walk
+  through the minimum viable tool plugin (binary shim, `Tool`
+  trait impl, capability extraction from `SessionContext`,
+  integration test via `tau-plugin-test-support`).
+- [Propose an ADR](propose-an-adr.md) — when an ADR is required
+  (QG18), the template + workflow, numbering rules, and the
+  24-hour cooldown.
+
 ## Coming next
 
 How-to coverage will grow alongside the public surface. Planned recipes
