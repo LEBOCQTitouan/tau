@@ -14,8 +14,8 @@ pub use result::{
 
 use anyhow::Result;
 
-/// Entry point for `tau check`. Stub until Task 14 wires the runner.
-pub async fn run() -> Result<()> {
-    eprintln!("tau check: not yet wired (Tasks 14+)");
+/// Entry point for `tau check`. Stub until Task 3 wires the runner.
+pub async fn run(args: crate::cli::CheckArgs) -> Result<()> {
+    eprintln!("tau check (stub): args = {args:?}");
     Ok(())
 }
