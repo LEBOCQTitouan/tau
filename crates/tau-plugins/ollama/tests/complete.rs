@@ -2,6 +2,7 @@
 
 mod common;
 
+use assert_matches::assert_matches;
 use common::cassette;
 use ollama_plugin_lib::plugin::OllamaPlugin;
 use tau_plugin_sdk::Configure;
@@ -98,12 +99,14 @@ async fn complete_404_model_not_pulled_includes_remediation_hint() {
         OllamaPlugin::from_config(common::test_config_with_retry(server.uri().into(), 3, 0))
             .unwrap();
     let err = plugin.complete(common::sample_request()).await.unwrap_err();
-    let LlmError::InvalidRequest { ref reason } = err else {
-        panic!("expected InvalidRequest, got {err:?}");
-    };
-    assert!(
-        reason.contains("ollama pull"),
-        "expected `ollama pull` remediation hint; got: {reason}"
+    assert_matches!(
+        &err,
+        LlmError::InvalidRequest { reason } => {
+            assert!(
+                reason.contains("ollama pull"),
+                "expected `ollama pull` remediation hint; got: {reason}"
+            );
+        }
     );
     // 404 must NOT retry.
     assert_eq!(server.received_requests().len(), 1, "404 must not retry");
@@ -116,12 +119,14 @@ async fn complete_400_bad_request_does_not_retry() {
         OllamaPlugin::from_config(common::test_config_with_retry(server.uri().into(), 3, 0))
             .unwrap();
     let err = plugin.complete(common::sample_request()).await.unwrap_err();
-    let LlmError::InvalidRequest { ref reason } = err else {
-        panic!("expected InvalidRequest, got {err:?}");
-    };
-    assert!(
-        reason.contains("ollama bad request") || reason.contains("bad request"),
-        "unexpected error reason: {reason}"
+    assert_matches!(
+        &err,
+        LlmError::InvalidRequest { reason } => {
+            assert!(
+                reason.contains("ollama bad request") || reason.contains("bad request"),
+                "unexpected error reason: {reason}"
+            );
+        }
     );
     assert_eq!(server.received_requests().len(), 1, "400 must not retry");
 }
