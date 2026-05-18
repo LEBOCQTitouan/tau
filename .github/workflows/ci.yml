@@ -337,6 +337,68 @@ jobs:
       - name: Test tau-plugin-compat (integration-tests feature)
         run: cargo nextest run --profile ci -p tau-plugin-compat --features integration-tests --tests --verbose
 
+  test-tau-plugin-compat-layer4-ignored:
+    # Promotes the 10 `#[ignore]`'d layer-4 sandbox boundary tests in
+    # crates/tau-plugin-compat/tests/layer4_{native,container}.rs from
+    # DARK to LIT (see docs/test-ignores-inventory.md bucket 2). Same
+    # prerequisites as test-tau-plugin-compat (pre-built plugin binaries
+    # + per-plugin Docker images on the container leg), but invoked
+    # with `--run-ignored only` and scoped to the layer4 test target.
+    #
+    # `matrix.flavor` is workflow-defined ("native" | "container"), not
+    # user input — no injection risk in the run: commands below.
+    #
+    # Plan: docs/superpowers/plans/2026-05-17-test-suite-upgrades.md
+    # Task 11 ("Layer4 sandbox CI dark-spot").
+    name: test (tau-plugin-compat / linux / layer4-ignored / ${{ matrix.flavor }})
+    needs: [changes, build-fixtures-linux]
+    if: needs.changes.outputs.tests_only != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [native, container]
+    env:
+      # Match the sister test-tau-plugin-compat job so adapter probes and
+      # xtask image storage land in the same place (docker, not podman).
+      TAU_CONTAINER_RUNTIME: docker
+      FLAVOR: ${{ matrix.flavor }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-mold: true
+      - uses: ./.github/actions/place-fixture-binaries
+        with:
+          binaries: "all"
+      - name: Set up Docker buildx
+        if: matrix.flavor == 'container'
+        uses: docker/setup-buildx-action@v4
+        with:
+          driver: docker-container
+      - name: Build per-plugin images (sub-project I)
+        if: matrix.flavor == 'container'
+        run: cargo run -p xtask -- build-plugin-images
+        env:
+          BUILDX_CACHE_FROM: type=gha
+          BUILDX_CACHE_TO: type=gha,mode=max
+          BUILDKIT_PROGRESS: plain
+          DOCKER_BUILDKIT: "1"
+      - name: Run ignored layer4 tests
+        # --run-ignored only runs ONLY the `#[ignore]`'d tests in the
+        # target. --test layer4_<flavor> scopes the test binary so we
+        # do not drag in unrelated targets.
+        run: |
+          cargo nextest run --profile ci \
+            -p tau-plugin-compat \
+            --features integration-tests \
+            --tests \
+            --run-ignored only \
+            --test "layer4_$FLAVOR" \
+            --verbose
+
   test-tau-sandbox-native-e2e:
     name: test (tau-sandbox-native e2e / linux)
     needs: [changes, build-fixtures-linux]

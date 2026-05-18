@@ -110,6 +110,13 @@ then running `cargo nextest run --run-ignored only -p <crate>`. Same job
 can pick up the `tau-runtime/tests/sandbox_container.rs` pair via
 `--features integration-tests`.
 
+**Status (2026-05-18):** Buckets 2a + 2b LIT. Job
+`test-tau-plugin-compat-layer4-ignored / {native,container}` lives in
+`.github/workflows/ci.yml`; reuses `build-fixtures-linux` for plugin
+binaries and (container leg only) xtask-built per-plugin Docker
+images. Bucket 2c (`tau-runtime/tests/sandbox_container.rs`) remains
+DARK pending a sibling job or matrix expansion.
+
 ---
 
 ## Bucket 3 — ENVIRONMENT-SPECIFIC (2 tests)
@@ -148,7 +155,8 @@ gone but the test is still `#[ignore]`'d, promote in a dedicated PR.
 | Bucket | Count | CI plan |
 |--------|------:|---------|
 | LIVE-DOCUMENTED | 6 | Stay `#[ignore]`'d; document opt-in |
-| DARK | 12 | Plan Task 11 — new `layer4-ignored` matrix |
+| DARK | 2 | Only `tau-runtime/sandbox_container.rs` pair remains (bucket 2c) |
+| LIT (Task 11) | 10 | Promoted via `test-tau-plugin-compat-layer4-ignored / {native,container}` matrix |
 | ENVIRONMENT-SPECIFIC | 2 | Sub-project D e2e (separate) |
 | DEFERRED | 2 | Promote when blocker resolves |
 | **Total** | **22** | |
