@@ -78,17 +78,17 @@ pre-push:
       #                                  spawn nested containers)
       #
       # Coverage — every Linux CI job is reproduced inside this single
-      # container so local pre-push gives the same answer as remote CI:
+      # container so local pre-push gives the same answer as remote CI.
+      # Stages marked PARALLEL run concurrently via _par/_wait_all.
+      #   0. setup                     — PARALLEL: apt-deps | nextest-install | rustup-1.91
       #   1. msrv-check / linux        — cargo check at MSRV (rust 1.91)
       #   2. test-fixtures-ports/linux — cargo nextest -p tau-ports --features test-fixtures
       #   3. feature-flag-matrix/linux — cargo check per-crate --no-default-features
-      #   4. build-fixtures / linux    — release binaries (consumed by jobs 6, 7, 8, 10)
+      #   4. build-fixtures / linux    — release binaries (consumed by stages 6, 7, 8)
       #   5. test-stable / linux       — cargo nextest --workspace --all-targets + doctests
-      #   6. test (conformance)        — plugin conformance suite
-      #   7. test (tau-runtime e2e)    — runtime e2e tests
-      #   8. test (sandbox-native e2e) — sandbox-native e2e tests
-      #   9. xtask-plugin-images       — DooD-built per-plugin Docker images
-      #  10. test (tau-plugin-compat)  — integration-tests feature
+      #   6. test (conformance)        — PARALLEL: anthropic | ollama | openai
+      #   7. xtask-plugin-images       — DooD-built per-plugin Docker images (prereq for stage 8)
+      #   8. e2e                       — PARALLEL: tau-runtime | tau-sandbox-native | tau-plugin-compat
       #
       # Cost: ~3-4 min warm, ~15-20 min cold. Bypass for emergencies:
       # `git push --no-verify`.
@@ -120,18 +120,6 @@ pre-push:
           docker.io/library/rust:1.82-bookworm \
           bash -c '
             set -e
-            apt-get update -qq
-            apt-get install -y -qq iproute2 nftables podman
-
-            # Install cargo-nextest (not bundled with the rust image).
-            if ! command -v cargo-nextest >/dev/null; then
-              ARCH=$(uname -m)
-              case "$ARCH" in
-                aarch64) NEXTEST_URL="https://get.nexte.st/latest/linux-arm" ;;
-                *)       NEXTEST_URL="https://get.nexte.st/latest/linux" ;;
-              esac
-              curl -LsSf "$NEXTEST_URL" | tar zxf - -C /usr/local/cargo/bin
-            fi
 
             # Use --target-dir (not CARGO_TARGET_DIR env) so child `cargo build`
             # calls spawned by tests are not redirected to the wrong path.
@@ -140,12 +128,60 @@ pre-push:
             unset CARGO_TARGET_DIR
             TARGET=target/lefthook-podman
 
+            # _par <label> <cmd...>  → background <cmd>, capture combined
+            # output to /tmp/par-<label>.log, append "<pid>:<label>:<log>"
+            # to the _PAR_TOKENS global. Call this directly (NOT inside
+            # $(...) — command substitution forks a subshell whose
+            # children cannot be `wait`-ed by the outer shell).
+            _PAR_TOKENS=()
+            _par() {
+              local label=$1; shift
+              local log=/tmp/par-$label.log
+              ( "$@" ) >"$log" 2>&1 &
+              _PAR_TOKENS+=("$!:$label:$log")
+            }
+
+            # _wait_all  → wait for every token in _PAR_TOKENS, replay
+            # each log inside ::group::<label>...::endgroup:: blocks in
+            # launch order, reset the array, return 1 if any stage
+            # exited non-zero.
+            _wait_all() {
+              local fail=0
+              for tok in "${_PAR_TOKENS[@]}"; do
+                local pid=${tok%%:*}; local rest=${tok#*:}
+                local label=${rest%%:*}; local log=${rest#*:}
+                if ! wait "$pid"; then fail=1; fi
+                echo "::group::$label"
+                cat "$log"
+                echo "::endgroup::"
+              done
+              _PAR_TOKENS=()
+              return $fail
+            }
+
+            # ─── 0. parallel setup ────────────────────────────────
+            # apt-get, cargo-nextest, and rustup MSRV install are
+            # independent of each other and of cargo. Run them
+            # concurrently via _par/_wait_all to save the difference
+            # between sum(setup tasks) and max(setup tasks).
+            _par apt-deps bash -c "apt-get update -qq && apt-get install -y -qq iproute2 nftables podman"
+            _par nextest-install bash -c '"'"'
+              if ! command -v cargo-nextest >/dev/null; then
+                ARCH=$(uname -m)
+                case "$ARCH" in
+                  aarch64) NEXTEST_URL="https://get.nexte.st/latest/linux-arm" ;;
+                  *)       NEXTEST_URL="https://get.nexte.st/latest/linux" ;;
+                esac
+                curl -LsSf "$NEXTEST_URL" | tar zxf - -C /usr/local/cargo/bin
+              fi
+            '"'"'
+            _par rustup-1.91 rustup toolchain install 1.91 --profile minimal --no-self-update
+            _wait_all
+
             # ─── 1. msrv-check / linux ────────────────────────────
-            # CI MSRV pin is 1.91 (see ci.yml). Install + use rustup
-            # to invoke it inline so we do not pollute the default
-            # toolchain in the persistent volume.
+            # CI MSRV pin is 1.91 (see ci.yml). The 1.91 toolchain was
+            # installed in Stage 0 in parallel with apt-deps.
             echo "::group::msrv-check"
-            rustup toolchain install 1.91 --profile minimal --no-self-update >/dev/null
             cargo +1.91 check --workspace --all-targets --locked --target-dir $TARGET
             echo "::endgroup::"
 
@@ -162,7 +198,7 @@ pre-push:
             echo "::endgroup::"
 
             # ─── 4. build-fixtures / linux ────────────────────────
-            # Release binaries consumed by jobs 6, 7, 8, 10.
+            # Release binaries consumed by stages 6, 7, 8.
             echo "::group::build-fixtures"
             cargo build --release \
               -p anthropic -p ollama -p openai \
@@ -189,26 +225,18 @@ pre-push:
             cargo test --workspace --doc --target-dir $TARGET
             echo "::endgroup::"
 
-            # ─── 6. test (conformance) ────────────────────────────
-            # CI runs the conformance suite against each HTTP plugin
-            # individually via its `--test conformance` integration test.
-            echo "::group::test-conformance"
-            for plugin in anthropic ollama openai; do
-              cargo nextest run -p "$plugin" --test conformance --target-dir $TARGET
-            done
-            echo "::endgroup::"
+            # ─── 6. test (conformance) — parallel ─────────────────
+            # Three independent test binaries (--test conformance per
+            # plugin crate). Build phases queue briefly on the cargo
+            # lock; test executions overlap.
+            _par conformance-anthropic cargo nextest run -p anthropic --test conformance --target-dir $TARGET
+            _par conformance-ollama    cargo nextest run -p ollama    --test conformance --target-dir $TARGET
+            _par conformance-openai    cargo nextest run -p openai    --test conformance --target-dir $TARGET
+            _wait_all
 
-            # ─── 7. test (tau-runtime e2e) ────────────────────────
-            echo "::group::test-tau-runtime-e2e"
-            cargo nextest run -p tau-runtime --features integration-tests --tests --target-dir $TARGET
-            echo "::endgroup::"
-
-            # ─── 8. test (tau-sandbox-native e2e) ─────────────────
-            echo "::group::test-tau-sandbox-native-e2e"
-            cargo nextest run -p tau-sandbox-native --features integration-tests --tests --target-dir $TARGET
-            echo "::endgroup::"
-
-            # ─── 9. xtask-plugin-images (DooD) ────────────────────
+            # ─── 7. xtask-plugin-images (DooD) ────────────────────
+            # MUST run before the parallel e2e block because
+            # test-plugin-compat consumes images built by xtask.
             # The container has /var/run/podman.sock bind-mounted; xtask
             # uses TAU_CONTAINER_RUNTIME=podman + the bind-mounted socket
             # for nested container spawn. `--target-dir` is a cargo
@@ -217,8 +245,12 @@ pre-push:
             cargo run --target-dir $TARGET -p xtask -- build-plugin-images
             echo "::endgroup::"
 
-            # ─── 10. test (tau-plugin-compat / linux) ─────────────
-            echo "::group::test-plugin-compat"
-            cargo nextest run -p tau-plugin-compat --features integration-tests --tests --target-dir $TARGET
-            echo "::endgroup::"
+            # ─── 8. e2e tests — parallel ──────────────────────────
+            # Three independent crate test runs with --features
+            # integration-tests. Build phases queue briefly on the
+            # cargo lock; test executions overlap.
+            _par e2e-tau-runtime         cargo nextest run -p tau-runtime         --features integration-tests --tests --target-dir $TARGET
+            _par e2e-tau-sandbox-native  cargo nextest run -p tau-sandbox-native  --features integration-tests --tests --target-dir $TARGET
+            _par e2e-tau-plugin-compat   cargo nextest run -p tau-plugin-compat   --features integration-tests --tests --target-dir $TARGET
+            _wait_all
           '
