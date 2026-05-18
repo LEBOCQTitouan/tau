@@ -7,7 +7,8 @@
 //! enables `--resume` with strict drift checking.
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 pub mod error;
 pub mod model;

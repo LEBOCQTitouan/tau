@@ -9,14 +9,20 @@
 use std::net::IpAddr;
 use std::str::FromStr;
 
+/// Errors returned by [`validate_hosts`] when a host doesn't pass the
+/// CONNECT proxy's allow-list rules.
 #[derive(Debug, thiserror::Error)]
 pub enum ValidationError {
+    /// A host contains a `*` wildcard — disallowed by the proxy.
     #[error("wildcard not allowed in host: {0}")]
     Wildcard(String),
+    /// A host is an IP literal that isn't a loopback address.
     #[error("non-loopback IP literal not allowed: {0}")]
     NonLoopbackIp(String),
 }
 
+/// Reject any host in the slice that contains a wildcard or is a
+/// non-loopback IP literal. Empty slices return `Ok(())`.
 pub fn validate_hosts(hosts: &[String]) -> Result<(), ValidationError> {
     for host in hosts {
         if host.contains('*') {

@@ -1,3 +1,7 @@
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+
 //! Plugin compatibility verification harness — sub-project B (2026-05-04).
 //!
 //! This crate is test infrastructure only (`publish = false`). It exists
