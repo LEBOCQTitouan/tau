@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["build_filter","install"]};
