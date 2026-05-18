@@ -383,7 +383,7 @@ jobs:
     # Task 11 ("Layer4 sandbox CI dark-spot").
     name: test (tau-plugin-compat / linux / layer4-ignored / ${{ matrix.flavor }})
     needs: [changes, build-fixtures-linux]
-    if: needs.changes.outputs.tests_only != 'true'
+    if: needs.changes.outputs.skip_heavy_jobs != 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
