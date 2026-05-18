@@ -6,13 +6,13 @@
 //! - Parses the package name and optional version pin.
 //! - Delegates to [`tau_pkg::update::update_package`].
 //! - Emits a result-summary after the synchronous call returns:
-//!   the library function runs end-to-end and returns an [`UpdateResult`];
+//!   the library function runs end-to-end and returns an `UpdateResult`;
 //!   intermediate "installing…" progress events are not available without
 //!   library hooks, so output is post-call summary only.
 //!
 //! Exit codes per ADR-0007 §7:
 //! - 0: success.
-//! - 2: any [`UpdateError`] (maps through `anyhow` to `ExitCode::Error`).
+//! - 2: any `UpdateError` (maps through `anyhow` to `ExitCode::Error`).
 
 use std::str::FromStr;
 

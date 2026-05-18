@@ -42,6 +42,17 @@ Reference content split:
   Every method, parameter, error code, and stability rule. One of
   tau's two public surfaces (G6).
 
+## Generated rustdoc
+
+`cargo doc` output for every workspace crate is published under
+`/latest/rustdoc/`. Use it for type signatures, trait method bounds,
+and per-item examples; this section of the book covers schemas +
+protocols that rustdoc can't encode naturally.
+
+The rustdoc landing page redirects to `tau-runtime`'s index — the
+kernel crate is the most useful entry point. Navigate to other
+crates from there.
+
 ## See also
 
 - [Architecture decisions](../decisions/README.md) — ADRs that pin
