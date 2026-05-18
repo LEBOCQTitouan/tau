@@ -36,6 +36,7 @@
 - [Package manifest schema](reference/package-manifest-schema.md)
 - [Project manifest schema](reference/project-manifest-schema.md)
 - [Sandbox platform support](reference/sandbox-platform-support.md)
+- [Serve mode protocol](reference/serve-mode-protocol.md)
 - [Skill manifest schema](reference/skill-manifest-schema.md)
 
 # Explanation
@@ -46,6 +47,7 @@
 - [Sandboxing](explanation/sandboxing.md)
 - [Multi-agent orchestration](explanation/multi-agent-orchestration.md)
 - [Workflows](explanation/workflows.md)
+- [Serve mode](explanation/serve-mode.md)
 - [Architecture overview](explanation/architecture-overview.md)
 - [Crate map](explanation/crate-map.md)
 - [Testing strategy](explanation/testing-strategy.md)
@@ -89,6 +91,7 @@
 - [ADR-0028 — Skills runtime invocation](decisions/0028-skills-runtime-invocation.md)
 - [ADR-0029 — Skills Anthropic interop](decisions/0029-skills-anthropic-interop.md)
 - [ADR-0030 — Skills reference packages](decisions/0030-skills-reference-packages.md)
+- [ADR-0031 — tau-observe consolidation](decisions/0031-tau-observe-consolidation.md)
 - [ADR-0032 — CapabilityOverride relocation](decisions/0032-capability-override-relocation.md)
 - [ADR-0033 — Tau serve mode v1](decisions/0033-tau-serve-mode.md)
 

@@ -37,6 +37,10 @@ Reference content split:
   features required by tau's native sandbox adapter, the distros
   tested in CI, and the known limitations of the current v0.1
   enforcement.
+- [Serve mode protocol](serve-mode-protocol.md) — the JSON-RPC 2.0 +
+  NDJSON wire format for tau running as a long-lived subprocess.
+  Every method, parameter, error code, and stability rule. One of
+  tau's two public surfaces (G6).
 
 ## See also
 
