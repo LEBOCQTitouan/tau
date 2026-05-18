@@ -36,7 +36,12 @@ pub enum DriveError {
     LoadFailed(String),
     /// The plugin's port doesn't match what the caller expected.
     #[error("port mismatch: caller expected {expected:?}, plugin provides {actual:?}")]
-    PortMismatch { expected: String, actual: String },
+    PortMismatch {
+        /// Port kind the caller asked the driver to load.
+        expected: String,
+        /// Port kind the plugin's manifest actually declared.
+        actual: String,
+    },
     /// A tool invocation returned an error.
     #[error("tool invocation failed: {0}")]
     ToolFailed(String),
