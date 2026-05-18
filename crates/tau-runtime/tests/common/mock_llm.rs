@@ -289,9 +289,7 @@ mod tests {
     /// otherwise.
     #[tokio::test]
     async fn verify_invocation_count_happy_path() {
-        let backend = MockLlmBackend::new("test")
-            .add_text("a")
-            .add_text("b");
+        let backend = MockLlmBackend::new("test").add_text("a").add_text("b");
         let req = CompletionRequest::new("m".to_string());
 
         backend.verify_invocation_count(0); // never called yet
