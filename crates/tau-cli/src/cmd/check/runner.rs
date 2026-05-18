@@ -63,6 +63,7 @@ async fn run_one(ctx: &CheckCtx, cat: CheckCategory) -> CheckResult {
         CheckCategory::Lockfile => super::categories::lockfile::run_lockfile(ctx),
         CheckCategory::Packages => super::categories::packages::run_packages(ctx),
         CheckCategory::Sandbox => super::categories::sandbox::run_sandbox(ctx).await,
+        CheckCategory::Plugins => super::categories::plugins::run_plugins(ctx).await,
         _ => CheckResult {
             category: cat,
             status: CheckStatus::Skipped {
