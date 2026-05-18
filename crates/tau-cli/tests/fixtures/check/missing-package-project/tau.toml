@@ -1,0 +1,16 @@
+# Fixture for packages check: agent that requires a tool that will
+# never be in the lockfile → packages check emits a NeedsSetup finding.
+
+[project]
+name = "missing-pkg-fixture"
+
+[agents.thing]
+display_name = "agent needing a missing tool"
+package      = "echo-llm@^0.1"
+llm_backend  = "echo-llm"
+prompt.system = "test"
+
+[[agents.thing.requires.tools]]
+name    = "never-installed"
+source  = "https://example.com/never-installed.git"
+version = "^0.1"

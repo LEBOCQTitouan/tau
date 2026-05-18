@@ -1,31 +1,34 @@
 ---
 source: crates/tau-cli/tests/help_snapshots.rs
+assertion_line: 64
 expression: s
 ---
-tau runtime CLI
+Run pre-flight validation against the project (config, lockfile, packages, sandbox, plugins, skills). Aggregates existing validators into one CI/IDE-friendly verb
 
-Usage: tau [OPTIONS] <COMMAND>
+Usage: tau check [OPTIONS] [CATEGORY]
 
-Commands:
-  init       Scaffold a project `tau.toml`
-  install    Install a package from a Git URL
-  list       List installed packages or available agents
-  run        Invoke an agent one-shot
-  chat       Open a REPL chat session with an agent
-  resolve    Install missing requires.tools dependencies for all agents in the project tau.toml. Project-wide form of the lazy resolve that `tau run` and `tau chat` perform per-agent
-  uninstall  Uninstall a package and remove its lockfile entry
-  verify     Verify installed packages against the lockfile (spec §3)
-  update     Update an installed package to a newer or specific version (spec §2)
-  plugin     Plugin debugging utilities (spec §9 debug tier)
-  session    Session management (list, show, delete, export)
-  sandbox    Sandbox configuration and diagnostics
-  workflow   Workflow subcommand group (list, run, log, resume)
-  skill      Inspect installed skill packages (list, show)
-  serve      Start serve mode: accept JSON-RPC requests over stdio
-  check      Run pre-flight validation against the project (config, lockfile, packages, sandbox, plugins, skills). Aggregates existing validators into one CI/IDE-friendly verb
-  help       Print this message or the help of the given subcommand(s)
+Arguments:
+  [CATEGORY]
+          Optional category — runs only the named check (one of: config, lockfile, packages, sandbox, plugins, skills). When omitted, runs all 6 categories
+          
+          [possible values: config, lockfile, packages, sandbox, plugins, skills]
 
 Options:
+      --fast
+          Reduce per-check I/O where a fast variant exists. No-op on categories without a fast variant (config, lockfile, packages)
+
+      --auto-resolve
+          Install missing required packages before running checks
+
+      --project <PATH>
+          Project root override. Default: cwd (walks up for tau.toml)
+
+      --json
+          Emit JSONL events to stdout. Mutually exclusive with --sarif
+
+      --sarif [<PATH>]
+          Emit SARIF 2.1.0 document. With path → write file; without → stdout. Mutually exclusive with --json
+
   -v, --verbose...
           Verbosity level. Repeat for more (-v: DEBUG, -vv: TRACE)
 
@@ -45,9 +48,6 @@ Options:
           
           [default: auto]
 
-      --json
-          Emit structured JSON output instead of human-readable. Only supported on `install`, `list`, `run`, `init`
-
       --record-protocol <PATH>
           Mirror every plugin protocol frame to a JSONL file at this path.
           
@@ -66,6 +66,3 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
-
-  -V, --version
-          Print version

@@ -1,0 +1,5 @@
+# Deliberately malformed TOML — guaranteed parse failure.
+# Missing closing bracket on [project] is a hard TOML syntax error.
+
+[project
+name = "bad"

@@ -117,6 +117,10 @@ pub enum Command {
     Skill(SkillSubcommand),
     /// Start serve mode: accept JSON-RPC requests over stdio.
     Serve(ServeArgs),
+    /// Run pre-flight validation against the project (config, lockfile,
+    /// packages, sandbox, plugins, skills). Aggregates existing validators
+    /// into one CI/IDE-friendly verb.
+    Check(CheckArgs),
 }
 
 /// `tau plugin <action>` — debug-tier helpers per spec §9.
@@ -622,6 +626,40 @@ pub struct SkillExportArgs {
     /// Overwrite an existing output directory.
     #[arg(long)]
     pub force: bool,
+}
+
+/// Arguments for `tau check`.
+///
+/// See spec at `docs/superpowers/specs/2026-05-18-tau-check-design.md` §5.
+#[derive(Args, Debug)]
+pub struct CheckArgs {
+    /// Optional category — runs only the named check (one of:
+    /// config, lockfile, packages, sandbox, plugins, skills).
+    /// When omitted, runs all 6 categories.
+    #[arg(value_name = "CATEGORY", value_parser = ["config", "lockfile", "packages", "sandbox", "plugins", "skills"])]
+    pub category: Option<String>,
+
+    /// Reduce per-check I/O where a fast variant exists.
+    /// No-op on categories without a fast variant (config, lockfile, packages).
+    #[arg(long)]
+    pub fast: bool,
+
+    /// Install missing required packages before running checks.
+    #[arg(long)]
+    pub auto_resolve: bool,
+
+    /// Project root override. Default: cwd (walks up for tau.toml).
+    #[arg(long, value_name = "PATH")]
+    pub project: Option<std::path::PathBuf>,
+
+    /// Emit JSONL events to stdout. Mutually exclusive with --sarif.
+    #[arg(long, conflicts_with = "sarif")]
+    pub json: bool,
+
+    /// Emit SARIF 2.1.0 document. With path → write file; without → stdout.
+    /// Mutually exclusive with --json.
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "-")]
+    pub sarif: Option<String>,
 }
 
 /// Arguments for `tau serve`.

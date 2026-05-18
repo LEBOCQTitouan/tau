@@ -59,6 +59,12 @@ fn snapshot_chat_help() {
 }
 
 #[test]
+fn snapshot_check_help() {
+    let s = capture_help(&["check", "--help"]);
+    insta::assert_snapshot!("check_help", s);
+}
+
+#[test]
 fn snapshot_resolve_help() {
     let s = capture_help(&["resolve", "--help"]);
     insta::assert_snapshot!("resolve_help", s);

@@ -1,0 +1,5 @@
+# Minimal project fixture for tau check integration tests (clean path).
+# No agents declared — zero-agent projects are valid per the parser.
+
+[project]
+name = "clean-fixture"

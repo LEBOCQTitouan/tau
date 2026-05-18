@@ -363,9 +363,14 @@ agent-workflow domain.
 
 Phase 2 sub-projects build on the priority-12 foundation:
 
-- **A. `tau check` standalone command** (~3 weeks). Layer 3 validation
-  as a first-class CLI verb — invocable from CI gates, IDE extensions,
-  pre-commit hooks. Reuses the validation logic from Tier 3 priority 12.
+- **A. `tau check` standalone command** ✅ Shipped 2026-05-18 — see
+  [spec](docs/superpowers/specs/2026-05-18-tau-check-design.md). Aggregator
+  CLI verb wrapping every existing pre-flight validator (config, lockfile,
+  packages, sandbox, plugins, skills) with human / `--json` / `--sarif`
+  output and granular exit codes (0/2/3/64/70). Bare `tau check` runs all
+  6 categories; `tau check <category>` runs one. Pure orchestration in
+  tau-cli — no new tau-pkg/tau-runtime code. Suitable for CI gates,
+  pre-commit hooks, and IDE Problems-panel integration via SARIF.
 - **B. Tau target triple registry** (~2 weeks). Formal naming
   convention + documented capability matrix per supported target. New
   triples land via ADR amendments.
