@@ -420,12 +420,17 @@ jobs:
       - name: Run ignored layer4 tests
         # --run-ignored only runs ONLY the `#[ignore]`'d tests in the
         # target. --test layer4_<flavor> scopes the test binary so we
-        # do not drag in unrelated targets.
+        # do not drag in unrelated targets. We deliberately do NOT pass
+        # the `--tests` flag here: combining `--tests` (all test
+        # targets) with `--test <name>` (one specific test target) lets
+        # nextest pick up BOTH targets, defeating the per-flavor
+        # filtering and causing the wrong-leg tests to fail on missing
+        # prerequisites (e.g. native leg trying to run container tests
+        # without docker images present).
         run: |
           cargo nextest run --profile ci \
             -p tau-plugin-compat \
             --features integration-tests \
-            --tests \
             --run-ignored only \
             --test "layer4_$FLAVOR" \
             --verbose
