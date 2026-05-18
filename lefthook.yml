@@ -93,7 +93,19 @@ pre-push:
       # Cost: ~3-4 min warm, ~15-20 min cold. Bypass for emergencies:
       # `git push --no-verify`.
       run: |
+        # Worktree support: in a linked worktree, .git is a file pointing
+        # to <main>/.git/worktrees/<slug>. The container bind-mounts the
+        # worktree as /workspace but cannot otherwise resolve that
+        # pointer. Bind-mount the git-common-dir at the same absolute
+        # path inside the container so the pointer resolves. No-op for
+        # normal-checkout invocations (where the paths match).
+        GIT_COMMON_DIR_ABS="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
+        EXTRA_MOUNTS=()
+        if [ "$GIT_COMMON_DIR_ABS" != "$PWD/.git" ]; then
+          EXTRA_MOUNTS+=("-v" "$GIT_COMMON_DIR_ABS:$GIT_COMMON_DIR_ABS")
+        fi
         podman run --rm \
+          "${EXTRA_MOUNTS[@]}" \
           --cap-add SYS_ADMIN --cap-add NET_ADMIN \
           --security-opt seccomp=unconfined \
           --security-opt apparmor=unconfined \
