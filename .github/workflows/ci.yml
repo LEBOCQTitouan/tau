@@ -249,12 +249,20 @@ jobs:
           shared-key: linux-stable
           with-mold: true
       - name: Build all release-mode binaries
+        # Two cargo invocations: cargo's `--bin <name>` is workspace-
+        # scoped, not per-package — combining `-p <pkg> -p <pkg> --bin
+        # <other>` builds ONLY that one binary across all packages, not
+        # all of pkg + that bin. Plugins (which each have one default
+        # binary) go in invocation 1; tau-net-bridge (a named binary
+        # inside tau-sandbox-native) goes in invocation 2.
         run: |
           cargo build --release \
             -p anthropic -p ollama -p openai \
             -p fs-read -p shell \
             -p echo-llm -p echo-tool \
             -p tau-cli
+          cargo build --release \
+            -p tau-sandbox-native --bin tau-net-bridge
       - name: Build controlled-env binary
         run: |
           cargo build --release \
@@ -276,6 +284,7 @@ jobs:
           cp target/release/echo-llm _artifacts/
           cp target/release/echo-tool _artifacts/
           cp target/release/tau _artifacts/
+          cp target/release/tau-net-bridge _artifacts/
           cp crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env _artifacts/
       - name: Upload fixture binaries
         uses: actions/upload-artifact@v7
@@ -371,6 +380,90 @@ jobs:
           DOCKER_BUILDKIT: "1"
       - name: Test tau-plugin-compat (integration-tests feature)
         run: cargo nextest run --profile ci -p tau-plugin-compat --features integration-tests --tests --verbose
+
+  test-tau-plugin-compat-layer4-ignored:
+    # Promotes the 10 `#[ignore]`'d layer-4 sandbox boundary tests in
+    # crates/tau-plugin-compat/tests/layer4_{native,container}.rs from
+    # DARK to LIT (see docs/test-ignores-inventory.md bucket 2). Same
+    # prerequisites as test-tau-plugin-compat (pre-built plugin binaries
+    # + per-plugin Docker images on the container leg), but invoked
+    # with `--run-ignored only` and scoped to the layer4 test target.
+    #
+    # `matrix.flavor` is workflow-defined ("native" | "container"), not
+    # user input — no injection risk in the run: commands below.
+    #
+    # Plan: docs/superpowers/plans/2026-05-17-test-suite-upgrades.md
+    # Task 11 ("Layer4 sandbox CI dark-spot").
+    name: test (tau-plugin-compat / linux / layer4-ignored / ${{ matrix.flavor }})
+    needs: [changes, build-fixtures-linux]
+    if: needs.changes.outputs.skip_heavy_jobs != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [native, container]
+    env:
+      # Match the sister test-tau-plugin-compat job so adapter probes and
+      # xtask image storage land in the same place (docker, not podman).
+      TAU_CONTAINER_RUNTIME: docker
+      FLAVOR: ${{ matrix.flavor }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-stable
+          with-nextest: true
+          with-mold: true
+      - uses: ./.github/actions/place-fixture-binaries
+        with:
+          binaries: "all"
+      - name: Set up Docker buildx
+        if: matrix.flavor == 'container'
+        uses: docker/setup-buildx-action@v4
+        with:
+          driver: docker-container
+      - name: Build per-plugin images (sub-project I)
+        if: matrix.flavor == 'container'
+        run: cargo run -p xtask -- build-plugin-images
+        env:
+          BUILDX_CACHE_FROM: type=gha
+          BUILDX_CACHE_TO: type=gha,mode=max
+          BUILDKIT_PROGRESS: plain
+          DOCKER_BUILDKIT: "1"
+      - name: Build NEXTEST_FILTER for this leg
+        # The 3 layer4_native HTTP cassette tests
+        # (anthropic|ollama|openai _layer4_native_completes_via_cassette)
+        # need tau-net-bridge to set up a network namespace, which
+        # requires CAP_SYS_ADMIN + CAP_NET_ADMIN. Standard GHA
+        # ubuntu-latest runners don't grant those caps; the lefthook
+        # pre-push gate gets them via `podman run --cap-add SYS_ADMIN
+        # --cap-add NET_ADMIN`. Skip them on the native leg until a
+        # privileged runner is available. The container leg covers them
+        # via its in-container bridge setup.
+        run: |
+          if [ "$FLAVOR" = "native" ]; then
+            echo 'NEXTEST_FILTER=not (test(/anthropic_layer4_native_completes_via_cassette/) | test(/ollama_layer4_native_completes_via_cassette/) | test(/openai_layer4_native_completes_via_cassette/))' >> "$GITHUB_ENV"
+          else
+            echo 'NEXTEST_FILTER=all()' >> "$GITHUB_ENV"
+          fi
+      - name: Run ignored layer4 tests
+        # --run-ignored only runs ONLY the `#[ignore]`'d tests in the
+        # target. --test layer4_<flavor> scopes the test binary so we
+        # do not drag in unrelated targets. We deliberately do NOT pass
+        # the `--tests` flag here: combining `--tests` (all test
+        # targets) with `--test <name>` (one specific test target) lets
+        # nextest pick up BOTH targets, defeating the per-flavor
+        # filtering and causing the wrong-leg tests to fail on missing
+        # prerequisites. `-E` applies the per-leg filterset from the
+        # previous step.
+        run: |
+          cargo nextest run --profile ci \
+            -p tau-plugin-compat \
+            --features integration-tests \
+            --run-ignored only \
+            --test "layer4_$FLAVOR" \
+            -E "$NEXTEST_FILTER" \
+            --verbose
 
   test-tau-sandbox-native-e2e:
     name: test (tau-sandbox-native e2e / linux)
