@@ -60,10 +60,11 @@ pub async fn run_categories(ctx: &CheckCtx, categories: &[CheckCategory]) -> Vec
 async fn run_one(ctx: &CheckCtx, cat: CheckCategory) -> CheckResult {
     match cat {
         CheckCategory::Config => super::categories::config::run_config(ctx),
+        CheckCategory::Lockfile => super::categories::lockfile::run_lockfile(ctx),
         _ => CheckResult {
             category: cat,
             status: CheckStatus::Skipped {
-                reason: "not implemented (Tasks 5-9)".to_string(),
+                reason: "not implemented (Tasks 6-9)".to_string(),
             },
             findings: Vec::new(),
             duration: Duration::from_millis(0),
