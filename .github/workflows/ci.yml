@@ -250,7 +250,8 @@ jobs:
             -p anthropic -p ollama -p openai \
             -p fs-read -p shell \
             -p echo-llm -p echo-tool \
-            -p tau-cli
+            -p tau-cli \
+            -p tau-sandbox-native --bin tau-net-bridge
       - name: Build controlled-env binary
         run: |
           cargo build --release \
@@ -272,6 +273,7 @@ jobs:
           cp target/release/echo-llm _artifacts/
           cp target/release/echo-tool _artifacts/
           cp target/release/tau _artifacts/
+          cp target/release/tau-net-bridge _artifacts/
           cp crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env _artifacts/
       - name: Upload fixture binaries
         uses: actions/upload-artifact@v7

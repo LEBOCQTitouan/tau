@@ -52,7 +52,7 @@ runs:
           # 'Stage binaries into flat _artifacts directory' step.
           for name in anthropic-plugin ollama-plugin openai-plugin \
                       fs-read-plugin shell-plugin echo-llm echo-tool tau \
-                      tau-controlled-env; do
+                      tau-net-bridge tau-controlled-env; do
             place "$name"
           done
         else
