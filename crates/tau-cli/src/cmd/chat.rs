@@ -4,8 +4,8 @@
 //!
 //! Mirrors `cmd::run`'s setup (project tau.toml → resolved
 //! `(AgentDefinition, PackageManifest)` → spawned plugin processes →
-//! [`Runtime`]), then enters a rustyline-driven REPL. Each user prompt
-//! is sent through [`Runtime::run_with_history`] so the conversation
+//! [`tau_runtime::Runtime`]), then enters a rustyline-driven REPL. Each user prompt
+//! is sent through [`tau_runtime::Runtime::run_with_history`] so the conversation
 //! accumulates across turns; tool dispatch and capability filtering
 //! are inherited from the kernel, not re-implemented here.
 //!
@@ -13,7 +13,7 @@
 //!
 //! Per spec §11: plugin processes spawn once at REPL entry and stay
 //! alive for the duration of the session (multiplexed long-lived
-//! lifecycle). On `/exit` (or EOF / Ctrl-D), the [`Runtime`] is
+//! lifecycle). On `/exit` (or EOF / Ctrl-D), the [`tau_runtime::Runtime`] is
 //! dropped, which drops the `Arc<dyn DynLlmBackend>` and per-tool
 //! `Arc<dyn DynTool>`, which drops the underlying `PluginProcess` —
 //! and `kill_on_drop` ensures the plugin subprocess exits cleanly.

@@ -40,7 +40,7 @@ pub enum ResolutionRejection {
     #[error("adapter does not apply to this platform")]
     PlatformMismatch,
 
-    /// Adapter probed [`tau_ports::ProbeOutcome::Unavailable`]; the inner
+    /// Adapter probed `tau_ports::ProbeOutcome::Unavailable`; the inner
     /// `String` is the human-readable reason returned by the probe.
     #[error("adapter probe failed: {0}")]
     ProbeUnavailable(String),

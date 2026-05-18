@@ -52,14 +52,13 @@ mod stream_router;
 /// covered by stability guarantees: integration tests under
 /// `tau-runtime/tests/plugin_host_*.rs` reach in here to drive the
 /// handshake driver and the per-port IPC adapters over a
-/// [`tau_plugin_protocol::test_support::FakeStdioPeer`] without
+/// `tau_plugin_protocol::test_support::FakeStdioPeer` without
 /// spawning real subprocesses.
 ///
 /// The non-test items
 /// ([`__internals::drive_handshake`]) are always available; the test
-/// constructors ([`__internals::PluginProcess`],
-/// [`__internals::IpcLlmBackend`], [`__internals::IpcTool`],
-/// [`__internals::IpcStorage`], etc.) require the
+/// constructors (`__internals::PluginProcess`, `__internals::IpcLlmBackend`,
+/// `__internals::IpcTool`, `__internals::IpcStorage`, etc.) require the
 /// `test-support` cargo feature so the production build can drop them.
 #[doc(hidden)]
 pub mod __internals {

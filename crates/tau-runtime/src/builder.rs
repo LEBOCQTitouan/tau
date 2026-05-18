@@ -752,7 +752,7 @@ impl RuntimeBuilder {
 
     /// Build a [`Runtime`] that may have zero LLM backends.
     ///
-    /// Unlike [`build`], this variant does **not** reject an empty backend
+    /// Unlike [`Self::build`], this variant does **not** reject an empty backend
     /// set. Use it in serve mode when the project tau.toml declares no agents
     /// (the serve process still accepts `meta.handshake` and `meta.ping`;
     /// any `runtime.run` call will return `-32010 UNKNOWN_AGENT` because no

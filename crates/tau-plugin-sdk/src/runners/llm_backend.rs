@@ -69,7 +69,7 @@ where
 }
 
 /// Same as [`run_llm_backend`] but accepts an explicit reader and writer.
-/// Used by integration tests over [`tau_plugin_protocol::test_support::FakeStdioPeer`].
+/// Used by integration tests over `tau_plugin_protocol::test_support::FakeStdioPeer`.
 pub async fn run_llm_backend_with_io<R, W, P>(
     reader: &mut FramedReader<R>,
     writer: &mut FramedWriter<W>,
@@ -155,7 +155,7 @@ where
 
 /// Same as [`run_llm_backend_with_config`] but accepts an explicit
 /// reader and writer. Used by integration tests over
-/// [`tau_plugin_protocol::test_support::FakeStdioPeer`].
+/// `tau_plugin_protocol::test_support::FakeStdioPeer`.
 pub async fn run_llm_backend_with_config_with_io<R, W, P>(
     reader: &mut FramedReader<R>,
     writer: &mut FramedWriter<W>,

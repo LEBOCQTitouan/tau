@@ -9,7 +9,8 @@ use crate::package::capability::CapabilityShape;
 /// A plugin can declare `[sandbox] required_tier = "strict"` in its
 /// `tau.toml` to refuse loading when the host can only deliver weaker
 /// enforcement (e.g., passthrough). Symmetric to project-side
-/// [`tau_pkg::scope::SandboxRequirements`].
+/// `tau_pkg::scope::SandboxRequirements` (cross-crate ref;
+/// `tau-pkg` is not a dependency of `tau-domain`).
 ///
 /// Both fields are optional with `#[serde(default)]`. A plugin with no
 /// `[sandbox]` block parses to `PluginSandboxRequirements::default()`,
