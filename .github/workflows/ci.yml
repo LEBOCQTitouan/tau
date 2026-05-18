@@ -245,12 +245,19 @@ jobs:
           shared-key: linux-stable
           with-mold: true
       - name: Build all release-mode binaries
+        # Two cargo invocations: cargo's `--bin <name>` is workspace-
+        # scoped, not per-package — combining `-p <pkg> -p <pkg> --bin
+        # <other>` builds ONLY that one binary across all packages, not
+        # all of pkg + that bin. Plugins (which each have one default
+        # binary) go in invocation 1; tau-net-bridge (a named binary
+        # inside tau-sandbox-native) goes in invocation 2.
         run: |
           cargo build --release \
             -p anthropic -p ollama -p openai \
             -p fs-read -p shell \
             -p echo-llm -p echo-tool \
-            -p tau-cli \
+            -p tau-cli
+          cargo build --release \
             -p tau-sandbox-native --bin tau-net-bridge
       - name: Build controlled-env binary
         run: |
