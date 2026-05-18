@@ -222,15 +222,6 @@ fn unknown_future_schema_version_is_rejected() {
     // schema_version = 999 must NOT load — otherwise a future tau
     // version's fields would be lost silently on the current binary's
     // re-save.
-    let body = format!(
-        r#"
-schema_version = 999
-generated_by_tau_version = "9.9.9"
-generated_at = "2030-01-01T00:00:00Z"
-"#
-    );
-    let _ = body; // suppress unused warning across rustc versions
-
     let tmp = tempfile::Builder::new()
         .prefix("tau-lockfile-future-")
         .tempdir()
@@ -238,11 +229,9 @@ generated_at = "2030-01-01T00:00:00Z"
     let path = tmp.path().join("tau-lock.toml");
     std::fs::write(
         &path,
-        format!(
-            "schema_version = 999\n\
-             generated_by_tau_version = \"9.9.9\"\n\
-             generated_at = \"2030-01-01T00:00:00Z\"\n"
-        ),
+        "schema_version = 999\n\
+         generated_by_tau_version = \"9.9.9\"\n\
+         generated_at = \"2030-01-01T00:00:00Z\"\n",
     )
     .expect("write future fixture");
 
