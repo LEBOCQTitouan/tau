@@ -178,7 +178,6 @@ fn emit_no_install_hints(
 /// `tau check config` and `tau check lockfile` categories are
 /// responsible for reporting config-file issues; the sandbox check
 /// should not double-report them.
-#[allow(dead_code)] // wired up by Tasks 3 + 4
 pub(crate) fn read_sandbox_requirements_for_check(scope: &tau_pkg::Scope) -> SandboxRequirements {
     let path = scope.config_path();
     if !path.exists() {
@@ -202,7 +201,6 @@ pub(crate) fn read_sandbox_requirements_for_check(scope: &tau_pkg::Scope) -> San
 /// happen if the user strengthens the requirement. If no
 /// non-passthrough adapter is available on this platform, the error
 /// from `resolve_strict_for_validation` propagates.
-#[allow(dead_code)] // wired up by Tasks 3 + 4
 pub(crate) async fn resolve_sandbox_check_adapter(
     requirements: &SandboxRequirements,
 ) -> Result<SandboxAdapter, ResolutionError> {
@@ -218,17 +216,14 @@ pub(crate) async fn resolve_sandbox_check_adapter(
 ///
 /// Captures all error messages as owned `String`s so callers don't need
 /// to thread runtime error types through their own match arms.
-#[allow(dead_code)] // wired up by Tasks 3 + 4
 #[derive(Debug)]
 pub(crate) enum SandboxPluginOutcome {
     /// Plan built and validated cleanly against the adapter (or built
     /// cleanly in fast mode where no adapter is given).
     Ok,
     /// `build_plan` returned an error.
-    #[allow(dead_code)] // wired up by Tasks 3 + 4
     BuildPlanFailed(String),
     /// `validate_plan_against_adapter` returned one or more errors.
-    #[allow(dead_code)] // wired up by Tasks 3 + 4
     ValidateFailed(Vec<SandboxValidationError>),
     /// Manifest at `<pkg>/tau.toml` could not be read.
     ManifestUnreadable(String),
@@ -244,7 +239,6 @@ pub(crate) enum SandboxPluginOutcome {
 /// Never panics; never logs. All outcomes (including manifest read
 /// errors and validation failures) come back through
 /// [`SandboxPluginOutcome`].
-#[allow(dead_code)] // wired up by Tasks 3 + 4
 pub(crate) fn check_plugin_sandbox(
     plugin_id: &str,
     manifest_path: &Path,
