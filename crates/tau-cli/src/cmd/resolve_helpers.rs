@@ -13,8 +13,10 @@ use anyhow::Context as _;
 
 use crate::config::AgentEntry;
 use crate::output::Output;
+use tau_pkg::scope::{SandboxRequirements, ScopeConfig};
 use tau_runtime::sandbox::{
-    build_plan, validate_plan_against_adapter, SandboxAdapter, SandboxValidationError,
+    build_plan, resolve_adapter, resolve_strict_for_validation, validate_plan_against_adapter,
+    ResolutionError, SandboxAdapter, SandboxValidationError,
 };
 
 /// Resolve + (optionally) install requires.tools for one agent.
@@ -167,6 +169,49 @@ fn emit_no_install_hints(
         output.warn(format!("  tau install {}", install.source))?;
     }
     Ok(())
+}
+
+/// Read `[sandbox]` from the active scope's `config.toml`.
+///
+/// Returns `SandboxRequirements::default()` if the file is missing,
+/// unreadable, or malformed. Errors are intentionally swallowed: the
+/// `tau check config` and `tau check lockfile` categories are
+/// responsible for reporting config-file issues; the sandbox check
+/// should not double-report them.
+#[allow(dead_code)] // wired up by Tasks 3 + 4
+pub(crate) fn read_sandbox_requirements_for_check(scope: &tau_pkg::Scope) -> SandboxRequirements {
+    let path = scope.config_path();
+    if !path.exists() {
+        return SandboxRequirements::default();
+    }
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return SandboxRequirements::default();
+    };
+    match ScopeConfig::read_from_str(&text) {
+        Ok(cfg) => cfg.sandbox,
+        Err(_) => SandboxRequirements::default(),
+    }
+}
+
+/// Resolve the sandbox adapter for check flows.
+///
+/// When `required_tier == None` the runtime resolver picks Passthrough,
+/// which trivially accepts every plan. Check flows skip passthrough
+/// and pick the highest-priority non-passthrough adapter via
+/// `resolve_strict_for_validation`, so the report shows what would
+/// happen if the user strengthens the requirement. If no
+/// non-passthrough adapter is available on this platform, the error
+/// from `resolve_strict_for_validation` propagates.
+#[allow(dead_code)] // wired up by Tasks 3 + 4
+pub(crate) async fn resolve_sandbox_check_adapter(
+    requirements: &SandboxRequirements,
+) -> Result<SandboxAdapter, ResolutionError> {
+    use tau_pkg::scope::SandboxRequiredTier;
+    if matches!(requirements.required_tier, SandboxRequiredTier::None) {
+        resolve_strict_for_validation().await
+    } else {
+        resolve_adapter(requirements, &[]).await
+    }
 }
 
 /// Outcome of validating one plugin's sandbox plan.
