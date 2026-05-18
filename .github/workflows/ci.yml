@@ -21,10 +21,14 @@ on:
     # queue itself only exists for branches that opt in.
     types: [checks_requested]
 
-# Cancel superseded runs on the same ref.
+# Cancel superseded runs on the same ref EXCEPT on main, where the
+# Swatinem rust-cache save-step only runs (see
+# .github/actions/setup-rust/action.yml `save-if`). Cancelling a
+# main run mid-cache-write means the cache write never completes
+# and subsequent PRs restore from a stale cache.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -139,18 +143,20 @@ jobs:
       - run: cargo test --workspace --doc
 
   msrv-check:
-    name: msrv-check / ${{ matrix.os == 'ubuntu-latest' && 'linux' || matrix.os == 'macos-latest' && 'macos' || 'windows' }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+    # MSRV is a rustc-version property, not an OS property. The only
+    # cfg(target_os)-gated code in this workspace lives in
+    # tau-sandbox-windows (scaffold) and tau-sandbox-darwin (real),
+    # both already covered by `test-stable` on their native OS.
+    # Cross-OS MSRV signal is not worth the ~14 Linux-equivalent
+    # runner minutes per CI run.
+    name: msrv-check / linux
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: "1.91"
-          shared-key: ${{ matrix.os }}-1.91
+          shared-key: linux-1.91
           with-sccache: true
           with-mold: true
       - run: cargo check --workspace --all-targets --locked
