@@ -30,7 +30,9 @@
 # Reference
 
 - [Overview](reference/README.md)
+- [Glossary](reference/glossary.md)
 - [Package manifest schema](reference/package-manifest-schema.md)
+- [Project manifest schema](reference/project-manifest-schema.md)
 - [Sandbox platform support](reference/sandbox-platform-support.md)
 - [Skill manifest schema](reference/skill-manifest-schema.md)
 
@@ -40,6 +42,8 @@
 - [Packages](explanation/packages.md)
 - [Capabilities and consent](explanation/capabilities-and-consent.md)
 - [Sandboxing](explanation/sandboxing.md)
+- [Multi-agent orchestration](explanation/multi-agent-orchestration.md)
+- [Workflows](explanation/workflows.md)
 - [Escape hatches](explanation/escape-hatches.md)
 - [tau as language](explanation/tau-as-language.md)
 - [Two-layer skills](explanation/two-layer-skills.md)
