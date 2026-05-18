@@ -4,7 +4,7 @@
 //!
 //! - Resolves the active [`Scope`] (project or global).
 //! - Parses the optional package name and version.
-//! - Delegates to [`tau_pkg::verify`] (single version) or
+//! - Delegates to [`tau_pkg::verify()`] (single version) or
 //!   [`tau_pkg::verify_all`] (all installed packages).
 //! - Prints either a human-readable summary (§3.3) or, when `--json`
 //!   is set, per-line JSON events (§3.4).
