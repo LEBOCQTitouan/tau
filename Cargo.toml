@@ -56,6 +56,7 @@ tau-sandbox-darwin      = { path = "crates/tau-sandbox-darwin",      version = "
 tau-sandbox-windows     = { path = "crates/tau-sandbox-windows",     version = "0.0.0" }
 tau-sandbox-proxy       = { path = "crates/tau-sandbox-proxy",       version = "0.0.0" }
 tau-workflow            = { path = "crates/tau-workflow",            version = "0.0.0" }
+tau-app                 = { path = "crates/tau-app",                 version = "0.0.0" }
 thiserror       = "2"
 semver          = { version = "1" }
 uuid            = { version = "1", features = ["v7"] }
@@ -76,9 +77,16 @@ fs4             = "0.8"
 humantime-serde = "1"
 tempfile        = "3"
 tracing         = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rmp-serde       = "1"
 rmpv            = { version = "1", features = ["with-serde"] }
 bytes           = "1"
+anyhow          = "1"
+async-trait     = "0.1"
+futures         = "0.3"
+insta           = { version = "1", features = ["json"] }
+dashmap         = "5"
+tokio-util      = { version = "0.7", features = ["rt"] }
 chrono          = { version = "0.4", features = ["serde"] }
 tokio           = { version = "1", features = ["macros", "rt", "rt-multi-thread", "io-util", "io-std", "process", "sync", "time"] }
 reqwest             = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
