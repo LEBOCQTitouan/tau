@@ -430,6 +430,22 @@ jobs:
           BUILDX_CACHE_TO: type=gha,mode=max
           BUILDKIT_PROGRESS: plain
           DOCKER_BUILDKIT: "1"
+      - name: Build NEXTEST_FILTER for this leg
+        # The 3 layer4_native HTTP cassette tests
+        # (anthropic|ollama|openai _layer4_native_completes_via_cassette)
+        # need tau-net-bridge to set up a network namespace, which
+        # requires CAP_SYS_ADMIN + CAP_NET_ADMIN. Standard GHA
+        # ubuntu-latest runners don't grant those caps; the lefthook
+        # pre-push gate gets them via `podman run --cap-add SYS_ADMIN
+        # --cap-add NET_ADMIN`. Skip them on the native leg until a
+        # privileged runner is available. The container leg covers them
+        # via its in-container bridge setup.
+        run: |
+          if [ "$FLAVOR" = "native" ]; then
+            echo 'NEXTEST_FILTER=not (test(/anthropic_layer4_native_completes_via_cassette/) | test(/ollama_layer4_native_completes_via_cassette/) | test(/openai_layer4_native_completes_via_cassette/))' >> "$GITHUB_ENV"
+          else
+            echo 'NEXTEST_FILTER=all()' >> "$GITHUB_ENV"
+          fi
       - name: Run ignored layer4 tests
         # --run-ignored only runs ONLY the `#[ignore]`'d tests in the
         # target. --test layer4_<flavor> scopes the test binary so we
@@ -438,14 +454,15 @@ jobs:
         # targets) with `--test <name>` (one specific test target) lets
         # nextest pick up BOTH targets, defeating the per-flavor
         # filtering and causing the wrong-leg tests to fail on missing
-        # prerequisites (e.g. native leg trying to run container tests
-        # without docker images present).
+        # prerequisites. `-E` applies the per-leg filterset from the
+        # previous step.
         run: |
           cargo nextest run --profile ci \
             -p tau-plugin-compat \
             --features integration-tests \
             --run-ignored only \
             --test "layer4_$FLAVOR" \
+            -E "$NEXTEST_FILTER" \
             --verbose
 
   test-tau-sandbox-native-e2e:
