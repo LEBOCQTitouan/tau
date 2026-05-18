@@ -38,5 +38,6 @@ bytes               = { workspace = true }
 tokio                   = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "net"] }
 tempfile                = { workspace = true }
 serde_yaml              = "0.9"
+assert_matches          = { workspace = true }
 tau-plugin-test-support = { workspace = true }
 tau-plugin-conformance  = { workspace = true }
