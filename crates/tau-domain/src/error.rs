@@ -183,7 +183,7 @@ pub enum PackageManifestError {
     SkillCannotHavePluginBlock,
 }
 
-/// Validation errors for [`crate::package::PortKind::from_str`].
+/// Validation errors for `<crate::package::PortKind as std::str::FromStr>::from_str`.
 ///
 /// # Example
 ///
@@ -206,7 +206,7 @@ pub enum PortKindError {
     },
 }
 
-/// Validation errors for [`crate::package::PluginKind::from_str`].
+/// Validation errors for `<crate::package::PluginKind as std::str::FromStr>::from_str`.
 ///
 /// # Example
 ///

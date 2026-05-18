@@ -8,7 +8,8 @@
 //!    (neither).
 //!
 //! 2. [`synthesize_manifest_from_skill_md`] takes a parsed
-//!    [`SkillContent`] (from [`parse_skill_md`]) plus a source URL
+//!    [`SkillContent`] (from
+//!    [`parse_skill_md`](crate::package::skill::parse_skill_md)) plus a source URL
 //!    and produces a default [`PackageManifest`] equivalent to what
 //!    a hand-written `tau.toml` would emit for an Anthropic skill.
 //!

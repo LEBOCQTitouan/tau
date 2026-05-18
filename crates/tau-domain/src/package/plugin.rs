@@ -1,7 +1,8 @@
 //! Plugin manifest types declared in a package's `tau.toml` `[plugin]`
 //! table.
 //!
-//! Mirrors the ADR-0005 pattern from [`PackageSource`]: enums serialize
+//! Mirrors the ADR-0005 pattern from
+//! [`PackageSource`](crate::package::source::PackageSource): enums serialize
 //! as canonical strings via `Display`/`FromStr` (not as adjacent-tagged
 //! objects), so a TOML `provides = "llm_backend"` round-trips cleanly.
 

@@ -48,7 +48,7 @@ impl Runtime {
     /// Identical to [`Runtime::run`] except `history` is pre-loaded into
     /// the messages buffer for turn 1: the kernel projects `history`
     /// (plus the new `initial_message`) onto the
-    /// [`CompletionRequest::messages`] list before the first LLM call.
+    /// [`tau_ports::CompletionRequest`]'s `messages` list before the first LLM call.
     /// Subsequent turns evolve the buffer normally — assistant text,
     /// tool calls, tool results — exactly as in
     /// [`Runtime::run`].
@@ -61,7 +61,7 @@ impl Runtime {
     ///
     /// The loop is otherwise identical to [`Runtime::run`]:
     ///
-    /// 1. Build a [`CompletionRequest`] from `history + initial_message`
+    /// 1. Build a [`tau_ports::CompletionRequest`] from `history + initial_message`
     ///    on turn 1; from the evolving buffer on later turns.
     /// 2. Call the LLM backend.
     /// 3. Append the assistant text to the history.

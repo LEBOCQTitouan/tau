@@ -3,15 +3,15 @@
 //!
 //! Per spec §6.2, §6.3:
 //! - [`Configure::from_config`] validates inputs
-//!   ([`resolve_bearer_token`], [`validate_retry`]), constructs the
+//!   (`resolve_bearer_token`, `validate_retry`), constructs the
 //!   `reqwest::Client` with the configured timeout + a tau-branded
 //!   user-agent, and assembles an `OllamaPlugin { client: OllamaClient }`.
 //! - [`LlmBackend::name`] returns `"ollama"`.
 //! - [`LlmBackend::complete`] builds a non-streaming body via
-//!   [`build_chat_body`], posts it via [`OllamaClient::post_chat`],
-//!   and parses the response with [`parse_chat_response`].
+//!   `build_chat_body`, posts it via `OllamaClient::post_chat`,
+//!   and parses the response with `parse_chat_response`.
 //! - [`LlmBackend::stream`] builds a streaming body, posts it, and
-//!   hands the [`reqwest::Response`] to [`parse_ndjson`] to produce a
+//!   hands the `reqwest::Response` to `parse_ndjson` to produce a
 //!   [`tau_ports::CompletionStream`].
 
 use secrecy::SecretString;
@@ -28,7 +28,7 @@ use crate::stream::parse_ndjson;
 /// Ollama (local LLM runner) plugin.
 ///
 /// Constructed via [`Configure::from_config`] from an
-/// [`OllamaConfig`]. Holds an [`OllamaClient`] preconfigured with the
+/// [`OllamaConfig`]. Holds an `OllamaClient` preconfigured with the
 /// optional bearer token (None for local Ollama at
 /// `http://localhost:11434`), base URL, retry policy, and a
 /// `reqwest::Client` carrying the per-request HTTP timeout.
