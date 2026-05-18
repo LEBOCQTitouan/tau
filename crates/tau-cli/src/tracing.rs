@@ -1,11 +1,16 @@
 //! Tracing-subscriber configuration for tau-cli.
 //!
+//! The CLI's job is to map clap flags onto a final filter directive.
+//! Subscriber install itself lives in [`tau_observe::install`] so the
+//! CLI and plugin SDK share one code path (sub-project A consolidation).
+//!
 //! Per spec §3.7: stderr-targeted subscriber, default level INFO scoped
 //! to `tau=*`, verbosity flags promote (-v: DEBUG, -vv: TRACE), --quiet
 //! demotes to WARN, --debug behaves as -v plus expanded error chain at
-//! print time, RUST_LOG overrides everything (standard env_logger
-//! convention).
+//! print time, RUST_LOG overrides everything.
 
+use tau_observe::filter::env_or_directive;
+use tau_observe::install::{install as observe_install, Format, InstallOptions, Writer};
 use tracing_subscriber::filter::EnvFilter;
 
 use crate::cli::Cli;
@@ -18,38 +23,35 @@ use crate::cli::Cli;
 /// 3. `--debug` OR `--verbose` count >= 1 → `"tau=debug"`.
 /// 4. `--quiet` → `"tau=warn"`.
 /// 5. Default → `"tau=info"`.
-///
-/// The default scopes to `tau=*` so plugin tracing doesn't flood unless
-/// the user explicitly opts in via `RUST_LOG`.
 pub fn build_filter(cli: &Cli) -> EnvFilter {
-    if let Ok(env) = std::env::var("RUST_LOG") {
-        return EnvFilter::new(env);
-    }
-
-    let level = if cli.verbose >= 2 {
-        "trace"
+    let directive = if cli.verbose >= 2 {
+        "tau=trace"
     } else if cli.debug || cli.verbose >= 1 {
-        "debug"
+        "tau=debug"
     } else if cli.quiet {
-        "warn"
+        "tau=warn"
     } else {
-        "info"
+        "tau=info"
     };
-
-    EnvFilter::new(format!("tau={level}"))
+    env_or_directive(directive)
 }
 
-/// Install the global tracing subscriber. Must be called exactly once
-/// per process; subsequent calls panic via `init()`.
+/// Install the global tracing subscriber for the `tau` CLI.
 ///
-/// Writes to stderr in the standard `tracing_subscriber::fmt` human-
-/// readable format (timestamp + level + target + fields + message).
+/// Delegates to [`tau_observe::install::install`] with the CLI's
+/// human-format, stderr-writer configuration. Idempotent — the
+/// underlying installer short-circuits second calls.
 pub fn install(cli: &Cli) {
-    let filter = build_filter(cli);
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .init();
+    let opts = InstallOptions {
+        filter: build_filter(cli),
+        format: Format::Human,
+        writer: Writer::Stderr,
+    };
+    // The CLI does not propagate install errors; the only failure mode
+    // is "already installed", which the underlying installer maps to a
+    // no-op guard.
+    let _guard =
+        observe_install(opts).expect("tau_observe::install never returns Err in current impl");
 }
 
 #[cfg(test)]
@@ -77,9 +79,9 @@ mod tests {
         }
     }
 
-    /// Mutex-guarded `RUST_LOG` mutation across tests since unit tests in the
-    /// same binary share env state. Each test that touches RUST_LOG must
-    /// take this lock to serialize.
+    /// Serialize tests that mutate `RUST_LOG` against each other in the
+    /// same process (cargo test runs unit tests in one binary, so env
+    /// state is shared).
     fn rust_log_lock() -> std::sync::MutexGuard<'static, ()> {
         use std::sync::{Mutex, OnceLock};
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -137,9 +139,8 @@ mod tests {
     fn build_filter_rust_log_overrides_flags() {
         let _g = rust_log_lock();
         std::env::set_var("RUST_LOG", "my_plugin=trace");
-        let cli = make_cli(0, true, false); // would be warn without RUST_LOG
+        let cli = make_cli(0, true, false);
         let filter = build_filter(&cli);
-        // RUST_LOG verbatim — no `tau=` scope
         assert!(
             filter.to_string().contains("my_plugin=trace"),
             "got: {filter}"
@@ -158,8 +159,6 @@ mod tests {
 
     #[test]
     fn build_filter_minus_vv_takes_precedence_over_minus_v_logic() {
-        // Sanity: order should check >= 2 first; otherwise -vv would
-        // collapse to -v (a known spec self-review fix).
         let _g = rust_log_lock();
         std::env::remove_var("RUST_LOG");
         let cli = make_cli(2, false, false);

@@ -57,6 +57,7 @@ tau-sandbox-windows     = { path = "crates/tau-sandbox-windows",     version = "
 tau-sandbox-proxy       = { path = "crates/tau-sandbox-proxy",       version = "0.0.0" }
 tau-workflow            = { path = "crates/tau-workflow",            version = "0.0.0" }
 tau-app                 = { path = "crates/tau-app",                 version = "0.0.0" }
+tau-observe             = { path = "crates/tau-observe",             version = "0.0.0" }
 thiserror       = "2"
 semver          = { version = "1" }
 uuid            = { version = "1", features = ["v7"] }
