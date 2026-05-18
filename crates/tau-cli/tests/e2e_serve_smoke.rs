@@ -14,6 +14,9 @@ use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
+#[path = "e2e_common.rs"]
+mod e2e_common;
+
 fn tau_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_tau"))
 }
@@ -56,6 +59,7 @@ fn recv_line(reader: &mut BufReader<std::process::ChildStdout>) -> Value {
 /// `meta.ping` works before the handshake.
 #[test]
 fn ping_before_handshake() {
+    e2e_common::ensure_home_env();
     let (mut child, mut stdin, mut reader) = spawn_serve();
 
     send_line(
@@ -77,6 +81,7 @@ fn ping_before_handshake() {
 /// Full `meta.handshake` roundtrip: request → response with matching protocol_version.
 #[test]
 fn handshake_response_over_real_pipe() {
+    e2e_common::ensure_home_env();
     let (mut child, mut stdin, mut reader) = spawn_serve();
 
     send_line(
@@ -107,6 +112,7 @@ fn handshake_response_over_real_pipe() {
 /// After a successful handshake, `meta.ping` still works.
 #[test]
 fn ping_after_handshake() {
+    e2e_common::ensure_home_env();
     let (mut child, mut stdin, mut reader) = spawn_serve();
 
     // Handshake first.

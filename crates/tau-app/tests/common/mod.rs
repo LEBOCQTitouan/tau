@@ -36,6 +36,14 @@ impl Harness {
     /// Used by concurrency tests to set a tight cap (e.g. 1) and observe
     /// the `-32004 SERVER_BUSY` error when the cap is reached.
     pub async fn with_options(fixture_dir: PathBuf, max_concurrent: usize) -> Self {
+        // tau_pkg::Scope::resolve (called transitively by Project::load) reads
+        // $HOME to find the user scope. GitHub Actions Windows runners don't
+        // set $HOME (Windows uses %USERPROFILE%), so we set it explicitly for
+        // tests. Safe to set unconditionally: if HOME is already set, this is
+        // a no-op; if it's unset (Windows CI), we point it at USERPROFILE or
+        // a tempdir.
+        ensure_home_env();
+
         let (in_tx, in_rx) = mpsc::channel::<Inbound>(32);
         let (out_tx, out_rx) = mpsc::channel::<Outbound>(64);
 
@@ -128,4 +136,19 @@ impl Harness {
             _ => None,
         }
     }
+}
+
+/// Ensure `$HOME` is set so `tau_pkg::Scope::resolve` succeeds in CI.
+///
+/// On Windows runners, `$HOME` is typically unset (Windows uses
+/// `%USERPROFILE%`). Falls back to USERPROFILE on Windows or `/tmp` as
+/// a last resort.
+fn ensure_home_env() {
+    if std::env::var_os("HOME").is_some() {
+        return;
+    }
+    let fallback = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("TEMP"))
+        .unwrap_or_else(|| std::ffi::OsString::from("/tmp"));
+    std::env::set_var("HOME", fallback);
 }

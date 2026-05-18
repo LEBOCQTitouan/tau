@@ -13,6 +13,9 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+#[path = "e2e_common.rs"]
+mod e2e_common;
+
 fn tau_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_tau"))
 }
@@ -23,6 +26,7 @@ fn fixture_dir() -> PathBuf {
 
 #[test]
 fn ready_on_stderr_marker() {
+    e2e_common::ensure_home_env();
     let bin = tau_bin();
     let fixture = fixture_dir();
 

@@ -21,6 +21,9 @@ use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
+#[path = "e2e_common.rs"]
+mod e2e_common;
+
 fn tau_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_tau"))
 }
@@ -67,6 +70,7 @@ fn recv_line(reader: &mut BufReader<std::process::ChildStdout>) -> Value {
 /// process (not just the in-memory harness used in Layer 2 tests).
 #[test]
 fn unknown_agent_in_streaming_run_returns_32010() {
+    e2e_common::ensure_home_env();
     let (mut child, mut stdin, mut reader) = spawn_serve();
 
     // Handshake first — streaming calls require a completed handshake.
@@ -103,6 +107,7 @@ fn unknown_agent_in_streaming_run_returns_32010() {
 /// the streaming test above.
 #[test]
 fn unknown_agent_in_batch_run_returns_32010() {
+    e2e_common::ensure_home_env();
     let (mut child, mut stdin, mut reader) = spawn_serve();
 
     send_line(

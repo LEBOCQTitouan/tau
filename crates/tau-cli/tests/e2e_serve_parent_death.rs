@@ -14,6 +14,9 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[path = "e2e_common.rs"]
+mod e2e_common;
+
 fn tau_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_tau"))
 }
@@ -29,6 +32,7 @@ fn fixture_dir() -> PathBuf {
 /// and listening (not still starting up) when we trigger shutdown.
 #[test]
 fn child_exits_on_stdin_eof() {
+    e2e_common::ensure_home_env();
     let mut child = Command::new(tau_bin())
         .args(["serve", "--ready-on-stderr", "--project"])
         .arg(fixture_dir())
