@@ -3,6 +3,7 @@
 //! Pure parsing functions over byte slices; the async splice loop lives
 //! in lib.rs. Tested without any tokio runtime.
 
+/// Parsed first line of a plain-HTTP request the proxy is about to forward.
 #[derive(Debug, PartialEq, Eq)]
 pub struct HttpRequest {
     /// HTTP method (GET, POST, etc.).
@@ -21,12 +22,17 @@ pub struct HttpRequest {
     pub line_end: usize,
 }
 
+/// Errors returned by [`parse_http_request`] when the request line can't
+/// be parsed or the host can't be resolved.
 #[derive(Debug, thiserror::Error)]
 pub enum HttpParseError {
+    /// The request line did not match the HTTP/1.x request grammar.
     #[error("malformed request: {0}")]
     Malformed(&'static str),
+    /// The method token isn't a recognised HTTP verb.
     #[error("not an HTTP method")]
     NotHttp,
+    /// Neither an absolute-URI nor a `Host:` header was present.
     #[error("no host (neither absolute-URI nor Host header)")]
     NoHost,
 }

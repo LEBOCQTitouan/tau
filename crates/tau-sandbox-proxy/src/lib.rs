@@ -1,3 +1,7 @@
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+
 //! `tau-sandbox-proxy` — userspace HTTP-CONNECT proxy for tau sandboxed plugins.
 //!
 //! Shared by both the native (Linux landlock/seccomp) and container
