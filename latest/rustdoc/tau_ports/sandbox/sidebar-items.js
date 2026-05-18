@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SandboxProbe","SandboxTier"],"struct":["ResourceLimits","SandboxHandle","SandboxPlan","WorkingContext"],"trait":["Sandbox"]};

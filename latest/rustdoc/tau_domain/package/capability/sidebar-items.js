@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AgentCapability","Capability","CapabilityShape","FsCapability","NetCapability","ProcessCapability","SkillCapability"],"struct":["CapabilityShapeSet"]};
