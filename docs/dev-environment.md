@@ -104,6 +104,20 @@ podman run -it --rm \
 
 Inside the container, `apt-get install -y iproute2 nftables` then run cargo commands directly. Same kernel, same caps, same crate cache as the automated gate — what fails interactively will fail in the gate, and vice versa.
 
+## Coverage
+
+```bash
+cargo install cargo-llvm-cov --locked
+rustup component add llvm-tools-preview
+cargo llvm-cov nextest --workspace --no-fail-fast --html
+```
+
+Then open `target/llvm-cov/html/index.html` (or your `CARGO_TARGET_DIR`-relative equivalent).
+CI runs the same invocation on every PR and posts the percent + the `lcov.info`
+artifact to the workflow summary.
+
+Coverage is a signal, not a gate — do not write tests to hit a number.
+
 ## Bypassing the gate (emergencies only)
 
 ```bash
