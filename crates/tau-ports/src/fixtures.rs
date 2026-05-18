@@ -598,7 +598,8 @@ pub fn plan_from_capabilities(caps: Vec<tau_domain::Capability>) -> SandboxPlan 
     SandboxPlan::new(caps, None, None)
 }
 
-/// Build a [`SandboxPlan`] from a capability list with a [`WorkingContext`].
+/// Build a [`SandboxPlan`] from a capability list with a
+/// [`WorkingContext`](crate::sandbox::WorkingContext).
 pub fn plan_with_context(
     caps: Vec<tau_domain::Capability>,
     ctx: crate::sandbox::WorkingContext,
@@ -606,7 +607,8 @@ pub fn plan_with_context(
     SandboxPlan::new(caps, Some(ctx), None)
 }
 
-/// Build a [`WorkingContext`] from a working directory and environment map.
+/// Build a [`WorkingContext`](crate::sandbox::WorkingContext) from a
+/// working directory and environment map.
 pub fn working_context(
     working_dir: impl Into<std::path::PathBuf>,
     env: BTreeMap<String, String>,
@@ -617,7 +619,8 @@ pub fn working_context(
     }
 }
 
-/// Build a [`ResourceLimits`] from optional memory and CPU-second limits.
+/// Build a [`ResourceLimits`](crate::sandbox::ResourceLimits) from
+/// optional memory and CPU-second limits.
 ///
 /// `cpu_seconds` is `Option<u32>` (matching the field type in
 /// [`crate::sandbox::ResourceLimits`]).

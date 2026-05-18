@@ -9,7 +9,7 @@
 //!   (§4.2) or, when `--json` is set, four per-line JSON events (§4.3).
 //!
 //! Errors propagate via `anyhow::Error` and exit 2 through the
-//! top-level `dispatch` in [`crate::lib`].
+//! top-level `dispatch` in `crate::run_main`.
 
 use std::str::FromStr;
 

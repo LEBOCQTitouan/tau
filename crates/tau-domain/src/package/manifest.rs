@@ -229,7 +229,8 @@ pub struct UncheckedManifest {
     /// Plugin-side sandbox requirements declared via `[sandbox]` table.
     ///
     /// Optional. Default = `PluginSandboxRequirements::default()` (no
-    /// tier floor; auto-derived shapes). See [`PluginSandboxRequirements`].
+    /// tier floor; auto-derived shapes). See
+    /// [`PluginSandboxRequirements`](crate::package::sandbox::PluginSandboxRequirements).
     #[cfg_attr(feature = "serde", serde(default))]
     pub sandbox: crate::package::sandbox::PluginSandboxRequirements,
     /// Skill manifest declared via the `[skill]` table.

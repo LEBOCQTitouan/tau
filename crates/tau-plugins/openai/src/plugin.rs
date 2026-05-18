@@ -3,16 +3,16 @@
 //!
 //! Per spec §6:
 //! - [`Configure::from_config`] validates inputs
-//!   ([`resolve_api_key`], [`validate_retry`]), constructs the
+//!   (`resolve_api_key`, `validate_retry`), constructs the
 //!   `reqwest::Client` with the configured timeout + a tau-branded
 //!   user-agent, and assembles an `OpenAIPlugin { client: OpenAIClient }`.
 //! - [`LlmBackend::name`] returns `"openai"`.
 //! - [`LlmBackend::complete`] builds a non-streaming body via
-//!   [`build_chat_completions_body`], posts it via
-//!   [`OpenAIClient::post_chat_completions`], and parses the response
-//!   with [`parse_chat_completions_response`].
+//!   `build_chat_completions_body`, posts it via
+//!   `OpenAIClient::post_chat_completions`, and parses the response
+//!   with `parse_chat_completions_response`.
 //! - [`LlmBackend::stream`] builds a streaming body, posts it, and
-//!   hands the [`reqwest::Response`] to [`parse_sse`] to produce a
+//!   hands the `reqwest::Response` to `parse_sse` to produce a
 //!   [`tau_ports::CompletionStream`].
 //!
 //! Non-success responses extract `headers` BEFORE consuming the
@@ -33,7 +33,7 @@ use crate::stream::parse_sse;
 /// OpenAI Chat Completions API plugin.
 ///
 /// Constructed via [`Configure::from_config`] from an
-/// [`OpenAIConfig`]. Holds an [`OpenAIClient`] preconfigured with the
+/// [`OpenAIConfig`]. Holds an `OpenAIClient` preconfigured with the
 /// resolved API key, base URL, optional organization id, retry policy,
 /// and a `reqwest::Client` carrying the per-request HTTP timeout.
 pub struct OpenAIPlugin {

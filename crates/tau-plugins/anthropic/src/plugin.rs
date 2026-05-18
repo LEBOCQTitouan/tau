@@ -3,15 +3,15 @@
 //!
 //! Per spec §6.3:
 //! - [`Configure::from_config`] validates inputs
-//!   ([`resolve_api_key`], [`validate_retry`]), constructs the
+//!   (`resolve_api_key`, `validate_retry`), constructs the
 //!   `reqwest::Client` with the configured timeout + a tau-branded
 //!   user-agent, and assembles an `AnthropicPlugin { client: AnthropicClient }`.
 //! - [`LlmBackend::name`] returns `"anthropic"`.
 //! - [`LlmBackend::complete`] builds a non-streaming body via
-//!   [`build_messages_body`], posts it via [`AnthropicClient::post_messages`],
-//!   and parses the response with [`parse_messages_response`].
+//!   `build_messages_body`, posts it via `AnthropicClient::post_messages`,
+//!   and parses the response with `parse_messages_response`.
 //! - [`LlmBackend::stream`] builds a streaming body, posts it, and hands
-//!   the [`reqwest::Response`] to [`parse_sse`] to produce a
+//!   the `reqwest::Response` to `parse_sse` to produce a
 //!   [`tau_ports::CompletionStream`].
 
 use secrecy::SecretString;
@@ -28,7 +28,7 @@ use crate::stream::parse_sse;
 /// Anthropic Claude (Messages API) plugin.
 ///
 /// Constructed via [`Configure::from_config`] from an
-/// [`AnthropicConfig`]. Holds an [`AnthropicClient`] preconfigured with
+/// [`AnthropicConfig`]. Holds an `AnthropicClient` preconfigured with
 /// the resolved API key, base URL, API-version header, retry policy,
 /// and a `reqwest::Client` carrying the per-request HTTP timeout.
 pub struct AnthropicPlugin {

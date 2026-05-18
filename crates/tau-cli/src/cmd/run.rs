@@ -6,7 +6,7 @@
 //! `(AgentDefinition, PackageManifest)` pair, resolves the agent's
 //! LLM-backend + tool plugins from the per-scope lockfile, spawns
 //! each plugin process via `tau_runtime::plugin_host::load_*`, builds
-//! a [`Runtime`] populated with the resulting `Arc<dyn Dyn*>` shims,
+//! a [`tau_runtime::Runtime`] populated with the resulting `Arc<dyn Dyn*>` shims,
 //! then builds an initial [`Message`] from `--prompt` / stdin, runs the
 //! agent, and maps the resulting [`RunOutcome`] to stdout/stderr + an
 //! `ExitCode`.

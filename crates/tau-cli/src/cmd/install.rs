@@ -12,7 +12,7 @@
 //!   structured payload.
 //!
 //! Errors propagate via `anyhow::Error` and exit 2 through the
-//! top-level `dispatch` in [`crate::lib`].
+//! top-level `dispatch` in `crate::run_main`.
 
 use std::path::PathBuf;
 use std::process::Command;

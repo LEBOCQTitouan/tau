@@ -17,7 +17,7 @@
 //! The `binary_sha256` slot on [`LockedPlugin`] is populated by
 //! `install_with_options` after `cargo build` succeeds (Task 2).
 //!
-//! [`LockFile::load`]/[`save`]/[`find`]/[`upsert`]/[`remove`] land in
+//! [`LockFile::load`]/`save`/`find`/`upsert`/`remove` land in
 //! Task 7. This file (Task 6) defines only the data shapes + `Default`.
 
 use std::fs;

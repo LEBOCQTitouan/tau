@@ -286,7 +286,7 @@ pub fn render_install_error(err: &InstallError) -> String {
     }
 }
 
-/// Render an [`ImportError`] as a guided, human-readable error message.
+/// Render an `ImportError` as a guided, human-readable error message.
 ///
 /// Covers Skills-5 `tau skill import` error variants. Each variant
 /// surfaces a remediation hint so users can fix the issue immediately.
@@ -346,7 +346,7 @@ pub fn render_import_error(err: &crate::cmd::skill::import::ImportError) -> Stri
     }
 }
 
-/// Render an [`ExportError`] as a guided, human-readable error message.
+/// Render an `ExportError` as a guided, human-readable error message.
 ///
 /// Skills-5 Task 6 stub — export is not yet implemented; this render
 /// covers the type variants declared in the stub module.
