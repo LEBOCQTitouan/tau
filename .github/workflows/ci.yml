@@ -64,8 +64,11 @@ jobs:
     # bump, so the test-file requirement is the conservative gate.
     #
     # Workspace-root Cargo.toml is intentionally NOT in the safe set
-    # (workspace deps can affect many crates). Pattern `crates/**/Cargo.toml`
-    # matches per-crate manifests only.
+    # (workspace deps can affect many crates). Per-crate manifests are
+    # enumerated at two and three path-segment depths because dorny's
+    # picomatch glob behaves inconsistently with deeply-nested manifests
+    # (observed: `crates/**/Cargo.toml` did not match
+    # `crates/tau-plugins/ollama/Cargo.toml` in PR #158).
     name: detect changes
     runs-on: ubuntu-latest
     outputs:
@@ -81,7 +84,8 @@ jobs:
             ok:
               - 'crates/**/tests/**'
               - 'crates/**/benches/**'
-              - 'crates/**/Cargo.toml'
+              - 'crates/*/Cargo.toml'
+              - 'crates/*/*/Cargo.toml'
               - 'Cargo.lock'
       - uses: dorny/paths-filter@v4
         id: any_test_change
