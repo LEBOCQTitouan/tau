@@ -229,7 +229,14 @@ fn toml_to_json(v: toml::Value) -> serde_json::Value {
     }
 }
 
-/// Wait for any of: SIGTERM, SIGINT, stdin EOF.
+/// Wait for any of: SIGTERM, SIGINT (Unix), Ctrl-C (all platforms).
+///
+/// Unix uses dedicated `SignalKind::terminate` + `SignalKind::interrupt`
+/// streams (`tokio::signal::unix`). Windows has no `unix` submodule;
+/// we use `tokio::signal::ctrl_c` as the cross-platform interrupt
+/// signal. SIGTERM has no analog on Windows — parent-death detection
+/// there relies on stdin EOF (see lifecycle::run).
+#[cfg(unix)]
 async fn wait_for_shutdown_signal() {
     use tokio::signal::unix::{signal, SignalKind};
     let mut term = match signal(SignalKind::terminate()) {
@@ -244,6 +251,12 @@ async fn wait_for_shutdown_signal() {
         _ = term.recv() => info!("received SIGTERM"),
         _ = int.recv() => info!("received SIGINT"),
     }
+}
+
+#[cfg(not(unix))]
+async fn wait_for_shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
+    info!("received Ctrl-C");
 }
 
 /// On Linux, ask the kernel to deliver SIGTERM to us when our parent dies.

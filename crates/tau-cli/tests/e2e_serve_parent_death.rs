@@ -44,7 +44,7 @@ fn child_exits_on_stdin_eof() {
         let stderr = child.stderr.take().unwrap();
         let reader = std::io::BufReader::new(stderr);
         let mut ready = false;
-        for line in reader.lines().flatten().take(50) {
+        for line in reader.lines().map_while(Result::ok).take(50) {
             if line.contains("tau-serve ready") {
                 ready = true;
                 break;

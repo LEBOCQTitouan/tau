@@ -40,8 +40,10 @@ fn ready_on_stderr_marker() {
     let mut saw_ready = false;
 
     // Read up to 50 lines from stderr — the ready signal should appear
-    // very early (before any protocol traffic).
-    for line in reader.lines().flatten().take(50) {
+    // very early (before any protocol traffic). Use map_while to bail
+    // on first read error rather than looping on a repeated Err
+    // (clippy::lines_filter_map_ok).
+    for line in reader.lines().map_while(Result::ok).take(50) {
         if line.contains("tau-serve ready") {
             saw_ready = true;
             break;
