@@ -6,12 +6,16 @@
 //! `Vec<(AgentId, RequiredTool)>` input — single-agent (run/chat) or
 //! all-agents (resolve).
 
+use std::path::Path;
 use std::str::FromStr;
 
 use anyhow::Context as _;
 
 use crate::config::AgentEntry;
 use crate::output::Output;
+use tau_runtime::sandbox::{
+    build_plan, validate_plan_against_adapter, SandboxAdapter, SandboxValidationError,
+};
 
 /// Resolve + (optionally) install requires.tools for one agent.
 ///
@@ -163,4 +167,163 @@ fn emit_no_install_hints(
         output.warn(format!("  tau install {}", install.source))?;
     }
     Ok(())
+}
+
+/// Outcome of validating one plugin's sandbox plan.
+///
+/// Captures all error messages as owned `String`s so callers don't need
+/// to thread runtime error types through their own match arms.
+#[allow(dead_code)] // wired up by Tasks 3 + 4
+#[derive(Debug)]
+pub(crate) enum SandboxPluginOutcome {
+    /// Plan built and validated cleanly against the adapter (or built
+    /// cleanly in fast mode where no adapter is given).
+    Ok,
+    /// `build_plan` returned an error.
+    #[allow(dead_code)] // wired up by Tasks 3 + 4
+    BuildPlanFailed(String),
+    /// `validate_plan_against_adapter` returned one or more errors.
+    #[allow(dead_code)] // wired up by Tasks 3 + 4
+    ValidateFailed(Vec<SandboxValidationError>),
+    /// Manifest at `<pkg>/tau.toml` could not be read.
+    ManifestUnreadable(String),
+}
+
+/// Build and (optionally) validate one plugin's sandbox plan.
+///
+/// Reads the plugin's manifest from `manifest_path`, calls `build_plan`
+/// on its declared capabilities, and (when `adapter` is `Some`) calls
+/// `validate_plan_against_adapter`. When `adapter` is `None`, runs in
+/// "fast mode" — only `build_plan` is exercised; on success returns `Ok`.
+///
+/// Never panics; never logs. All outcomes (including manifest read
+/// errors and validation failures) come back through
+/// [`SandboxPluginOutcome`].
+#[allow(dead_code)] // wired up by Tasks 3 + 4
+pub(crate) fn check_plugin_sandbox(
+    plugin_id: &str,
+    manifest_path: &Path,
+    adapter: Option<&SandboxAdapter>,
+) -> SandboxPluginOutcome {
+    let package_caps = match tau_pkg::read_manifest(manifest_path) {
+        Ok(manifest) => manifest.capabilities().to_vec(),
+        Err(e) => return SandboxPluginOutcome::ManifestUnreadable(e.to_string()),
+    };
+
+    let plan = match build_plan(&package_caps, &[], None, None) {
+        Ok(p) => p,
+        Err(e) => return SandboxPluginOutcome::BuildPlanFailed(e.to_string()),
+    };
+
+    match adapter {
+        Some(adapter) => match validate_plan_against_adapter(plugin_id, &plan, adapter) {
+            Ok(()) => SandboxPluginOutcome::Ok,
+            Err(errors) => SandboxPluginOutcome::ValidateFailed(errors),
+        },
+        None => SandboxPluginOutcome::Ok,
+    }
+}
+
+#[cfg(test)]
+mod check_sandbox_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// `MockSandbox` supports the 5 standard CapabilityShapes (fs.read,
+    /// fs.write, net.http, exec, env). It is reachable via
+    /// `TAU_TESTING_ALLOW_MOCK_SANDBOX=1` through `resolve_adapter`. We
+    /// use it here directly to keep tests platform-independent.
+    fn mock_adapter() -> tau_runtime::sandbox::SandboxAdapter {
+        // Force the Mock branch of resolve_adapter via the env var so the
+        // returned SandboxAdapter::Mock variant exists for the test.
+        std::env::set_var("TAU_TESTING_ALLOW_MOCK_SANDBOX", "1");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let adapter = rt.block_on(async {
+            tau_runtime::sandbox::resolve_adapter(
+                &tau_pkg::scope::SandboxRequirements::default(),
+                &[],
+            )
+            .await
+            .expect("mock adapter")
+        });
+        std::env::remove_var("TAU_TESTING_ALLOW_MOCK_SANDBOX");
+        adapter
+    }
+
+    fn write_manifest(dir: &std::path::Path, body: &str) -> PathBuf {
+        let path = dir.join("tau.toml");
+        std::fs::write(&path, body).expect("write manifest");
+        path
+    }
+
+    #[test]
+    fn check_plugin_sandbox_ok_for_benign_manifest() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let manifest_path = write_manifest(
+            tmp.path(),
+            r#"
+name = "test-plugin"
+version = "0.1.0"
+description = "A test plugin"
+authors = []
+source = "https://example.com/test-plugin.git"
+kind = "tool"
+dependencies = []
+
+[[capabilities]]
+kind = "fs.read"
+paths = ["/tmp/**"]
+"#,
+        );
+        let adapter = mock_adapter();
+        let outcome = check_plugin_sandbox("test-plugin", &manifest_path, Some(&adapter));
+        assert!(
+            matches!(outcome, SandboxPluginOutcome::Ok),
+            "expected Ok, got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn check_plugin_sandbox_manifest_unreadable_for_missing_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let manifest_path = tmp.path().join("nonexistent.toml");
+        let adapter = mock_adapter();
+        let outcome = check_plugin_sandbox("ghost-plugin", &manifest_path, Some(&adapter));
+        match outcome {
+            SandboxPluginOutcome::ManifestUnreadable(msg) => {
+                assert!(!msg.is_empty(), "expected non-empty error message");
+            }
+            other => panic!("expected ManifestUnreadable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn check_plugin_sandbox_ok_in_fast_mode_without_adapter() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let manifest_path = write_manifest(
+            tmp.path(),
+            r#"
+name = "fast-plugin"
+version = "0.1.0"
+description = "A fast plugin"
+authors = []
+source = "https://example.com/fast-plugin.git"
+kind = "tool"
+dependencies = []
+
+[[capabilities]]
+kind = "fs.read"
+paths = ["/tmp/**"]
+"#,
+        );
+        // adapter = None → fast mode: build_plan only.
+        let outcome = check_plugin_sandbox("fast-plugin", &manifest_path, None);
+        assert!(
+            matches!(outcome, SandboxPluginOutcome::Ok),
+            "expected Ok in fast mode, got {outcome:?}"
+        );
+    }
 }
