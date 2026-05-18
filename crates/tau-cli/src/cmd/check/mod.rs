@@ -44,9 +44,14 @@ pub async fn run(args: crate::cli::CheckArgs) -> Result<()> {
     let results = runner::run_categories(&ctx, &categories).await;
     let exit_code = compute_exit(&results);
 
-    let use_color = std::env::var_os("NO_COLOR").is_none();
-    let rendered = output::human::render(&results, use_color, exit_code);
-    print!("{rendered}");
+    if args.json {
+        let rendered = output::json::render(&ctx.project_root, &categories, args.fast, &results, exit_code);
+        print!("{rendered}");
+    } else {
+        let use_color = std::env::var_os("NO_COLOR").is_none();
+        let rendered = output::human::render(&results, use_color, exit_code);
+        print!("{rendered}");
+    }
 
     if exit_code != 0 {
         std::process::exit(exit_code);
