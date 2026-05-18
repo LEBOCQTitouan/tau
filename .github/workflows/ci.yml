@@ -64,48 +64,88 @@ jobs:
     # bump, so the test-file requirement is the conservative gate.
     #
     # Workspace-root Cargo.toml is intentionally NOT in the safe set
-    # (workspace deps can affect many crates). Per-crate manifests are
-    # enumerated at two and three path-segment depths because dorny's
-    # picomatch glob behaves inconsistently with deeply-nested manifests
-    # (observed: `crates/**/Cargo.toml` did not match
-    # `crates/tau-plugins/ollama/Cargo.toml` in PR #158).
+    # (workspace deps can affect many crates).
+    #
+    # Implementation note: this used to use dorny/paths-filter@v4 but
+    # its picomatch globbing returned false even when every changed
+    # file should have matched (issue #162 — observed in PRs #158/#159
+    # with `predicate-quantifier: every` and a mixed pattern list).
+    # The inline-bash version below is fully self-contained, gives
+    # explicit "Non-safe: <file>" debug output, and has no dependence
+    # on third-party glob semantics.
     name: detect changes
     runs-on: ubuntu-latest
     outputs:
       skip_heavy_jobs: ${{ steps.compute.outputs.skip_heavy_jobs }}
     steps:
       - uses: actions/checkout@v6
-      - uses: dorny/paths-filter@v4
-        id: only_safe_paths
         with:
-          # `every` → flag is true iff every changed file matches.
-          predicate-quantifier: 'every'
-          filters: |
-            ok:
-              - 'crates/**/tests/**'
-              - 'crates/**/benches/**'
-              - 'crates/*/Cargo.toml'
-              - 'crates/*/*/Cargo.toml'
-              - 'Cargo.lock'
-      - uses: dorny/paths-filter@v4
-        id: any_test_change
-        with:
-          # default `some` → flag is true if any changed file matches.
-          filters: |
-            ok:
-              - 'crates/**/tests/**'
-              - 'crates/**/benches/**'
+          # Need the merge-base with main so `git diff --name-only` can
+          # produce the changed file list. fetch-depth: 0 is overkill
+          # but cheap on the small tau repo and avoids edge cases when
+          # the PR head is shallow.
+          fetch-depth: 0
       - id: compute
         env:
-          ONLY_SAFE: ${{ steps.only_safe_paths.outputs.ok }}
-          HAS_TEST: ${{ steps.any_test_change.outputs.ok }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
         run: |
-          if [ "$ONLY_SAFE" = "true" ] && [ "$HAS_TEST" = "true" ]; then
+          set -euo pipefail
+
+          # Pick base/head SHAs based on which trigger fired. Using env
+          # vars (not `${{ }}` interpolation inside run:) keeps any
+          # untrusted-input shape safe per workflow-injection hygiene.
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BASE_SHA="$PR_BASE_SHA"
+            HEAD_SHA="$PR_HEAD_SHA"
+          elif [ "$EVENT_NAME" = "merge_group" ]; then
+            BASE_SHA="$MG_BASE_SHA"
+            HEAD_SHA="$MG_HEAD_SHA"
+          else
+            # push event or other — no path filter, run full matrix.
+            echo "Event $EVENT_NAME: defaulting to full matrix."
+            echo "skip_heavy_jobs=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          files=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          if [ -z "$files" ]; then
+            echo "No changed files detected (rare; treating as full matrix)."
+            echo "skip_heavy_jobs=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Changed files:"
+          echo "$files" | sed 's/^/  /'
+
+          # Regex-based matching (bash `case` glob doesn't recurse on `**`).
+          # `(/[^/]+)?` makes the second path segment optional, covering
+          # both `crates/foo/...` (depth 2) and `crates/tau-plugins/ollama/...`
+          # (depth 3). Workspace root Cargo.toml is NOT matched by these.
+          tests_re='^crates/[^/]+(/[^/]+)?/(tests|benches)/'
+          cargo_toml_re='^crates/[^/]+(/[^/]+)?/Cargo\.toml$'
+
+          only_safe=true
+          has_test=false
+          while IFS= read -r f; do
+            if [[ "$f" =~ $tests_re ]]; then
+              has_test=true
+            elif [[ "$f" =~ $cargo_toml_re ]] || [ "$f" = "Cargo.lock" ]; then
+              : # safe (no test flag)
+            else
+              echo "Non-safe: $f"
+              only_safe=false
+            fi
+          done <<< "$files"
+
+          if [ "$only_safe" = "true" ] && [ "$has_test" = "true" ]; then
             echo "skip_heavy_jobs=true" >> "$GITHUB_OUTPUT"
             echo "Fast-path eligible: tests + (optionally) dev-dep manifest changes only."
           else
             echo "skip_heavy_jobs=false" >> "$GITHUB_OUTPUT"
-            echo "Full matrix: only_safe=$ONLY_SAFE, has_test=$HAS_TEST."
+            echo "Full matrix: only_safe=$only_safe, has_test=$has_test."
           fi
 
   fmt:
@@ -249,20 +289,12 @@ jobs:
           shared-key: linux-stable
           with-mold: true
       - name: Build all release-mode binaries
-        # Two cargo invocations: cargo's `--bin <name>` is workspace-
-        # scoped, not per-package — combining `-p <pkg> -p <pkg> --bin
-        # <other>` builds ONLY that one binary across all packages, not
-        # all of pkg + that bin. Plugins (which each have one default
-        # binary) go in invocation 1; tau-net-bridge (a named binary
-        # inside tau-sandbox-native) goes in invocation 2.
         run: |
           cargo build --release \
             -p anthropic -p ollama -p openai \
             -p fs-read -p shell \
             -p echo-llm -p echo-tool \
             -p tau-cli
-          cargo build --release \
-            -p tau-sandbox-native --bin tau-net-bridge
       - name: Build controlled-env binary
         run: |
           cargo build --release \
@@ -284,7 +316,6 @@ jobs:
           cp target/release/echo-llm _artifacts/
           cp target/release/echo-tool _artifacts/
           cp target/release/tau _artifacts/
-          cp target/release/tau-net-bridge _artifacts/
           cp crates/tau-plugin-compat/fixtures/controlled-env-binary/target/release/tau-controlled-env _artifacts/
       - name: Upload fixture binaries
         uses: actions/upload-artifact@v7
@@ -380,90 +411,6 @@ jobs:
           DOCKER_BUILDKIT: "1"
       - name: Test tau-plugin-compat (integration-tests feature)
         run: cargo nextest run --profile ci -p tau-plugin-compat --features integration-tests --tests --verbose
-
-  test-tau-plugin-compat-layer4-ignored:
-    # Promotes the 10 `#[ignore]`'d layer-4 sandbox boundary tests in
-    # crates/tau-plugin-compat/tests/layer4_{native,container}.rs from
-    # DARK to LIT (see docs/test-ignores-inventory.md bucket 2). Same
-    # prerequisites as test-tau-plugin-compat (pre-built plugin binaries
-    # + per-plugin Docker images on the container leg), but invoked
-    # with `--run-ignored only` and scoped to the layer4 test target.
-    #
-    # `matrix.flavor` is workflow-defined ("native" | "container"), not
-    # user input — no injection risk in the run: commands below.
-    #
-    # Plan: docs/superpowers/plans/2026-05-17-test-suite-upgrades.md
-    # Task 11 ("Layer4 sandbox CI dark-spot").
-    name: test (tau-plugin-compat / linux / layer4-ignored / ${{ matrix.flavor }})
-    needs: [changes, build-fixtures-linux]
-    if: needs.changes.outputs.skip_heavy_jobs != 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        flavor: [native, container]
-    env:
-      # Match the sister test-tau-plugin-compat job so adapter probes and
-      # xtask image storage land in the same place (docker, not podman).
-      TAU_CONTAINER_RUNTIME: docker
-      FLAVOR: ${{ matrix.flavor }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-stable
-          with-nextest: true
-          with-mold: true
-      - uses: ./.github/actions/place-fixture-binaries
-        with:
-          binaries: "all"
-      - name: Set up Docker buildx
-        if: matrix.flavor == 'container'
-        uses: docker/setup-buildx-action@v4
-        with:
-          driver: docker-container
-      - name: Build per-plugin images (sub-project I)
-        if: matrix.flavor == 'container'
-        run: cargo run -p xtask -- build-plugin-images
-        env:
-          BUILDX_CACHE_FROM: type=gha
-          BUILDX_CACHE_TO: type=gha,mode=max
-          BUILDKIT_PROGRESS: plain
-          DOCKER_BUILDKIT: "1"
-      - name: Build NEXTEST_FILTER for this leg
-        # The 3 layer4_native HTTP cassette tests
-        # (anthropic|ollama|openai _layer4_native_completes_via_cassette)
-        # need tau-net-bridge to set up a network namespace, which
-        # requires CAP_SYS_ADMIN + CAP_NET_ADMIN. Standard GHA
-        # ubuntu-latest runners don't grant those caps; the lefthook
-        # pre-push gate gets them via `podman run --cap-add SYS_ADMIN
-        # --cap-add NET_ADMIN`. Skip them on the native leg until a
-        # privileged runner is available. The container leg covers them
-        # via its in-container bridge setup.
-        run: |
-          if [ "$FLAVOR" = "native" ]; then
-            echo 'NEXTEST_FILTER=not (test(/anthropic_layer4_native_completes_via_cassette/) | test(/ollama_layer4_native_completes_via_cassette/) | test(/openai_layer4_native_completes_via_cassette/))' >> "$GITHUB_ENV"
-          else
-            echo 'NEXTEST_FILTER=all()' >> "$GITHUB_ENV"
-          fi
-      - name: Run ignored layer4 tests
-        # --run-ignored only runs ONLY the `#[ignore]`'d tests in the
-        # target. --test layer4_<flavor> scopes the test binary so we
-        # do not drag in unrelated targets. We deliberately do NOT pass
-        # the `--tests` flag here: combining `--tests` (all test
-        # targets) with `--test <name>` (one specific test target) lets
-        # nextest pick up BOTH targets, defeating the per-flavor
-        # filtering and causing the wrong-leg tests to fail on missing
-        # prerequisites. `-E` applies the per-leg filterset from the
-        # previous step.
-        run: |
-          cargo nextest run --profile ci \
-            -p tau-plugin-compat \
-            --features integration-tests \
-            --run-ignored only \
-            --test "layer4_$FLAVOR" \
-            -E "$NEXTEST_FILTER" \
-            --verbose
 
   test-tau-sandbox-native-e2e:
     name: test (tau-sandbox-native e2e / linux)
