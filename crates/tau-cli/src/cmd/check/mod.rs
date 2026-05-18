@@ -9,6 +9,7 @@
 mod result;
 mod runner;
 mod categories;
+mod output;
 
 pub use result::{
     compute_exit, CheckCategory, CheckFinding, CheckResult, CheckStatus, FindingLocation, Severity,
@@ -41,16 +42,14 @@ pub async fn run(args: crate::cli::CheckArgs) -> Result<()> {
     };
 
     let results = runner::run_categories(&ctx, &categories).await;
+    let exit_code = compute_exit(&results);
 
-    // Stub output — Tasks 10-12 replace this with real renderers.
-    eprintln!("tau check: {} categories", results.len());
-    for r in &results {
-        eprintln!("  {} → {:?}", r.category.name(), r.status);
-    }
+    let use_color = std::env::var_os("NO_COLOR").is_none();
+    let rendered = output::human::render(&results, use_color, exit_code);
+    print!("{rendered}");
 
-    let code = compute_exit(&results);
-    if code != 0 {
-        std::process::exit(code);
+    if exit_code != 0 {
+        std::process::exit(exit_code);
     }
     Ok(())
 }
