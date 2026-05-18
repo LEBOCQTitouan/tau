@@ -8,6 +8,7 @@
 
 mod result;
 mod runner;
+mod categories;
 
 pub use result::{
     compute_exit, CheckCategory, CheckFinding, CheckResult, CheckStatus, FindingLocation, Severity,

@@ -57,14 +57,16 @@ pub async fn run_categories(ctx: &CheckCtx, categories: &[CheckCategory]) -> Vec
     results
 }
 
-async fn run_one(_ctx: &CheckCtx, cat: CheckCategory) -> CheckResult {
-    // Tasks 4-9 replace these stubs with real category logic.
-    CheckResult {
-        category: cat,
-        status: CheckStatus::Skipped {
-            reason: "not implemented (Tasks 4-9)".to_string(),
+async fn run_one(ctx: &CheckCtx, cat: CheckCategory) -> CheckResult {
+    match cat {
+        CheckCategory::Config => super::categories::config::run_config(ctx),
+        _ => CheckResult {
+            category: cat,
+            status: CheckStatus::Skipped {
+                reason: "not implemented (Tasks 5-9)".to_string(),
+            },
+            findings: Vec::new(),
+            duration: Duration::from_millis(0),
         },
-        findings: Vec::new(),
-        duration: Duration::from_millis(0),
     }
 }
