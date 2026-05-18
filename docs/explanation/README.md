@@ -37,6 +37,10 @@ specific decision at a specific date.
   counterpart to in-run orchestration. Deterministic linear
   pipelines authored in TOML, persisted as JSONL, resumable. When
   to reach for a workflow vs in-run orchestration.
+- [Serve mode](serve-mode.md) — tau as a long-lived subprocess
+  speaking JSON-RPC 2.0 over NDJSON-framed stdio. One of tau's
+  two public surfaces (G6). When to embed tau in a parent app
+  vs. driving it through the CLI.
 
 ### For contributors
 

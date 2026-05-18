@@ -475,8 +475,8 @@ pub enum SandboxCommand {
     /// Print sandbox configuration + per-adapter probe results.
     /// Non-mutating; always exits 0.
     Status,
-    /// Interactive (or non-interactive) wizard to write the [sandbox]
-    /// block in <scope>/config.toml. Implemented in Task 10.
+    /// Interactive (or non-interactive) wizard to write the `[sandbox]`
+    /// block in `<scope>/config.toml`. Implemented in Task 10.
     Setup(SandboxSetupArgs),
 }
 
@@ -520,7 +520,7 @@ pub enum WorkflowSubcommand {
 /// Arguments for `tau workflow run`.
 #[derive(Debug, clap::Args)]
 pub struct WorkflowRunArgs {
-    /// Workflow name (matches workflows/<name>.toml).
+    /// Workflow name (matches `workflows/<name>.toml`).
     pub name: String,
     /// Input string passed to the first step as ${input}.
     #[arg(long, default_value = "")]

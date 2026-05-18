@@ -48,30 +48,65 @@ permissions:
 
 jobs:
   changes:
-    # Detect whether the PR touches anything other than test code, so the
-    # heavy integration jobs (build-fixtures-linux, test-conformance,
-    # test-tau-plugin-compat, the two e2e jobs) can be skipped on
-    # tests-only PRs.
+    # Detect whether the PR is safe to fast-path (skip the heavy
+    # integration jobs: build-fixtures-linux, test-conformance,
+    # test-tau-plugin-compat, the two e2e jobs).
     #
-    # `tests_only` is true ONLY if every changed file matches the listed
-    # patterns — `predicate-quantifier: every` enforces this. Source-code
-    # or Cargo.toml changes flip it to false and the heavy jobs run as
-    # before. dorny/paths-filter uses the action's own logic; no untrusted
-    # github.event interpolation is involved.
+    # A PR is fast-pathable when BOTH conditions hold:
+    #   (1) every changed file is in the safe set — tests/benches,
+    #       per-crate Cargo.toml, or Cargo.lock; AND
+    #   (2) at least one tests/benches file actually changed.
+    #
+    # Condition (1) keeps source-code changes out of the fast path.
+    # Condition (2) prevents a Cargo.toml-only PR (e.g. a runtime dep
+    # bump with no test changes) from skipping the integration jobs —
+    # the path filter can't tell a dev-dep add from a runtime-dep
+    # bump, so the test-file requirement is the conservative gate.
+    #
+    # Workspace-root Cargo.toml is intentionally NOT in the safe set
+    # (workspace deps can affect many crates). Per-crate manifests are
+    # enumerated at two and three path-segment depths because dorny's
+    # picomatch glob behaves inconsistently with deeply-nested manifests
+    # (observed: `crates/**/Cargo.toml` did not match
+    # `crates/tau-plugins/ollama/Cargo.toml` in PR #158).
     name: detect changes
     runs-on: ubuntu-latest
     outputs:
-      tests_only: ${{ steps.filter.outputs.tests_only }}
+      skip_heavy_jobs: ${{ steps.compute.outputs.skip_heavy_jobs }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v4
-        id: filter
+        id: only_safe_paths
         with:
+          # `every` → flag is true iff every changed file matches.
           predicate-quantifier: 'every'
           filters: |
-            tests_only:
+            ok:
               - 'crates/**/tests/**'
               - 'crates/**/benches/**'
+              - 'crates/*/Cargo.toml'
+              - 'crates/*/*/Cargo.toml'
+              - 'Cargo.lock'
+      - uses: dorny/paths-filter@v4
+        id: any_test_change
+        with:
+          # default `some` → flag is true if any changed file matches.
+          filters: |
+            ok:
+              - 'crates/**/tests/**'
+              - 'crates/**/benches/**'
+      - id: compute
+        env:
+          ONLY_SAFE: ${{ steps.only_safe_paths.outputs.ok }}
+          HAS_TEST: ${{ steps.any_test_change.outputs.ok }}
+        run: |
+          if [ "$ONLY_SAFE" = "true" ] && [ "$HAS_TEST" = "true" ]; then
+            echo "skip_heavy_jobs=true" >> "$GITHUB_OUTPUT"
+            echo "Fast-path eligible: tests + (optionally) dev-dep manifest changes only."
+          else
+            echo "skip_heavy_jobs=false" >> "$GITHUB_OUTPUT"
+            echo "Full matrix: only_safe=$ONLY_SAFE, has_test=$HAS_TEST."
+          fi
 
   fmt:
     name: rustfmt
@@ -205,7 +240,7 @@ jobs:
     # still run.
     name: build-fixtures / linux
     needs: changes
-    if: needs.changes.outputs.tests_only != 'true'
+    if: needs.changes.outputs.skip_heavy_jobs != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -274,7 +309,7 @@ jobs:
   test-conformance:
     name: test (conformance)
     needs: [changes, build-fixtures-linux]
-    if: needs.changes.outputs.tests_only != 'true'
+    if: needs.changes.outputs.skip_heavy_jobs != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -296,7 +331,7 @@ jobs:
   test-tau-plugin-compat:
     name: test (tau-plugin-compat / linux)
     needs: [changes, build-fixtures-linux]
-    if: needs.changes.outputs.tests_only != 'true'
+    if: needs.changes.outputs.skip_heavy_jobs != 'true'
     runs-on: ubuntu-latest
     env:
       # GHA Linux runners ship both podman and docker. The xtask + adapter
@@ -340,7 +375,7 @@ jobs:
   test-tau-sandbox-native-e2e:
     name: test (tau-sandbox-native e2e / linux)
     needs: [changes, build-fixtures-linux]
-    if: needs.changes.outputs.tests_only != 'true'
+    if: needs.changes.outputs.skip_heavy_jobs != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -361,7 +396,7 @@ jobs:
   test-tau-runtime-e2e:
     name: test (tau-runtime e2e / linux)
     needs: [changes, build-fixtures-linux]
-    if: needs.changes.outputs.tests_only != 'true'
+    if: needs.changes.outputs.skip_heavy_jobs != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
