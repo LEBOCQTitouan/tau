@@ -8,6 +8,7 @@
 
 #![cfg(unix)]
 
+use assert_matches::assert_matches;
 use shell_plugin_lib::plugin::ShellPlugin;
 use std::time::SystemTime;
 use tau_domain::{AgentInstanceId, Capability, PortKind, Value};
@@ -158,8 +159,9 @@ async fn integration_echo_returns_expected_stdout() {
     let result = recv_tool_response(&mut peer).await.expect("Ok response");
 
     assert!(!result.is_error, "expected non-error; got {result:?}");
+    assert_matches!(&result.content[0], tau_ports::ToolContent::Json { .. });
     let tau_ports::ToolContent::Json { data } = &result.content[0] else {
-        panic!("expected Json content, got {:?}", result.content[0]);
+        unreachable!("just asserted Json shape above")
     };
     let map = data.as_object().expect("Object");
     let stdout = map
@@ -167,11 +169,12 @@ async fn integration_echo_returns_expected_stdout() {
         .and_then(Value::as_string)
         .expect("stdout string");
     assert_eq!(stdout, "hi\n");
-    let exit_code = map.get("exit_code");
-    let Some(Value::Integer(code)) = exit_code else {
-        panic!("expected Integer exit_code, got {exit_code:?}");
-    };
-    assert_eq!(*code, 0);
+    assert_matches!(
+        map.get("exit_code"),
+        Some(Value::Integer(code)) => {
+            assert_eq!(*code, 0);
+        }
+    );
 
     shutdown(&mut peer).await;
     drop(peer);
@@ -202,20 +205,23 @@ async fn integration_long_running_killed_by_timeout() {
     .await;
     let result = recv_tool_response(&mut peer).await.expect("Ok response");
 
+    assert_matches!(&result.content[0], tau_ports::ToolContent::Json { .. });
     let tau_ports::ToolContent::Json { data } = &result.content[0] else {
-        panic!("expected Json content");
+        unreachable!("just asserted Json shape above")
     };
     let map = data.as_object().expect("Object");
-    let timed_out = map.get("timed_out");
-    let Some(Value::Bool(t)) = timed_out else {
-        panic!("expected Bool timed_out, got {timed_out:?}");
-    };
-    assert!(*t, "expected timed_out: true");
-    let exit_code = map.get("exit_code");
-    let Some(Value::Integer(code)) = exit_code else {
-        panic!("expected Integer exit_code");
-    };
-    assert_eq!(*code, -1);
+    assert_matches!(
+        map.get("timed_out"),
+        Some(Value::Bool(t)) => {
+            assert!(*t, "expected timed_out: true");
+        }
+    );
+    assert_matches!(
+        map.get("exit_code"),
+        Some(Value::Integer(code)) => {
+            assert_eq!(*code, -1);
+        }
+    );
 
     shutdown(&mut peer).await;
     drop(peer);
@@ -279,8 +285,9 @@ async fn integration_large_stdout_truncated_and_flagged() {
     .await;
     let result = recv_tool_response(&mut peer).await.expect("Ok response");
 
+    assert_matches!(&result.content[0], tau_ports::ToolContent::Json { .. });
     let tau_ports::ToolContent::Json { data } = &result.content[0] else {
-        panic!("expected Json content");
+        unreachable!("just asserted Json shape above")
     };
     let map = data.as_object().expect("Object");
     let stdout = map
@@ -289,11 +296,12 @@ async fn integration_large_stdout_truncated_and_flagged() {
         .expect("stdout string");
     // The output should be exactly MAX_OUTPUT_BYTES (1 MiB).
     assert_eq!(stdout.len(), 1024 * 1024);
-    let stdout_truncated = map.get("stdout_truncated");
-    let Some(Value::Bool(t)) = stdout_truncated else {
-        panic!("expected Bool stdout_truncated, got {stdout_truncated:?}");
-    };
-    assert!(*t, "expected stdout_truncated: true");
+    assert_matches!(
+        map.get("stdout_truncated"),
+        Some(Value::Bool(t)) => {
+            assert!(*t, "expected stdout_truncated: true");
+        }
+    );
 
     shutdown(&mut peer).await;
     drop(peer);
