@@ -1,0 +1,70 @@
+//! Sequential orchestrator. Builds `CheckCtx` once, runs selected
+//! categories one-at-a-time, returns `Vec<CheckResult>`.
+//!
+//! Tasks 4-9 implement each category. Until then, the runner returns
+//! Skipped placeholders for every category.
+
+use super::result::{CheckCategory, CheckResult, CheckStatus};
+use anyhow::Result;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+use tau_pkg::{project::ProjectConfig, Scope};
+
+/// Shared context for all checks. Built once at runner start.
+pub struct CheckCtx {
+    /// Project root (the directory containing tau.toml).
+    pub project_root: PathBuf,
+    /// Resolved scope (project or global). Carries lockfile path, config path, etc.
+    pub scope: Scope,
+    /// Parsed `tau.toml`. None when the file is malformed (the `config` check
+    /// reports the error and other checks early-skip).
+    pub project: Option<ProjectConfig>,
+    /// `--fast` flag passthrough.
+    pub fast: bool,
+}
+
+impl CheckCtx {
+    /// Build context from a project root path.
+    pub async fn load(project_root: PathBuf, fast: bool) -> Result<Self> {
+        let scope = Scope::resolve(&project_root)
+            .map_err(|e| anyhow::anyhow!("resolve scope: {e}"))?;
+        // Project load may legitimately fail (malformed tau.toml). Record
+        // None and let the `config` check report the error.
+        let project = match ProjectConfig::from_path(&project_root.join("tau.toml")) {
+            Ok(p) => Some(p),
+            Err(_) => None,
+        };
+        Ok(Self {
+            project_root,
+            scope,
+            project,
+            fast,
+        })
+    }
+}
+
+/// Run a list of categories sequentially. Returns one result per category.
+pub async fn run_categories(ctx: &CheckCtx, categories: &[CheckCategory]) -> Vec<CheckResult> {
+    let mut results = Vec::with_capacity(categories.len());
+    for cat in categories {
+        let started = Instant::now();
+        let result = run_one(ctx, *cat).await;
+        results.push(CheckResult {
+            duration: started.elapsed(),
+            ..result
+        });
+    }
+    results
+}
+
+async fn run_one(_ctx: &CheckCtx, cat: CheckCategory) -> CheckResult {
+    // Tasks 4-9 replace these stubs with real category logic.
+    CheckResult {
+        category: cat,
+        status: CheckStatus::Skipped {
+            reason: "not implemented (Tasks 4-9)".to_string(),
+        },
+        findings: Vec::new(),
+        duration: Duration::from_millis(0),
+    }
+}
