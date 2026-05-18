@@ -135,6 +135,11 @@ intersecting a scope's sandbox config with a plugin's manifest.
 The resolver maps a plan to an adapter at spawn time. See
 [sandboxing](../explanation/sandboxing.md#resolution).
 
+**Serve mode** — tau running as a long-lived subprocess speaking
+JSON-RPC 2.0 over NDJSON-framed stdio. One of tau's two public
+surfaces (G6). See [serve mode](../explanation/serve-mode.md) and
+the [protocol reference](serve-mode-protocol.md).
+
 **Scope** — a tau installation root. Two kinds: **global**
 (`~/.tau`) and **project** (a `.tau/` directory walked up from
 cwd). Project scope overrides global per package (G8). Each
