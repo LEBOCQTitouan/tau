@@ -2,11 +2,9 @@
 //! stderr. The host (in `tau-runtime::plugin_host`) reads each line,
 //! decodes the JSON, and re-emits as a `tracing::Event` on
 //! `target = "plugin::<plugin_name>"`.
-
-use std::sync::Once;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-
-static INSTALL_ONCE: Once = Once::new();
+//!
+//! Internals delegate to [`tau_observe::install`] so all tau crates
+//! share one subscriber-init code path.
 
 /// Install the SDK's stderr-JSON tracing layer.
 ///
@@ -17,19 +15,8 @@ static INSTALL_ONCE: Once = Once::new();
 /// The default filter level is `info`; override via `RUST_LOG` env var
 /// (e.g., `RUST_LOG=tau_plugin_sdk=debug,my_plugin=trace`).
 pub fn install() {
-    INSTALL_ONCE.call_once(|| {
-        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-        tracing_subscriber::registry()
-            .with(filter)
-            .with(
-                fmt::layer()
-                    .json()
-                    .with_writer(std::io::stderr)
-                    .with_current_span(true)
-                    .with_span_list(false),
-            )
-            .init();
-    });
+    let _guard = tau_observe::install::install(tau_observe::install::InstallOptions::plugin_sdk())
+        .expect("tau_observe::install never returns Err in current impl");
 }
 
 #[cfg(test)]
