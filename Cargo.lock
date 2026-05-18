@@ -877,6 +877,7 @@ dependencies = [
 name = "fs-read"
 version = "0.0.0"
 dependencies = [
+ "assert_matches",
  "base64",
  "globset",
  "rmp-serde",
@@ -2894,6 +2895,7 @@ dependencies = [
 name = "shell"
 version = "0.0.0"
 dependencies = [
+ "assert_matches",
  "rmp-serde",
  "serde",
  "serde_json",
