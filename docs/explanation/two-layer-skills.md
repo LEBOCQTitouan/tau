@@ -37,6 +37,21 @@ The result is a skill directory that's simultaneously:
 
 ## What each layer owns
 
+```mermaid
+flowchart LR
+    subgraph A["Anthropic Agent Skills format"]
+        SK["SKILL.md<br/><i>prompt content</i><br/>+ YAML frontmatter (name, description)"]
+    end
+    subgraph T["tau-specific layer"]
+        TT["tau.toml<br/><i>typed package metadata</i><br/>kind = &quot;skill&quot;<br/>[[capabilities]]<br/>[skill.requires_skills]<br/>version, source, authors"]
+    end
+    SK -.->|name<br/>must match| TT
+    A -->|<code>tau install</code>| INSTALLED[("installed skill<br/>SKILL.md + tau.toml<br/>+ lockfile entry")]
+    T -->|<code>tau install</code>| INSTALLED
+    INSTALLED -->|"<code>tau skill export</code>"| OUT["SKILL.md only<br/>(capabilities dropped<br/>with warning)"]
+    OUT -.->|byte-identical iff<br/>capabilities = [] and<br/>no requires_skills| SK
+```
+
 **SKILL.md owns: the prompt content.**
 
 - The YAML frontmatter declares `name` and `description` (both

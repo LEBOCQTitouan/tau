@@ -28,6 +28,28 @@ specific decision at a specific date.
   (`none` / `light` / `strict`), the adapter set per platform, the
   four-layer enforcement model, and what sandboxing is *not*
   designed to do.
+- [Multi-agent orchestration](multi-agent-orchestration.md) — six
+  entities, three channels, six invariants, and the five
+  tree-topology patterns the kernel composes (linear, worker-pool,
+  plan-revise, supervisor/critic, hierarchical). What this rules
+  out and why.
+- [Workflows](workflows.md) — the external-script-driven
+  counterpart to in-run orchestration. Deterministic linear
+  pipelines authored in TOML, persisted as JSONL, resumable. When
+  to reach for a workflow vs in-run orchestration.
+
+### For contributors
+
+- [Architecture overview](architecture-overview.md) — a single
+  `tau chat` traced end-to-end through the codebase. Phase ⨯
+  owner-crate map. Where to look when X is broken.
+- [Crate map](crate-map.md) — every workspace crate with a
+  one-line purpose, the hexagonal-architecture dependency rules,
+  and "where new code lands" by feature kind.
+- [Testing strategy](testing-strategy.md) — the standard Rust
+  layers (QG5) plus the four sandbox-test layers (L1 manifest →
+  L4 kernel enforcement). Where each kind of test lives and what
+  helpers exist.
 - [Tau as language](tau-as-language.md) — the framing that "tau is a
   language for installing and running agents," what that buys, and
   what it costs.

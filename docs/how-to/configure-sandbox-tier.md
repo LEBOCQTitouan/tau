@@ -19,6 +19,29 @@ reference](../reference/package-manifest-schema.md#sandbox-block).
 The resolver picks the **strongest** tier consistent with all three.
 "Stronger" means `strict > light > none`.
 
+```mermaid
+flowchart LR
+    S["scope.required_tier<br/><code>&lt;scope&gt;/config.toml</code>"]
+    P["plugin.required_tier<br/><code>&lt;package&gt;/tau.toml</code>"]
+    F["<code>--no-sandbox</code>?<br/>caps scope to <code>none</code>"]
+    M{{"<code>max</code>(scope, plugin)<br/>strict &gt; light &gt; none"}}
+    E["effective_tier"]
+    R[("resolver picks<br/>adapter")]
+    S --> M
+    P --> M
+    F -.-> S
+    M --> E --> R
+```
+
+Two consequences of the `max(...)` rule worth being explicit about:
+
+- **`--no-sandbox` only relaxes the scope**, not the plugin. A plugin
+  with `required_tier = "strict"` refuses to load even with
+  `--no-sandbox`.
+- **A plugin's `required_tier` is a floor, not a cap.** A plugin
+  declaring `required_tier = "light"` running in a `strict` scope
+  still gets `strict`.
+
 ## Per-project: change the scope's required tier
 
 A scope is either project-local (`.tau/` walked up from cwd) or

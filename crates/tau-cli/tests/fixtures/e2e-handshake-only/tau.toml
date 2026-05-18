@@ -1,0 +1,7 @@
+# Minimal project for Layer 3 e2e subprocess tests.
+# No agents declared — serve mode should start without plugins,
+# accepting meta.handshake and meta.ping. runtime.run calls would
+# return -32010 UNKNOWN_AGENT (correct behaviour for empty project).
+
+[project]
+name = "e2e-handshake-fixture"
