@@ -29,6 +29,32 @@ pub async fn run(args: crate::cli::CheckArgs) -> Result<()> {
 
     let ctx = runner::CheckCtx::load(project_root, args.fast).await?;
 
+    // --auto-resolve: attempt to install missing required tools for all agents
+    // before running checks. Errors are non-fatal — the packages category will
+    // report any remaining missing tools as findings.
+    if args.auto_resolve {
+        if let Some(project) = &ctx.project {
+            let mut resolve_output = crate::output::Output::with_writers(
+                Box::new(std::io::sink()),
+                Box::new(std::io::stderr()),
+                false,
+                false,
+                crate::output::ColorChoice::Never,
+            );
+            if let Err(e) = crate::cmd::resolve_helpers::resolve_and_install_for_project(
+                project.agents.values().cloned(),
+                &ctx.scope,
+                false, // no_install = false → actually install
+                false, // dry_run = false → apply changes
+                &mut resolve_output,
+            ) {
+                // Non-fatal: warn on stderr and continue; packages check
+                // will surface any remaining gaps as findings.
+                eprintln!("tau check: --auto-resolve encountered errors (continuing): {e:#}");
+            }
+        }
+    }
+
     // Determine category list.
     let categories: Vec<CheckCategory> = match args.category.as_deref() {
         None => CheckCategory::ALL.to_vec(),
