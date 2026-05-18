@@ -7,3 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+
+[dependencies]
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter", "json"] }
+thiserror          = { workspace = true }
+
+[features]
+default = []
