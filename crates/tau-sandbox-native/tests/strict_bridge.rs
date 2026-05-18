@@ -109,17 +109,24 @@ fn plan_with_bridge_and_cat() -> SandboxPlan {
 /// added in T0b. Without those allowed syscalls, the wrapped Command
 /// exits with signal 31 (SIGSYS) instead of /bin/cat's clean 0.
 #[tokio::test]
+#[ignore = "requires Linux kernel with landlock + seccomp + user namespaces; \
+            CI runs this via the `Run --ignored landlock-gated tests` step \
+            in test-tau-sandbox-native-e2e"]
 async fn bridge_survives_strict_tier_filter() {
     ensure_bridge_path();
 
-    // Skip gracefully if the host doesn't support landlock/seccomp
-    // (e.g., podman-in-podman with apparmor blocking landlock).
+    // Hard requirement under #[ignore]: callers that opt in via
+    // --run-ignored only are claiming the environment supports the
+    // strict-tier filter. Surface mismatches loudly rather than
+    // silently passing the test on a degraded host.
     let adapter = NativeSandbox::new("test-strict-bridge", SandboxTier::Strict);
     let probe = adapter.probe().await;
-    if !matches!(probe, SandboxProbe::Available { .. }) {
-        eprintln!("SKIP: native adapter probe returned {probe:?}");
-        return;
-    }
+    assert!(
+        matches!(probe, SandboxProbe::Available { .. }),
+        "native adapter probe returned {probe:?}; \
+         this test is opt-in via --run-ignored only and the caller's \
+         environment must support landlock + seccomp + user namespaces"
+    );
 
     let plan = plan_with_bridge_and_cat();
 

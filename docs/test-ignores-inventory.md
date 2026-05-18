@@ -110,6 +110,26 @@ then running `cargo nextest run --run-ignored only -p <crate>`. Same job
 can pick up the `tau-runtime/tests/sandbox_container.rs` pair via
 `--features integration-tests`.
 
+### 2d — `tau-sandbox-native` landlock-gated tests
+
+Two tests previously used silent `eprintln!("SKIP") + return` paths when
+their runtime probes (landlock + seccomp + namespaces, or proxy spawn)
+failed. T3 of the test-suite-upgrades plan converted them to
+`#[ignore = "..."]` with explicit reasons so the silent skip stops
+masking environments where the test never runs.
+
+| File:line | Test | Reason |
+|-----------|------|--------|
+| `crates/tau-sandbox-native/tests/strict_bridge.rs:111` | `bridge_survives_strict_tier_filter` | requires Linux kernel with landlock + seccomp + user namespaces |
+| `crates/tau-sandbox-native/src/strict.rs:700` | `wrap_spawn_with_http_cap_sets_both_proxy_env_vars` | requires environment where the strict-tier proxy can spawn |
+
+**CI plan:** the existing `test-tau-sandbox-native-e2e` job grew a
+second step (`Run --ignored landlock-gated tests`) that opts in via
+`cargo nextest run --run-ignored only -p tau-sandbox-native
+--features integration-tests`. GHA `ubuntu-latest` runners satisfy
+the prereqs, so both tests are LIT in CI but stay opt-in for local
+developer runs (where landlock support is unknown).
+
 **Status (2026-05-18):** Bucket 2b fully LIT. Bucket 2a partially LIT —
 the 2 tool-plugin tests (`shell_layer4_native_runs_echo_hello`,
 `fs_read_layer4_native_reads_data_file`) run on the native leg of
@@ -162,6 +182,7 @@ gone but the test is still `#[ignore]`'d, promote in a dedicated PR.
 | Bucket | Count | CI plan |
 |--------|------:|---------|
 | LIVE-DOCUMENTED | 6 | Stay `#[ignore]`'d; document opt-in |
+| LIT — bucket 2d (Task T3) | 2 | `test-tau-sandbox-native-e2e` `--run-ignored only` step |
 | DARK | 5 | 3 × native HTTP (need privileged runner); 2 × `tau-runtime/sandbox_container.rs` |
 | LIT (Task 11) | 7 | 5 × container + 2 × native tool plugins via `test-tau-plugin-compat-layer4-ignored / {native,container}` matrix |
 | ENVIRONMENT-SPECIFIC | 2 | Sub-project D e2e (separate) |

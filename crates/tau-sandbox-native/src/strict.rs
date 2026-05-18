@@ -698,6 +698,10 @@ mod tests {
     /// returning an `http://` URL won't be proxied if only `HTTPS_PROXY`
     /// is set. Regression guard for PR #53.
     #[tokio::test]
+    #[ignore = "requires environment where the strict-tier proxy can spawn \
+                (working tokio runtime + writable Unix-socket dir); CI runs \
+                this via the `Run --ignored landlock-gated tests` step in \
+                test-tau-sandbox-native-e2e"]
     async fn wrap_spawn_with_http_cap_sets_both_proxy_env_vars() {
         let plan_json = serde_json::json!({
             "capabilities": [{
@@ -711,18 +715,12 @@ mod tests {
         let plan: tau_ports::SandboxPlan = serde_json::from_value(plan_json).expect("valid plan");
 
         let mut cmd = Command::new("/bin/true");
-        let _handle = match apply_strict(&plan, &mut cmd) {
-            Ok(h) => h,
-            Err(SandboxError::Proxy { .. }) => {
-                // Proxy spawn requires a working tokio runtime + permitted
-                // socket dir; skip gracefully if the test env can't supply
-                // them. The env-var assertion needs apply_strict to have
-                // succeeded, so we can't usefully continue.
-                eprintln!("SKIP: proxy spawn failed in this environment");
-                return;
-            }
-            Err(e) => panic!("apply_strict failed unexpectedly: {e:?}"),
-        };
+        // Hard requirement under #[ignore]: callers that opt in via
+        // --run-ignored only are claiming the environment supports
+        // proxy spawn. Surface mismatches loudly rather than silently
+        // passing the test on a degraded host.
+        let _handle = apply_strict(&plan, &mut cmd)
+            .expect("apply_strict must succeed when this test is invoked under --run-ignored only");
 
         let env_names: std::collections::HashSet<&std::ffi::OsStr> =
             cmd.get_envs().filter_map(|(k, v)| v.map(|_| k)).collect();
