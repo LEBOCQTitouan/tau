@@ -1,11 +1,15 @@
 # ADR-0018: CI optimization — five-phase migration (sub-project E)
 
-**Status:** Accepted
+**Status:** Accepted (Decision 3 partially superseded — see "Subsequent revisions" below)
 **Date:** 2026-05-06
 **Deciders:** Titouan Lebocq
 **Supersedes:** —
 **Closes:**
 - The 23-required-check / ~33-min PR critical-path CI baseline that had accumulated since priority-12 shipped.
+
+## Subsequent revisions
+
+- **2026-05-17 (PR #122, "ci: round 1 upgrades"):** The `msrv-check` job was collapsed from a 3-OS matrix (`linux`, `macos`, `windows`) to Linux-only. Decision 3 below still holds — MSRV remains a `cargo check` job, not `cargo test` — but the cross-OS dimension is gone, on the basis that MSRV is a rustc-version property and the OS-gated code paths are already exercised by `test-stable` on stable toolchain. Section "14 required checks across 3 jobs types" in Decision 6 below is therefore now overstated by 2 checks. See `docs/superpowers/specs/2026-05-17-ci-upgrades-round-1-design.md` for full rationale.
 
 ## Context
 
