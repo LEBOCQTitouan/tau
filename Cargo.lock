@@ -3094,6 +3094,7 @@ dependencies = [
  "serde_json",
  "tau-app",
  "tau-domain",
+ "tau-observe",
  "tau-pkg",
  "tau-plugin-protocol",
  "tau-ports",
@@ -3135,6 +3136,11 @@ version = "0.0.0"
 [[package]]
 name = "tau-observe"
 version = "0.0.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "tau-pkg"
@@ -3219,12 +3225,12 @@ dependencies = [
  "serde",
  "serde_json",
  "tau-domain",
+ "tau-observe",
  "tau-plugin-protocol",
  "tau-ports",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
