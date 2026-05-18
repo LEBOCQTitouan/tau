@@ -44,7 +44,14 @@ pub async fn run(args: crate::cli::CheckArgs) -> Result<()> {
     let results = runner::run_categories(&ctx, &categories).await;
     let exit_code = compute_exit(&results);
 
-    if args.json {
+    if let Some(path) = args.sarif.as_ref() {
+        let rendered = output::sarif::render(&results);
+        if path == "-" {
+            print!("{rendered}");
+        } else {
+            std::fs::write(path, rendered)?;
+        }
+    } else if args.json {
         let rendered = output::json::render(&ctx.project_root, &categories, args.fast, &results, exit_code);
         print!("{rendered}");
     } else {
