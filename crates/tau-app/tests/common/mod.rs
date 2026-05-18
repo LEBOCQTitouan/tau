@@ -138,17 +138,20 @@ impl Harness {
     }
 }
 
-/// Ensure `$HOME` is set so `tau_pkg::Scope::resolve` succeeds in CI.
+/// Ensure tau's scope-global lookup succeeds in CI.
 ///
-/// On Windows runners, `$HOME` is typically unset (Windows uses
-/// `%USERPROFILE%`). Falls back to USERPROFILE on Windows or `/tmp` as
-/// a last resort.
+/// `tau_pkg::Scope::global` reads `$TAU_HOME` → `$XDG_DATA_HOME/tau` →
+/// `$HOME/.tau`. GitHub Actions Windows runners don't set `$HOME`
+/// (Windows uses `%USERPROFILE%`) and the only Scope check sees as
+/// "set" is `TAU_HOME`. Set `TAU_HOME` to a tempdir-style path — same
+/// pattern as `crates/tau-cli/tests/cmd_resolve.rs`.
 fn ensure_home_env() {
-    if std::env::var_os("HOME").is_some() {
+    if std::env::var_os("TAU_HOME").is_some() {
         return;
     }
     let fallback = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
         .or_else(|| std::env::var_os("TEMP"))
         .unwrap_or_else(|| std::ffi::OsString::from("/tmp"));
-    std::env::set_var("HOME", fallback);
+    std::env::set_var("TAU_HOME", fallback);
 }

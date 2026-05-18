@@ -4,19 +4,18 @@
 
 #![allow(dead_code)]
 
-/// Ensure `$HOME` is set so the spawned `tau` process can resolve its scope.
+/// Ensure tau's global scope can be resolved.
 ///
-/// `tau_pkg::Scope::resolve` reads `$HOME`. GitHub Actions Windows runners
-/// don't set `$HOME` (Windows uses `%USERPROFILE%`), and the env is inherited
-/// by the spawned subprocess. Fall back to `USERPROFILE`, `TEMP`, or `/tmp`.
-///
-/// Idempotent — no-op when `HOME` is already set.
+/// Sets `$TAU_HOME` to a sensible existing directory if it's unset.
+/// Matches the pattern used by `crates/tau-cli/tests/cmd_resolve.rs`.
+/// The spawned `tau` subprocess inherits the env.
 pub fn ensure_home_env() {
-    if std::env::var_os("HOME").is_some() {
+    if std::env::var_os("TAU_HOME").is_some() {
         return;
     }
     let fallback = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
         .or_else(|| std::env::var_os("TEMP"))
         .unwrap_or_else(|| std::ffi::OsString::from("/tmp"));
-    std::env::set_var("HOME", fallback);
+    std::env::set_var("TAU_HOME", fallback);
 }
