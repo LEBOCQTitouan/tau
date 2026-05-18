@@ -342,6 +342,14 @@ async fn system_prompt_override_replaces_skill_default() {
         !system.contains("Default SKILL.md body"),
         "child's system prompt must NOT contain the default SKILL.md body; got: {system:?}"
     );
+
+    // Sanity-check that the mock actually drove the test end-to-end.
+    // The script has 3 turns (parent tool-call → child text → parent
+    // text); the run must consume all of them, otherwise either the
+    // script and the code-under-test have drifted apart or the run
+    // exited early.
+    backend.verify_fully_consumed();
+    backend.verify_invocation_count(3);
 }
 
 // ---------------------------------------------------------------------------
