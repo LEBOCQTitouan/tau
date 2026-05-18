@@ -17,6 +17,7 @@ pub mod resolve;
 pub(crate) mod resolve_helpers;
 pub mod run;
 pub mod sandbox;
+pub mod serve;
 pub mod session;
 pub mod skill;
 pub mod uninstall;

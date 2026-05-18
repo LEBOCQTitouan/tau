@@ -89,6 +89,8 @@
 - [ADR-0028 — Skills runtime invocation](decisions/0028-skills-runtime-invocation.md)
 - [ADR-0029 — Skills Anthropic interop](decisions/0029-skills-anthropic-interop.md)
 - [ADR-0030 — Skills reference packages](decisions/0030-skills-reference-packages.md)
+- [ADR-0032 — CapabilityOverride relocation](decisions/0032-capability-override-relocation.md)
+- [ADR-0033 — Tau serve mode v1](decisions/0033-tau-serve-mode.md)
 
 # Project artifacts
 
