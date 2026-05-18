@@ -6,6 +6,7 @@
 //! 3. Sends handshake → tool.call((ctx, args)) → meta.shutdown.
 //! 4. Decodes the response and asserts on its shape.
 
+use assert_matches::assert_matches;
 use base64::Engine as _;
 use fs_read_plugin_lib::plugin::FsReadPlugin;
 use std::time::SystemTime;
@@ -159,8 +160,9 @@ async fn integration_read_tempfile_succeeds() {
 
     assert!(!result.is_error, "expected success; got {result:?}");
     assert_eq!(result.content.len(), 1);
+    assert_matches!(&result.content[0], tau_ports::ToolContent::Json { .. });
     let tau_ports::ToolContent::Json { data } = &result.content[0] else {
-        panic!("expected ToolContent::Json, got {:?}", result.content[0]);
+        unreachable!("just asserted Json shape above")
     };
     let map = data.as_object().expect("Object data");
     let contents_b64 = map
