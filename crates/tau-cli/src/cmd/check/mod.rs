@@ -6,10 +6,10 @@
 //! Output: human (default), `--json` (JSONL), `--sarif` (SARIF 2.1.0).
 //! Exit codes: 0 clean / 2 fixable / 3 needs-setup / 64 usage / 70 internal.
 
-mod result;
-mod runner;
 mod categories;
 mod output;
+mod result;
+mod runner;
 
 pub use result::{
     compute_exit, CheckCategory, CheckFinding, CheckResult, CheckStatus, FindingLocation, Severity,
@@ -78,7 +78,13 @@ pub async fn run(args: crate::cli::CheckArgs) -> Result<()> {
             std::fs::write(path, rendered)?;
         }
     } else if args.json {
-        let rendered = output::json::render(&ctx.project_root, &categories, args.fast, &results, exit_code);
+        let rendered = output::json::render(
+            &ctx.project_root,
+            &categories,
+            args.fast,
+            &results,
+            exit_code,
+        );
         print!("{rendered}");
     } else {
         let use_color = std::env::var_os("NO_COLOR").is_none();

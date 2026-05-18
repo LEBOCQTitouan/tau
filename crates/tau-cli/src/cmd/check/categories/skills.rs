@@ -63,9 +63,7 @@ pub fn run_skills(ctx: &CheckCtx) -> CheckResult {
         let pkg_version = pkg.active_version.to_string();
 
         // Locate the install directory: <packages_dir>/<name>/<active_version>
-        let install_dir = ctx
-            .scope
-            .package_dir(&pkg.name, &pkg.active_version);
+        let install_dir = ctx.scope.package_dir(&pkg.name, &pkg.active_version);
 
         if !install_dir.exists() {
             findings.push(CheckFinding {
@@ -149,9 +147,7 @@ pub fn run_skills(ctx: &CheckCtx) -> CheckResult {
                         line: None,
                         column: None,
                     }),
-                    remediation: Some(
-                        "tau install --force or report the skill author".into(),
-                    ),
+                    remediation: Some("tau install --force or report the skill author".into()),
                     structured: json!({
                         "package": pkg_name,
                         "version": pkg_version,

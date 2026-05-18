@@ -97,12 +97,7 @@ mod tests {
         }
     }
 
-    fn failed_result(
-        cat: CheckCategory,
-        ms: u64,
-        sev: Severity,
-        summary: &str,
-    ) -> CheckResult {
+    fn failed_result(cat: CheckCategory, ms: u64, sev: Severity, summary: &str) -> CheckResult {
         CheckResult {
             category: cat,
             status: CheckStatus::Failed,

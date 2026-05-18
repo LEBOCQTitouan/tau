@@ -8,7 +8,7 @@ use crate::cmd::check::result::{
 };
 use crate::cmd::check::runner::CheckCtx;
 use serde_json::json;
-use tau_pkg::{verify_all_with_options, VerifyReport};
+use tau_pkg::verify_all_with_options;
 
 pub fn run_lockfile(ctx: &CheckCtx) -> CheckResult {
     let lockfile_path = ctx.scope.lockfile_path();

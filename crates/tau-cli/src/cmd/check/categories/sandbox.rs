@@ -220,7 +220,11 @@ pub async fn run_sandbox(ctx: &CheckCtx) -> CheckResult {
         let plan = match build_plan(&package_caps, &[], None, None) {
             Ok(p) => p,
             Err(e) => {
-                findings.push(build_plan_finding(&plugin_id, format!("{e}"), &tau_toml_path));
+                findings.push(build_plan_finding(
+                    &plugin_id,
+                    format!("{e}"),
+                    &tau_toml_path,
+                ));
                 continue;
             }
         };

@@ -36,8 +36,7 @@ fn json_output_is_jsonl() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     // First line must parse as JSON and have type=run_started.
     let first = stdout.lines().next().unwrap_or("");
-    let v: serde_json::Value =
-        serde_json::from_str(first).expect("first line must be valid JSON");
+    let v: serde_json::Value = serde_json::from_str(first).expect("first line must be valid JSON");
     assert_eq!(
         v["type"], "run_started",
         "first JSONL line type must be run_started, got: {first}"

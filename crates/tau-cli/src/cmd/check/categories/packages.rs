@@ -22,10 +22,7 @@ pub fn run_packages(ctx: &CheckCtx) -> CheckResult {
 
     let lockfile_path = ctx.scope.lockfile_path();
     let lockfile: Option<LockFile> = if lockfile_path.exists() {
-        match LockFile::load(&lockfile_path) {
-            Ok(l) => Some(l),
-            Err(_) => None,
-        }
+        LockFile::load(&lockfile_path).ok()
     } else {
         None
     };

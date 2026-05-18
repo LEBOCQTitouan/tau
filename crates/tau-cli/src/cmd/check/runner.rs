@@ -4,10 +4,10 @@
 //! Tasks 4-9 implement each category. Until then, the runner returns
 //! Skipped placeholders for every category.
 
-use super::result::{CheckCategory, CheckResult, CheckStatus};
+use super::result::{CheckCategory, CheckResult};
 use anyhow::Result;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tau_pkg::{project::ProjectConfig, Scope};
 
 /// Shared context for all checks. Built once at runner start.
@@ -26,14 +26,11 @@ pub struct CheckCtx {
 impl CheckCtx {
     /// Build context from a project root path.
     pub async fn load(project_root: PathBuf, fast: bool) -> Result<Self> {
-        let scope = Scope::resolve(&project_root)
-            .map_err(|e| anyhow::anyhow!("resolve scope: {e}"))?;
+        let scope =
+            Scope::resolve(&project_root).map_err(|e| anyhow::anyhow!("resolve scope: {e}"))?;
         // Project load may legitimately fail (malformed tau.toml). Record
         // None and let the `config` check report the error.
-        let project = match ProjectConfig::from_path(&project_root.join("tau.toml")) {
-            Ok(p) => Some(p),
-            Err(_) => None,
-        };
+        let project = ProjectConfig::from_path(project_root.join("tau.toml")).ok();
         Ok(Self {
             project_root,
             scope,
@@ -65,13 +62,5 @@ async fn run_one(ctx: &CheckCtx, cat: CheckCategory) -> CheckResult {
         CheckCategory::Sandbox => super::categories::sandbox::run_sandbox(ctx).await,
         CheckCategory::Plugins => super::categories::plugins::run_plugins(ctx).await,
         CheckCategory::Skills => super::categories::skills::run_skills(ctx),
-        _ => CheckResult {
-            category: cat,
-            status: CheckStatus::Skipped {
-                reason: "not implemented (Tasks 6-9)".to_string(),
-            },
-            findings: Vec::new(),
-            duration: Duration::from_millis(0),
-        },
     }
 }
