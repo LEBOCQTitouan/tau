@@ -3,9 +3,12 @@
 //! Pure parsing functions over byte slices. The async splice loop lives
 //! in proxy::mod (T4). Tested without any tokio runtime.
 
+/// Parsed `CONNECT host:port HTTP/1.1` request line.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ConnectRequest {
+    /// Target host from the request line.
     pub host: String,
+    /// Target port from the request line.
     pub port: u16,
 }
 
