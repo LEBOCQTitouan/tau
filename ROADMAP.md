@@ -7,12 +7,10 @@ PG4.
 For per-issue tracking, see [GitHub
 Issues](https://github.com/LEBOCQTitouan/tau/issues).
 
-## Current phase: 1 — runnable runtime
+## Current phase: 2 — tau as a compiled language for agentic workflows
 
-**Goal:** make the Phase 0 stack actually runnable end-to-end. Plugin
-loading mechanism, first real LLM-backend + tool plugins, capability
-override, transitive dependency resolution. The first sub-project of
-Phase 1 unblocks everything else.
+**Phase 1 complete** (2026-05-17). All Tier 1–4 priorities shipped,
+including serve mode (§15, ADR-0033). See [Phase 2](#phase-2--tau-as-a-compiled-language-for-agentic-workflows) for active work.
 
 **Status:** Phase 1 priority 3 (first real Tool plugins: fs-read +
 shell) shipped 2026-04-30. Tier 1 fully complete: plugin loading
@@ -300,8 +298,18 @@ Tier ordering reflects criticality, not strict implementation order
     2026-05-11 (PR #57, commit f8ad58f). `cargo-deny / linux` is the
     19th required CI check; gates RustSec advisories + license
     allow-list + non-crates.io sources.
-15. **Serve mode** (JSON-RPC over stdio; Constitution G6, QG12). Lives
-    in `tau-app`.
+15. **Serve mode** (JSON-RPC over stdio) ✅ Shipped 2026-05-17 — see
+    [spec](docs/superpowers/specs/2026-05-17-tau-serve-mode-design.md)
+    and [ADR-0033](docs/decisions/0033-tau-serve-mode.md).
+    `tau serve` exposes runtime.run + runtime.run_streaming as JSON-RPC
+    2.0 over NDJSON-framed stdio. 5 methods + 1 server-initiated
+    notification in v1. One `Runtime` per process, parallel concurrent
+    runs (cap 8 default). Graceful shutdown on SIGTERM/SIGINT/stdin-EOF/
+    parent-death. `tau-app` crate exits stub status. Sister refactor in
+    [ADR-0032](docs/decisions/0032-capability-override-relocation.md)
+    moved `CapabilityOverride` to tau-pkg to break a dependency cycle.
+    Phase 1 closes; Phase 2 (tau as a compiled language) is now the
+    active phase.
 
 ### Deferred sub-projects (cross-tier)
 

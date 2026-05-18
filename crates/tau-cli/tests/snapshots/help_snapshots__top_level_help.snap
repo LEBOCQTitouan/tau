@@ -21,6 +21,7 @@ Commands:
   sandbox    Sandbox configuration and diagnostics
   workflow   Workflow subcommand group (list, run, log, resume)
   skill      Inspect installed skill packages (list, show)
+  serve      Start serve mode: accept JSON-RPC requests over stdio
   help       Print this message or the help of the given subcommand(s)
 
 Options:

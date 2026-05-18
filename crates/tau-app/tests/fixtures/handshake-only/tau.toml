@@ -1,0 +1,6 @@
+# Minimal project for handshake-only tests. No agents needed —
+# handshake reports `agents: []`. Project::load just needs to parse
+# valid tau.toml without erroring.
+
+[project]
+name = "handshake-fixture"
