@@ -141,11 +141,21 @@ pub fn make_session_context(
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use tau_ports::fixtures::scratch_dir;
 ///
 /// let dir = scratch_dir("install-roundtrip");
-/// // dir.path() lives until `dir` is dropped.
+/// // The directory lives on disk until `dir` is dropped.
+/// assert!(dir.path().exists());
+/// assert!(
+///     dir.path()
+///         .file_name()
+///         .and_then(|s| s.to_str())
+///         .map(|s| s.starts_with("tau-test-install-roundtrip-"))
+///         .unwrap_or(false),
+///     "scratch_dir should embed the label in the dir name; got {:?}",
+///     dir.path()
+/// );
 /// ```
 pub fn scratch_dir(label: &str) -> tempfile::TempDir {
     tempfile::Builder::new()
