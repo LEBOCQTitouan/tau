@@ -877,6 +877,7 @@ dependencies = [
 name = "fs-read"
 version = "0.0.0"
 dependencies = [
+ "assert_matches",
  "base64",
  "globset",
  "rmp-serde",
@@ -1939,6 +1940,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 name = "openai"
 version = "0.0.0"
 dependencies = [
+ "assert_matches",
  "async-stream",
  "bytes",
  "eventsource-stream",
@@ -2893,6 +2895,7 @@ dependencies = [
 name = "shell"
 version = "0.0.0"
 dependencies = [
+ "assert_matches",
  "rmp-serde",
  "serde",
  "serde_json",

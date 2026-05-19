@@ -1228,6 +1228,7 @@ fn make_max_turns_outcome(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
     use tau_ports::fixtures::{make_token_usage, make_tool_result};
 
     #[test]
@@ -1235,11 +1236,9 @@ mod tests {
         let e = RunEvent::TextDelta {
             delta: "Hello".into(),
         };
-        let cloned = e.clone();
-        let RunEvent::TextDelta { delta } = cloned else {
-            panic!("expected TextDelta")
-        };
-        assert_eq!(delta, "Hello");
+        assert_matches!(e.clone(), RunEvent::TextDelta { delta } => {
+            assert_eq!(delta, "Hello");
+        });
     }
 
     #[test]
@@ -1249,12 +1248,10 @@ mod tests {
             name: "fs-read".into(),
             args: Value::Null,
         };
-        let cloned = e.clone();
-        let RunEvent::ToolCallStarted { id, name, .. } = cloned else {
-            panic!("expected ToolCallStarted")
-        };
-        assert_eq!(id, "call_1");
-        assert_eq!(name, "fs-read");
+        assert_matches!(e.clone(), RunEvent::ToolCallStarted { id, name, .. } => {
+            assert_eq!(id, "call_1");
+            assert_eq!(name, "fs-read");
+        });
     }
 
     #[test]
@@ -1264,10 +1261,9 @@ mod tests {
             name: "fs-read".into(),
             result: Ok(make_tool_result(vec![], false)),
         };
-        let RunEvent::ToolCallCompleted { result, .. } = e else {
-            panic!("expected ToolCallCompleted")
-        };
-        assert!(result.is_ok());
+        assert_matches!(e, RunEvent::ToolCallCompleted { result, .. } => {
+            assert!(result.is_ok());
+        });
     }
 
     #[test]
@@ -1277,13 +1273,11 @@ mod tests {
             name: "fs-read".into(),
             result: Err("validation failed".into()),
         };
-        let RunEvent::ToolCallCompleted { result, .. } = e else {
-            panic!("expected ToolCallCompleted")
-        };
-        let Err(reason) = result else {
-            panic!("expected Err")
-        };
-        assert_eq!(reason, "validation failed");
+        assert_matches!(e, RunEvent::ToolCallCompleted { result, .. } => {
+            assert_matches!(result, Err(reason) => {
+                assert_eq!(reason, "validation failed");
+            });
+        });
     }
 
     #[test]
@@ -1293,17 +1287,18 @@ mod tests {
             usage: Some(make_token_usage(10, 5)),
             turn: 3,
         };
-        let RunEvent::TurnCompleted {
-            stop_reason,
-            usage,
-            turn,
-        } = e
-        else {
-            panic!("expected TurnCompleted")
-        };
-        assert_eq!(stop_reason, StopReason::ToolUse);
-        assert_eq!(turn, 3);
-        assert!(usage.is_some());
+        assert_matches!(
+            e,
+            RunEvent::TurnCompleted {
+                stop_reason,
+                usage,
+                turn,
+            } => {
+                assert_eq!(stop_reason, StopReason::ToolUse);
+                assert_eq!(turn, 3);
+                assert!(usage.is_some());
+            }
+        );
     }
 
     // ---- Task 3 tests: run_streaming_inner ----

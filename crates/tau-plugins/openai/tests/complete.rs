@@ -2,6 +2,7 @@
 
 mod common;
 
+use assert_matches::assert_matches;
 use common::cassette;
 use openai_plugin_lib::plugin::OpenAIPlugin;
 use tau_plugin_sdk::Configure;
@@ -81,10 +82,12 @@ async fn complete_401_returns_typed_auth_error() {
         OpenAIPlugin::from_config(common::test_config_with_retry(server.uri().into(), 3, 0))
             .unwrap();
     let err = plugin.complete(common::sample_request()).await.unwrap_err();
-    let LlmError::Auth { ref message } = err else {
-        panic!("expected Auth, got {err:?}");
-    };
-    assert!(message.contains("Invalid API key"), "got: {message}");
+    assert_matches!(
+        &err,
+        LlmError::Auth { message } => {
+            assert!(message.contains("Invalid API key"), "got: {message}");
+        }
+    );
     // 401 must NOT retry.
     assert_eq!(server.received_requests().len(), 1);
 }
@@ -96,10 +99,12 @@ async fn complete_400_returns_typed_invalid_request() {
         OpenAIPlugin::from_config(common::test_config_with_retry(server.uri().into(), 3, 0))
             .unwrap();
     let err = plugin.complete(common::sample_request()).await.unwrap_err();
-    let LlmError::InvalidRequest { ref reason } = err else {
-        panic!("expected InvalidRequest, got {err:?}");
-    };
-    assert!(reason.contains("openai bad request"), "got: {reason}");
+    assert_matches!(
+        &err,
+        LlmError::InvalidRequest { reason } => {
+            assert!(reason.contains("openai bad request"), "got: {reason}");
+        }
+    );
     // 400 must NOT retry.
     assert_eq!(server.received_requests().len(), 1);
 }

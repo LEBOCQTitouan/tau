@@ -484,7 +484,18 @@ jobs:
         # strict_net_filter tests were replaced by strict_proxy tests (sub-project H,
         # ADR-0020). The proxy pattern needs no CAP_NET_ADMIN; all integration tests
         # run on this stock ubuntu-latest runner.
+        # No untrusted input in run: commands here or below.
         run: cargo nextest run --profile ci -p tau-sandbox-native --features integration-tests --tests --verbose
+      - name: Run --ignored landlock-gated tests
+        # Two tau-sandbox-native tests are `#[ignore]`'d because their
+        # runtime probes for landlock + seccomp + namespaces (or a
+        # working proxy spawn) would otherwise silently SKIP in
+        # environments that lack them. CI runners DO support those,
+        # so we explicitly opt in via --run-ignored only here.
+        # Promotes `bridge_survives_strict_tier_filter` (integration
+        # test) and `wrap_spawn_with_http_cap_sets_both_proxy_env_vars`
+        # (unit test in src/strict.rs) from DARK to LIT.
+        run: cargo nextest run --profile ci -p tau-sandbox-native --features integration-tests --run-ignored only --verbose
 
   test-tau-runtime-e2e:
     name: test (tau-runtime e2e / linux)
