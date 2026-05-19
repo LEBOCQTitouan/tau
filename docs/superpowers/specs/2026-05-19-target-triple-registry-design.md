@@ -42,8 +42,8 @@ Bazel-inspired: a triple is fundamentally a **constraint set on three orthogonal
 
 | Axis | Variants | Source of truth |
 |---|---|---|
-| `Platform` | `Linux`, `Darwin`, `Windows`, `Any` | new enum in `tau-domain::target` |
-| `AdapterFamily` | `Native`, `Container`, `Remote`, `Wasi`, `Passthrough` | new enum in `tau-domain::target`; aligns with `tau-runtime::sandbox::registry::RegistryKind` |
+| `Platform` | `Linux`, `Darwin`, `Windows`, `Any` | new enum in `tau-ports::target` |
+| `AdapterFamily` | `Native`, `Container`, `Remote`, `Wasi`, `Passthrough` | new enum in `tau-ports::target`; aligns with `tau-runtime::sandbox::registry::RegistryKind` |
 | `SandboxTier` | `Strict`, `Light`, `None` | existing, in `tau-ports` |
 
 The `Wasi` family is reserved (no `Wasi` variant in `RegistryKind` today; added when §G ships).
@@ -105,7 +105,7 @@ pub enum TripleStatus {
 
 ## 5. Code surface
 
-### 5.1 `tau-domain::target` module
+### 5.1 `tau-ports::target` module
 
 ```rust
 pub mod target;
@@ -241,7 +241,7 @@ pub enum ParseError {
 
 ```rust
 // tau-runtime/src/sandbox/target_match.rs
-use tau_domain::target::{TargetTriple, TargetTripleEntry, AdapterFamily, Platform};
+use tau_ports::target::{TargetTriple, TargetTripleEntry, AdapterFamily, Platform};
 use crate::sandbox::registry::{AdapterRegistration, REGISTRY as ADAPTER_REGISTRY, RegistryKind};
 
 /// Does the given adapter registration satisfy the triple's constraints?
@@ -333,7 +333,7 @@ Parse errors surface through `cmd/error_render.rs` (existing helper from tau-pkg
 New CLI flag on `tau check` (and any per-category invocation like `tau check sandbox --target X`). Behavior:
 
 1. Parse `<triple>` via `TargetTriple::from_str`. Parse error → exit 64 (usage).
-2. Look up profile via `tau_domain::target::lookup(&triple)`. Unknown → exit 64 with suggestion (re-use show's renderer).
+2. Look up profile via `tau_ports::target::lookup(&triple)`. Unknown → exit 64 with suggestion (re-use show's renderer).
 3. Run categories with the target in scope:
    - `sandbox` category: validate plugins' required shapes ⊆ target profile's `required_shapes`. Error finding per violation. Validate project's `required_tier` ≤ target's tier. Error finding on violation. Adapter is determined by `registration_for_triple(&triple)`; if no local registration → Warning finding `target reserved (no working adapter exists)` for `Reserved` triples, OR Warning `target's adapter not registered locally` for `Available` triples where no compatible adapter is in `ADAPTER_REGISTRY`. If the adapter IS registered but its probe returns Unavailable, also Warning.
    - Other categories (`config`, `lockfile`, `packages`, `plugins`, `skills`): unchanged behavior; the target is informational only for these.
@@ -393,7 +393,7 @@ No changes to `tau resolve --check-sandbox`. That command exists for project-sid
 
 ## 8. Testing strategy
 
-- **Unit tests inline** in `tau-domain::target`:
+- **Unit tests inline** in `tau-ports::target`:
   - Round-trip parse → display for every Available triple
   - Parse error for each `ParseError` variant
   - Levenshtein-style suggestion sanity (5 closest matches)
