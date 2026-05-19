@@ -178,14 +178,24 @@ impl BundleManifest {
         })?;
         Ok(Self::parse_str(&bytes)?)
     }
+
+    /// Emit the canonical-TOML serialization of this manifest. See
+    /// `crate::bundle::canonical::to_canonical_toml` for the format
+    /// specification.
+    pub fn to_canonical_toml(&self) -> String {
+        crate::bundle::canonical::to_canonical_toml(self)
+    }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests_helpers {
     use super::*;
+    use std::collections::BTreeMap;
     use tau_domain::GitLocation;
 
-    fn sample_manifest() -> BundleManifest {
+    /// Construct a fully-populated bundle manifest for tests. Shared
+    /// across the bundle module's unit tests.
+    pub fn sample_manifest() -> BundleManifest {
         BundleManifest {
             schema_version: 1,
             bundle: BundleMeta {
@@ -229,6 +239,12 @@ mod tests {
             }],
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::tests_helpers::sample_manifest;
 
     #[test]
     fn manifest_round_trips_through_toml() {

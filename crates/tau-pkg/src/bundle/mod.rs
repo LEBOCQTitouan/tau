@@ -9,9 +9,11 @@
 //! - Canonical TOML serialization (canonical module, Task 2).
 //! - Self-hash compute + verify (hash module, Task 3).
 
+pub mod canonical;
 pub mod error;
 pub mod manifest;
 
+pub use canonical::to_canonical_toml;
 pub use error::{BundleIntegrityError, BundleIoError, BundleParseError};
 pub use manifest::{
     BackendRef, BundleAgent, BundleEffectiveCapabilities, BundleManifest, BundleMeta,

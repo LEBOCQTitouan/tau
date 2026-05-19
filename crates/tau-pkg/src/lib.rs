@@ -40,7 +40,7 @@ pub mod verify;
 
 pub use bundle::{
     BackendRef, BundleAgent, BundleEffectiveCapabilities, BundleIntegrityError, BundleIoError,
-    BundleManifest, BundleMeta, BundlePackage, BundleParseError, ProjectInfo,
+    BundleManifest, BundleMeta, BundlePackage, BundleParseError, ProjectInfo, to_canonical_toml,
 };
 pub use error::{
     GitError, InstallError, ManifestReadError, RegistryError, ScopeError, UninstallError,
