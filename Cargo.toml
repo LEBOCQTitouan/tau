@@ -31,6 +31,10 @@ members = [
 ]
 exclude = [
     "crates/tau-plugin-compat/fixtures/controlled-env-binary",
+    # cargo-fuzz harness — separate Cargo project; requires nightly Rust
+    # and libfuzzer-sys, neither of which should leak into the workspace
+    # toolchain. See crates/tau-pkg/fuzz/README.md.
+    "crates/tau-pkg/fuzz",
 ]
 
 [workspace.package]
