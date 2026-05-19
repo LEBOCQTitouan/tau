@@ -427,12 +427,10 @@ kind = "fs.read"
 paths = ["/tmp/**"]
 "#,
         );
-        let entry = tau_ports::target::lookup(
-            &"linux-native-strict".parse().unwrap()
-        ).unwrap();
+        let entry = tau_ports::target::lookup(&"linux-native-strict".parse().unwrap()).unwrap();
         let profile = entry.profile();
-        let outcome = check_plugin_sandbox_against_profile(
-            "subset-plugin", &manifest_path, &profile);
+        let outcome =
+            check_plugin_sandbox_against_profile("subset-plugin", &manifest_path, &profile);
         assert!(
             matches!(outcome, SandboxPluginOutcome::Ok),
             "expected Ok, got {outcome:?}"
@@ -457,17 +455,19 @@ dependencies = []
 kind = "agent.spawn"
 "#,
         );
-        let entry = tau_ports::target::lookup(
-            &"linux-native-strict".parse().unwrap()
-        ).unwrap();
+        let entry = tau_ports::target::lookup(&"linux-native-strict".parse().unwrap()).unwrap();
         let profile = entry.profile();
-        let outcome = check_plugin_sandbox_against_profile(
-            "agent-spawner", &manifest_path, &profile);
+        let outcome =
+            check_plugin_sandbox_against_profile("agent-spawner", &manifest_path, &profile);
         match outcome {
             SandboxPluginOutcome::ValidateFailed(errors) => {
                 assert_eq!(errors.len(), 1);
-                assert!(errors[0].reason.contains("AgentSpawn") || errors[0].reason.contains("agent.spawn"),
-                    "unexpected reason: {}", errors[0].reason);
+                assert!(
+                    errors[0].reason.contains("AgentSpawn")
+                        || errors[0].reason.contains("agent.spawn"),
+                    "unexpected reason: {}",
+                    errors[0].reason
+                );
             }
             other => panic!("expected ValidateFailed, got {other:?}"),
         }

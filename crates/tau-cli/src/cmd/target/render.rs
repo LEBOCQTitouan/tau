@@ -26,7 +26,12 @@ pub(crate) fn render_human_line(e: &TargetTripleEntry, output: &mut Output) -> a
         }
     }
     let shapes_csv = shape_names.join(", ");
-    output.human(&format!("{:<24} {}  {}", e.triple.to_string(), status, shapes_csv))?;
+    output.human(&format!(
+        "{:<24} {}  {}",
+        e.triple.to_string(),
+        status,
+        shapes_csv
+    ))?;
     Ok(())
 }
 

@@ -147,7 +147,11 @@ mod tests {
     fn registry_triples_are_unique() {
         let mut seen = std::collections::HashSet::new();
         for e in REGISTRY {
-            assert!(seen.insert(e.triple), "duplicate triple in REGISTRY: {:?}", e.triple);
+            assert!(
+                seen.insert(e.triple),
+                "duplicate triple in REGISTRY: {:?}",
+                e.triple
+            );
         }
     }
 

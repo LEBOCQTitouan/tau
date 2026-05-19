@@ -40,8 +40,8 @@ pub use sandbox::{
 };
 pub use storage::{Key, Namespace, Storage};
 pub use target::{
-    AdapterFamily, ParseError as TargetParseError, Platform, TargetCapabilityProfile,
-    TargetTriple, TargetTripleEntry, TripleStatus,
+    AdapterFamily, ParseError as TargetParseError, Platform, TargetCapabilityProfile, TargetTriple,
+    TargetTripleEntry, TripleStatus,
 };
 pub use tool::{
     DenyEntry, SessionContext, StatelessAdapter, StatelessTool, Tool, ToolContent, ToolResult,

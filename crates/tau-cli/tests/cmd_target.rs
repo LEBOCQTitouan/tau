@@ -12,11 +12,18 @@ fn list_default_shows_only_available() {
         .args(["target", "list"])
         .output()
         .expect("spawn");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).expect("utf8");
     assert!(stdout.contains("linux-native-strict"));
     assert!(stdout.contains("passthrough"));
-    assert!(!stdout.contains("windows-native-strict"), "Reserved should be hidden by default");
+    assert!(
+        !stdout.contains("windows-native-strict"),
+        "Reserved should be hidden by default"
+    );
 }
 
 #[test]
@@ -39,7 +46,12 @@ fn list_json_emits_one_event_per_triple() {
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).expect("utf8");
     let lines: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
-    assert_eq!(lines.len(), 6, "expected 6 entries (5 Available + 1 Reserved), got {} — stdout: {stdout}", lines.len());
+    assert_eq!(
+        lines.len(),
+        6,
+        "expected 6 entries (5 Available + 1 Reserved), got {} — stdout: {stdout}",
+        lines.len()
+    );
     for l in &lines {
         let v: serde_json::Value = serde_json::from_str(l).expect("each line is JSON");
         assert_eq!(v["event"], "target");
@@ -53,7 +65,11 @@ fn show_known_triple_prints_matrix() {
         .args(["target", "show", "linux-native-strict"])
         .output()
         .expect("spawn");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).expect("utf8");
     assert!(stdout.contains("linux-native-strict"));
     assert!(stdout.contains("status:"));
@@ -77,7 +93,7 @@ fn show_reserved_triple_includes_reason() {
 #[test]
 fn show_bogus_triple_exits_64_with_suggestion() {
     let out = Command::new(tau_bin())
-        .args(["target", "show", "linux-native-strikt"])  // typo
+        .args(["target", "show", "linux-native-strikt"]) // typo
         .output()
         .expect("spawn");
     assert_eq!(out.status.code(), Some(64));
@@ -86,7 +102,9 @@ fn show_bogus_triple_exits_64_with_suggestion() {
     let stdout = String::from_utf8(out.stdout).expect("utf8");
     let combined = format!("{stderr}{stdout}");
     assert!(
-        combined.contains("did you mean") || combined.contains("could not parse") || combined.contains("unknown triple"),
+        combined.contains("did you mean")
+            || combined.contains("could not parse")
+            || combined.contains("unknown triple"),
         "expected error or suggestion in output. combined: {combined}"
     );
 }
@@ -94,7 +112,7 @@ fn show_bogus_triple_exits_64_with_suggestion() {
 #[test]
 fn show_unknown_but_parsing_triple_exits_64() {
     let out = Command::new(tau_bin())
-        .args(["target", "show", "darwin-container-strict"])  // parses, not registered
+        .args(["target", "show", "darwin-container-strict"]) // parses, not registered
         .output()
         .expect("spawn");
     assert_eq!(out.status.code(), Some(64));

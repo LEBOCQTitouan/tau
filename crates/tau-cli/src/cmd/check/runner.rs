@@ -30,7 +30,11 @@ pub struct CheckCtx {
 
 impl CheckCtx {
     /// Build context from a project root path.
-    pub async fn load(project_root: PathBuf, fast: bool, target: Option<TargetTriple>) -> Result<Self> {
+    pub async fn load(
+        project_root: PathBuf,
+        fast: bool,
+        target: Option<TargetTriple>,
+    ) -> Result<Self> {
         let scope =
             Scope::resolve(&project_root).map_err(|e| anyhow::anyhow!("resolve scope: {e}"))?;
         // Project load may legitimately fail (malformed tau.toml). Record

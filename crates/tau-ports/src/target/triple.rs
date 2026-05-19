@@ -68,10 +68,7 @@ impl FromStr for TargetTriple {
         if s.is_empty() {
             return Err(ParseError::Empty);
         }
-        if let Some(bad) = s
-            .chars()
-            .find(|c| !(c.is_ascii_lowercase() || *c == '-'))
-        {
+        if let Some(bad) = s.chars().find(|c| !(c.is_ascii_lowercase() || *c == '-')) {
             return Err(ParseError::InvalidChar(bad));
         }
         let segments: Vec<&str> = s.split('-').collect();

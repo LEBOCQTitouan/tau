@@ -57,7 +57,10 @@ pub fn run(args: &TargetShowArgs, output: &mut Output) -> anyhow::Result<()> {
     output.human(&format!("  status:   {status_line}"))?;
     output.human(&format!("  platform: {}", entry.triple.platform))?;
     output.human(&format!("  adapter:  {}", entry.triple.adapter_family))?;
-    output.human(&format!("  tier:     {}", render::tier_str(entry.triple.tier)))?;
+    output.human(&format!(
+        "  tier:     {}",
+        render::tier_str(entry.triple.tier)
+    ))?;
     output.human(&format!("  shapes:   {shapes_csv}"))?;
     Ok(())
 }
@@ -91,7 +94,9 @@ fn emit_unknown(triple: &TargetTriple, output: &mut Output) -> anyhow::Result<()
             "input": triple.to_string(),
         }))?;
     } else {
-        output.error(format!("unknown triple `{triple}` (parses but not registered)"))?;
+        output.error(format!(
+            "unknown triple `{triple}` (parses but not registered)"
+        ))?;
         if let Some(hint) = suggest(&triple.to_string()) {
             output.human(&format!("  did you mean: {hint}?"))?;
         }
