@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn collect_landlock_paths_uses_command_cwd_when_set() {
         // Use a real directory that exists so symlink resolution succeeds.
-        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let tmp = tau_ports::fixtures::scratch_dir("landlock-cwd");
         let src = tmp.path().join("src");
         std::fs::create_dir(&src).expect("mkdir src");
         let plan = plan_from(serde_json::json!([
@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn collect_landlock_paths_separates_read_and_write() {
         // Use real existing directories so symlink resolution succeeds.
-        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let tmp = tau_ports::fixtures::scratch_dir("landlock-read-write");
         let r1 = tmp.path().join("r1");
         let r2 = tmp.path().join("r2");
         let w1 = tmp.path().join("w1");
@@ -561,7 +561,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn resolve_symlinks_symlink_includes_canonical() {
         use std::os::unix::fs::symlink;
-        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let tmp = tau_ports::fixtures::scratch_dir("resolve-symlinks-canonical");
         let target = tmp.path().join("target");
         std::fs::create_dir(&target).expect("mkdir target");
         let link = tmp.path().join("link");
@@ -599,7 +599,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn collect_landlock_paths_includes_canonical_for_symlinks() {
         use std::os::unix::fs::symlink;
-        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let tmp = tau_ports::fixtures::scratch_dir("landlock-canonical-for-symlinks");
         let target = tmp.path().join("target");
         std::fs::create_dir(&target).expect("mkdir target");
         let link = tmp.path().join("link");
