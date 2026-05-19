@@ -4,9 +4,10 @@
 //! the expected error variant (or success).
 
 use tau_pkg::{read_manifest, ManifestReadError};
+use tau_ports::fixtures::scratch_dir;
 
 fn write_and_read(toml_body: &str) -> Result<tau_domain::PackageManifest, ManifestReadError> {
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = scratch_dir("manifest-validation");
     let path = tmp.path().join("tau.toml");
     std::fs::write(&path, toml_body).unwrap();
     read_manifest(&path)
