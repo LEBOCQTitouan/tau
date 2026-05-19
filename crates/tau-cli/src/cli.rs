@@ -693,6 +693,11 @@ pub struct CheckArgs {
     /// Mutually exclusive with --json.
     #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "-")]
     pub sarif: Option<String>,
+
+    /// Validate against a specific target triple instead of the locally
+    /// resolved adapter. See `tau target list` for valid values.
+    #[arg(long, value_name = "TRIPLE")]
+    pub target: Option<String>,
 }
 
 /// Arguments for `tau serve`.
