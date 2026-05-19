@@ -287,6 +287,90 @@ fn verify_anthropic_strict_fails_for_missing_description() {
     );
 }
 
+/// Test 7b: `tau verify --anthropic-strict` exits 2 for a skill whose
+/// SKILL.md body (after the closing `---`) is empty / whitespace-only.
+/// Validates the `AnthropicConformanceIssue::EmptyBody` variant.
+#[test]
+fn verify_anthropic_strict_fails_for_empty_body() {
+    let global_dir = tempfile::tempdir().unwrap();
+    let global_path = global_dir.path();
+
+    std::fs::write(
+        global_path.join("tau-lock.toml"),
+        skill_lockfile_toml("empty-body-skill", "1.0.0"),
+    )
+    .unwrap();
+
+    let pkg_dir = global_path.join("packages/empty-body-skill/1.0.0");
+    write_skill_package(
+        &pkg_dir,
+        "empty-body-skill",
+        "1.0.0",
+        // Frontmatter is valid; the body after `---` is whitespace-only.
+        "---\nname: empty-body-skill\ndescription: A skill with no body.\n---\n   \n\n",
+    );
+
+    let output = Command::cargo_bin("tau")
+        .unwrap()
+        .args(["verify", "--global", "--anthropic-strict"])
+        .env("TAU_HOME", global_path)
+        .output()
+        .expect("tau verify ran");
+
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit when SKILL.md body is empty"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("AnthropicConformance"),
+        "expected 'AnthropicConformance' in output for empty body; got: {stdout}"
+    );
+}
+
+/// Test 7c: `tau verify --anthropic-strict` exits 2 for a skill whose
+/// SKILL.md frontmatter is malformed (missing closing `---`).
+/// Validates the `AnthropicConformanceIssue::MalformedFrontmatter` variant.
+#[test]
+fn verify_anthropic_strict_fails_for_malformed_frontmatter() {
+    let global_dir = tempfile::tempdir().unwrap();
+    let global_path = global_dir.path();
+
+    std::fs::write(
+        global_path.join("tau-lock.toml"),
+        skill_lockfile_toml("broken-frontmatter-skill", "1.0.0"),
+    )
+    .unwrap();
+
+    let pkg_dir = global_path.join("packages/broken-frontmatter-skill/1.0.0");
+    // SKILL.md begins with `---` but never closes the frontmatter block.
+    // The frontmatter parser must reject this with MalformedFrontmatter
+    // rather than silently treat the entire file as body.
+    write_skill_package(
+        &pkg_dir,
+        "broken-frontmatter-skill",
+        "1.0.0",
+        "---\nname: broken-frontmatter-skill\ndescription: missing closing fence\nDo the thing.\n",
+    );
+
+    let output = Command::cargo_bin("tau")
+        .unwrap()
+        .args(["verify", "--global", "--anthropic-strict"])
+        .env("TAU_HOME", global_path)
+        .output()
+        .expect("tau verify ran");
+
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit when SKILL.md frontmatter is malformed"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("AnthropicConformance"),
+        "expected 'AnthropicConformance' in output for malformed frontmatter; got: {stdout}"
+    );
+}
+
 /// Test 8: `tau verify` (without `--anthropic-strict`) exits 0 even for a
 /// skill that would fail the strict conformance check.
 ///

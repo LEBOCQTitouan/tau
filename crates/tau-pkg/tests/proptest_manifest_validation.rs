@@ -9,6 +9,7 @@
 //! suite over its serde derives.
 
 use tau_pkg::{read_manifest, ManifestReadError};
+use tau_ports::fixtures::scratch_dir;
 
 fn write_manifest(dir: &tempfile::TempDir, contents: &str) -> std::path::PathBuf {
     let path = dir.path().join("tau.toml");
@@ -18,7 +19,7 @@ fn write_manifest(dir: &tempfile::TempDir, contents: &str) -> std::path::PathBuf
 
 #[test]
 fn rejects_completely_malformed_toml() {
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = scratch_dir("manifest-malformed-toml");
     let path = write_manifest(&tmp, "this is not toml = = =");
     let err = read_manifest(&path).unwrap_err();
     assert!(matches!(err, ManifestReadError::Parse { .. }));
@@ -26,7 +27,7 @@ fn rejects_completely_malformed_toml() {
 
 #[test]
 fn rejects_missing_required_field_name() {
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = scratch_dir("manifest-missing-name");
     let bad = r#"
         version = "1.0.0"
         description = "no name field"
@@ -44,7 +45,7 @@ fn rejects_missing_required_field_name() {
 
 #[test]
 fn rejects_invalid_version_format() {
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = scratch_dir("manifest-invalid-version");
     let bad = r#"
         name = "acme-tool"
         version = "not.a.semver"
@@ -63,7 +64,7 @@ fn rejects_invalid_version_format() {
 
 #[test]
 fn rejects_missing_required_field_source() {
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = scratch_dir("manifest-missing-source");
     let bad = r#"
         name = "acme-tool"
         version = "1.0.0"
@@ -85,7 +86,7 @@ fn unknown_top_level_field_outcome_is_defined() {
     // unknown fields. If it ignores them, read_manifest will succeed.
     // If it rejects them, read_manifest will return Parse or Validation.
     // Either outcome is acceptable — we document the actual behaviour here.
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = scratch_dir("manifest-unknown-field");
     let input = r#"
         name = "acme-tool"
         version = "1.0.0"
