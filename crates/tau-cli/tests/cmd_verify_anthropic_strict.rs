@@ -73,9 +73,7 @@ fn redacted(stdout: &str) -> String {
             // Erase up to (but not including) the next whitespace or
             // newline; that's the path span.
             let rest = &out[start..];
-            let end = rest
-                .find(|c: char| c.is_whitespace())
-                .unwrap_or(rest.len());
+            let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
             out.replace_range(start..start + end, "<TEMPDIR>");
         }
     }
