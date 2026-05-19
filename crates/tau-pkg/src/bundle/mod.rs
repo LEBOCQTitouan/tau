@@ -11,10 +11,12 @@
 
 pub mod canonical;
 pub mod error;
+pub mod hash;
 pub mod manifest;
 
 pub use canonical::to_canonical_toml;
 pub use error::{BundleIntegrityError, BundleIoError, BundleParseError};
+pub use hash::{compute_self_hash, verify_self_hash};
 pub use manifest::{
     BackendRef, BundleAgent, BundleEffectiveCapabilities, BundleManifest, BundleMeta,
     BundlePackage, ProjectInfo,

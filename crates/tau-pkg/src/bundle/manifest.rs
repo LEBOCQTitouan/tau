@@ -185,6 +185,19 @@ impl BundleManifest {
     pub fn to_canonical_toml(&self) -> String {
         crate::bundle::canonical::to_canonical_toml(self)
     }
+
+    /// Compute the canonical self-hash of this manifest. Does not mutate.
+    /// See `crate::bundle::hash::compute_self_hash`.
+    pub fn compute_self_hash(&self) -> String {
+        crate::bundle::hash::compute_self_hash(self)
+    }
+
+    /// Verify that this manifest's `bundle.sha256` field equals the
+    /// recomputed canonical self-hash. See
+    /// `crate::bundle::hash::verify_self_hash`.
+    pub fn verify_self_hash(&self) -> Result<(), crate::bundle::error::BundleIntegrityError> {
+        crate::bundle::hash::verify_self_hash(self)
+    }
 }
 
 #[cfg(test)]
