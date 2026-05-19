@@ -13,9 +13,11 @@ name: CI summary
 # this — ci-summary said success while CI itself failed.
 #
 # This version polls the GitHub API directly for the CI workflow's
-# run on the PR's HEAD SHA and reports the authoritative outcome
-# from within a single `pull_request`-triggered job. Self-contained;
-# no reliance on workflow_run propagation.
+# run on the head SHA and reports the authoritative outcome from
+# within a single job. Self-contained; no reliance on workflow_run
+# propagation. Runs on both `pull_request` (for PR gating) and
+# `merge_group` (for merge-queue gating) — branch protection
+# requires this check on merge_group commits as well.
 #
 # Behavior:
 # - Wait up to ~25 min for the CI workflow run on this SHA to complete.
@@ -30,9 +32,10 @@ name: CI summary
 
 on:
   pull_request:
+  merge_group:
 
 concurrency:
-  group: ci-summary-${{ github.event.pull_request.number }}
+  group: ci-summary-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -48,10 +51,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          SHA: ${{ github.event.pull_request.head.sha }}
+          SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          echo "Waiting for CI workflow run on $SHA in $REPO."
+          echo "Waiting for CI workflow run on $SHA in $REPO (event: $EVENT)."
 
           paths_ignore_grace=120
 
@@ -60,7 +64,7 @@ jobs:
             elapsed=$((SECONDS - start))
 
             run_json=$(gh api \
-              "repos/$REPO/actions/runs?head_sha=$SHA&event=pull_request&per_page=10" \
+              "repos/$REPO/actions/runs?head_sha=$SHA&event=$EVENT&per_page=10" \
               --jq '.workflow_runs[] | select(.name=="CI") | {id, status, conclusion}' \
               | head -1)
 
