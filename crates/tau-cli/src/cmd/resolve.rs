@@ -61,67 +61,39 @@ pub async fn run(args: &ResolveArgs, output: &mut Output) -> anyhow::Result<()> 
 /// Exit 0 if all plugins pass; exit 2 if any fail or no adapter is
 /// available (per ADR-0007 three-bucket exit codes).
 async fn run_check_sandbox(_args: &ResolveArgs, output: &mut Output) -> anyhow::Result<()> {
-    use tau_pkg::scope::{SandboxRequiredTier, SandboxRequirements, ScopeConfig};
-    use tau_runtime::sandbox::{
-        build_plan, resolve_adapter, resolve_strict_for_validation, validate_plan_against_adapter,
+    use crate::cmd::resolve_helpers::{
+        check_plugin_sandbox, read_sandbox_requirements_for_check, resolve_sandbox_check_adapter,
+        SandboxPluginOutcome,
     };
+    use tau_pkg::scope::SandboxRequiredTier;
 
     // 1. Resolve the scope.
     let cwd = std::env::current_dir()?;
     let scope = tau_pkg::Scope::resolve(&cwd).context("resolving package scope")?;
 
-    // 2. Read scope config for [sandbox] section.
-    let config_path = scope.config_path();
-    let sandbox_requirements = if config_path.exists() {
-        let text = std::fs::read_to_string(&config_path)
-            .with_context(|| format!("reading scope config at {config_path:?}"))?;
-        let scope_config = ScopeConfig::read_from_str(&text)
-            .with_context(|| format!("parsing scope config at {config_path:?}"))?;
-        scope_config.sandbox
-    } else {
-        SandboxRequirements::default()
-    };
+    // 2. Read [sandbox] from scope config (swallows malformed-config errors;
+    //    `tau check config` is the authoritative report surface).
+    let sandbox_requirements = read_sandbox_requirements_for_check(&scope);
 
-    // 3. Select the sandbox adapter.
-    //
-    //    If required_tier == None the runtime resolver would pick Passthrough,
-    //    which trivially accepts every plan. --check-sandbox skips passthrough
-    //    and picks the highest-priority non-passthrough adapter instead, so the
-    //    report shows what would happen if the user strengthens the requirement.
-    let adapter = if matches!(
-        sandbox_requirements.required_tier,
-        SandboxRequiredTier::None
-    ) {
-        match resolve_strict_for_validation().await {
-            Ok(a) => a,
-            Err(_) => {
-                let msg = "no non-permissive adapter available to validate against; cannot perform sandbox check";
-                if output.is_json() {
-                    output.json(&serde_json::json!({
-                        "event": "error",
-                        "reason": msg,
-                    }))?;
-                } else {
-                    output.error(msg)?;
+    // 3. Resolve the adapter (handles the None->strict-for-validation pivot).
+    let adapter = match resolve_sandbox_check_adapter(&sandbox_requirements).await {
+        Ok(a) => a,
+        Err(e) => {
+            let msg = match sandbox_requirements.required_tier {
+                SandboxRequiredTier::None => {
+                    "no non-permissive adapter available to validate against; cannot perform sandbox check".to_string()
                 }
-                std::process::exit(2);
+                _ => format!("no sandbox adapter available: {e}"),
+            };
+            if output.is_json() {
+                output.json(&serde_json::json!({
+                    "event": "error",
+                    "reason": msg,
+                }))?;
+            } else {
+                output.error(&msg)?;
             }
-        }
-    } else {
-        match resolve_adapter(&sandbox_requirements, &[]).await {
-            Ok(a) => a,
-            Err(e) => {
-                let msg = format!("no sandbox adapter available: {e}");
-                if output.is_json() {
-                    output.json(&serde_json::json!({
-                        "event": "error",
-                        "reason": msg,
-                    }))?;
-                } else {
-                    output.error(&msg)?;
-                }
-                std::process::exit(2);
-            }
+            std::process::exit(2);
         }
     };
 
@@ -135,63 +107,17 @@ async fn run_check_sandbox(_args: &ResolveArgs, output: &mut Output) -> anyhow::
 
     // 5. For each installed package that has a plugin entry, validate its plan.
     for pkg in &lockfile.packages {
-        let Some(_locked_plugin) = &pkg.plugin else {
+        if pkg.plugin.is_none() {
             // Data-only package — no sandbox check needed.
             continue;
-        };
+        }
 
         let plugin_id = pkg.name.as_str().to_owned();
-
-        // Read the package manifest from disk to get declared capabilities.
         let pkg_dir = scope.package_dir(&pkg.name, &pkg.active_version);
         let manifest_path = pkg_dir.join("tau.toml");
 
-        let package_caps = match tau_pkg::read_manifest(&manifest_path) {
-            Ok(manifest) => manifest.capabilities().to_vec(),
-            Err(e) => {
-                // Manifest missing or unreadable — treat as empty capabilities
-                // and log a warning. The plugin may still have been installed
-                // in a previous tau version; we skip shape-level checking.
-                let reason = format!(
-                    "could not read manifest for {plugin_id}: {e} — skipping capability check"
-                );
-                if output.is_json() {
-                    output.json(&serde_json::json!({
-                        "event": "sandbox_check",
-                        "plugin_id": plugin_id,
-                        "status": "skipped",
-                        "reason": reason,
-                    }))?;
-                } else {
-                    output.warn(&reason)?;
-                }
-                continue;
-            }
-        };
-
-        // Build a plan (no project overrides at this layer).
-        let plan = match build_plan(&package_caps, &[], None, None) {
-            Ok(p) => p,
-            Err(e) => {
-                let reason = format!("build_plan failed for {plugin_id}: {e}");
-                if output.is_json() {
-                    output.json(&serde_json::json!({
-                        "event": "sandbox_check",
-                        "plugin_id": plugin_id,
-                        "status": "error",
-                        "reason": reason,
-                    }))?;
-                } else {
-                    output.error(&reason)?;
-                }
-                error_count += 1;
-                continue;
-            }
-        };
-
-        // Validate the plan against the adapter.
-        match validate_plan_against_adapter(&plugin_id, &plan, &adapter) {
-            Ok(()) => {
+        match check_plugin_sandbox(&plugin_id, &manifest_path, Some(&adapter)) {
+            SandboxPluginOutcome::Ok => {
                 ok_count += 1;
                 if output.is_json() {
                     output.json(&serde_json::json!({
@@ -203,7 +129,21 @@ async fn run_check_sandbox(_args: &ResolveArgs, output: &mut Output) -> anyhow::
                     output.human(&format!("✓ {plugin_id}"))?;
                 }
             }
-            Err(errors) => {
+            SandboxPluginOutcome::BuildPlanFailed(msg) => {
+                error_count += 1;
+                let reason = format!("build_plan failed for {plugin_id}: {msg}");
+                if output.is_json() {
+                    output.json(&serde_json::json!({
+                        "event": "sandbox_check",
+                        "plugin_id": plugin_id,
+                        "status": "error",
+                        "reason": reason,
+                    }))?;
+                } else {
+                    output.error(&reason)?;
+                }
+            }
+            SandboxPluginOutcome::ValidateFailed(errors) => {
                 error_count += 1;
                 for err in &errors {
                     if output.is_json() {
@@ -217,6 +157,21 @@ async fn run_check_sandbox(_args: &ResolveArgs, output: &mut Output) -> anyhow::
                     } else {
                         output.human(&format!("✗ {plugin_id}: {}", err.reason))?;
                     }
+                }
+            }
+            SandboxPluginOutcome::ManifestUnreadable(msg) => {
+                let reason = format!(
+                    "could not read manifest for {plugin_id}: {msg} — skipping capability check"
+                );
+                if output.is_json() {
+                    output.json(&serde_json::json!({
+                        "event": "sandbox_check",
+                        "plugin_id": plugin_id,
+                        "status": "skipped",
+                        "reason": reason,
+                    }))?;
+                } else {
+                    output.warn(&reason)?;
                 }
             }
         }
