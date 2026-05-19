@@ -18,6 +18,7 @@
 
 use proptest::prelude::*;
 use tau_pkg::{LockFile, RegistryError};
+use tau_ports::fixtures::scratch_dir;
 
 /// Generate a small semver version string (avoid 0.0.0 edge cases).
 fn arb_version_str() -> impl Strategy<Value = String> {
@@ -133,7 +134,7 @@ proptest! {
 
 #[test]
 fn lockfile_load_rejects_too_new_schema_version() {
-    let tmp = tempfile::TempDir::new().unwrap();
+    let tmp = scratch_dir("lockfile-schema-too-new");
     let path = tmp.path().join("tau-lock.toml");
     std::fs::write(
         &path,
