@@ -115,6 +115,9 @@ pub enum Command {
     /// Inspect installed skill packages (list, show).
     #[command(subcommand)]
     Skill(SkillSubcommand),
+    /// Inspect the deployment-target registry (list, show).
+    #[command(subcommand)]
+    Target(TargetSubcommand),
     /// Start serve mode: accept JSON-RPC requests over stdio.
     Serve(ServeArgs),
     /// Run pre-flight validation against the project (config, lockfile,
@@ -626,6 +629,36 @@ pub struct SkillExportArgs {
     /// Overwrite an existing output directory.
     #[arg(long)]
     pub force: bool,
+}
+
+/// `tau target <subcommand>` — inspect the deployment-target registry.
+#[derive(Debug, clap::Subcommand)]
+pub enum TargetSubcommand {
+    /// List all registered target triples.
+    List(TargetListArgs),
+    /// Show detail for one target triple.
+    Show(TargetShowArgs),
+}
+
+/// Arguments for `tau target list`.
+#[derive(Debug, clap::Args)]
+pub struct TargetListArgs {
+    /// Include Reserved triples (default: Available only).
+    #[arg(long)]
+    pub all: bool,
+    /// Emit canonical JSON instead of the human-formatted table.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `tau target show`.
+#[derive(Debug, clap::Args)]
+pub struct TargetShowArgs {
+    /// Triple to show (e.g. `linux-native-strict`).
+    pub triple: String,
+    /// Emit canonical JSON instead of the human-formatted summary.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for `tau check`.
