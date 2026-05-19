@@ -22,6 +22,7 @@ pub mod llm;
 pub mod orchestration;
 pub mod sandbox;
 pub mod storage;
+pub mod target;
 pub mod tool;
 
 pub use error::{KeyError, LlmError, NamespaceError, SandboxError, StorageError, ToolError};
@@ -38,6 +39,7 @@ pub use sandbox::{
     ResourceLimits, Sandbox, SandboxHandle, SandboxPlan, SandboxProbe, SandboxTier, WorkingContext,
 };
 pub use storage::{Key, Namespace, Storage};
+pub use target::{AdapterFamily, ParseError as TargetParseError, Platform, TargetTriple};
 pub use tool::{
     DenyEntry, SessionContext, StatelessAdapter, StatelessTool, Tool, ToolContent, ToolResult,
 };
