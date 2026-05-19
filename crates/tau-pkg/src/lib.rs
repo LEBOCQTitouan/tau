@@ -39,9 +39,9 @@ pub mod update;
 pub mod verify;
 
 pub use bundle::{
-    BackendRef, BundleAgent, BundleEffectiveCapabilities, BundleIntegrityError, BundleIoError,
-    BundleManifest, BundleMeta, BundlePackage, BundleParseError, ProjectInfo,
-    compute_self_hash, to_canonical_toml, verify_self_hash,
+    compute_self_hash, to_canonical_toml, verify_self_hash, BackendRef, BundleAgent,
+    BundleEffectiveCapabilities, BundleIntegrityError, BundleIoError, BundleManifest, BundleMeta,
+    BundlePackage, BundleParseError, ProjectInfo,
 };
 pub use error::{
     GitError, InstallError, ManifestReadError, RegistryError, ScopeError, UninstallError,

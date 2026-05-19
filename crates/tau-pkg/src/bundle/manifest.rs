@@ -256,8 +256,8 @@ pub(crate) mod tests_helpers {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::tests_helpers::sample_manifest;
+    use super::*;
 
     #[test]
     fn manifest_round_trips_through_toml() {

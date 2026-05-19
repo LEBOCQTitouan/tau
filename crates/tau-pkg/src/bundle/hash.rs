@@ -70,7 +70,9 @@ mod tests {
         let m = sample_manifest();
         let h = compute_self_hash(&m);
         assert_eq!(h.len(), 64);
-        assert!(h.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(h
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 
     #[test]
@@ -80,7 +82,10 @@ mod tests {
         let h1 = compute_self_hash(&m);
         m.bundle.sha256 = "f".repeat(64);
         let h2 = compute_self_hash(&m);
-        assert_eq!(h1, h2, "existing sha value must not affect the computed hash");
+        assert_eq!(
+            h1, h2,
+            "existing sha value must not affect the computed hash"
+        );
     }
 
     #[test]

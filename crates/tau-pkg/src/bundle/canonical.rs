@@ -32,7 +32,11 @@ pub fn to_canonical_toml(manifest: &BundleManifest) -> String {
     out.push_str("[project]\n");
     write_str_kv(&mut out, "name", &manifest.project.name);
     write_str_kv(&mut out, "version", &manifest.project.version.to_string());
-    write_str_kv(&mut out, "tau_toml_sha256", &manifest.project.tau_toml_sha256);
+    write_str_kv(
+        &mut out,
+        "tau_toml_sha256",
+        &manifest.project.tau_toml_sha256,
+    );
 
     // [[packages]]
     for pkg in &manifest.packages {
@@ -177,7 +181,10 @@ fn toml_string(s: &str) -> String {
 /// Emit a TOML bare key if `k` is ASCII alphanumeric/dash/underscore;
 /// otherwise quote it.
 fn toml_bare_key(k: &str) -> String {
-    if !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if !k.is_empty()
+        && k.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         k.to_string()
     } else {
         toml_string(k)
