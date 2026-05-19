@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn resolve_head_errors_on_non_repo_dir() {
-        let tmp = tempfile::TempDir::new().unwrap();
+        let tmp = tau_ports::fixtures::scratch_dir("git-resolve-head-non-repo");
         let result = Git::resolve_head(tmp.path());
         match result {
             Err(GitError::CommandFailed { what, .. }) => {
