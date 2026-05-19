@@ -32,3 +32,6 @@ default = []
 
 [dev-dependencies]
 proptest   = { workspace = true }
+# `tau_ports::fixtures::scratch_dir` for labeled tempdir creation
+# (T7 of the test-suite-upgrades plan). Test-fixtures feature only.
+tau-ports  = { workspace = true, features = ["test-fixtures"] }
