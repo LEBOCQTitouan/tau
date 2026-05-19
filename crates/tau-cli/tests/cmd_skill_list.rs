@@ -171,6 +171,33 @@ fn list_human_empty_state() {
     insta::assert_snapshot!("list_human_empty_state", stdout);
 }
 
+/// `--json` for the empty-skill case. Pins the JSON contract:
+/// `{"skills": []}` (empty array, NOT null, NOT a missing key) so
+/// downstream tooling that iterates `.skills` keeps working when
+/// no skills are installed.
+#[test]
+fn list_json_empty_state() {
+    let dir = make_scope_with_skills(&[]);
+    let output = run_skill_list(dir.path(), &["--json"]);
+
+    assert!(
+        output.status.success(),
+        "expected success; stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let parsed: Value = serde_json::from_str(stdout.trim()).expect("valid JSON");
+    let skill_arr = parsed["skills"]
+        .as_array()
+        .expect("`skills` must be an array (not null or missing) even when empty");
+    assert!(
+        skill_arr.is_empty(),
+        "expected `skills: []`; got {} entries",
+        skill_arr.len()
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Negative-path tests
 // ---------------------------------------------------------------------------
