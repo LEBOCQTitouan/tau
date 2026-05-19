@@ -424,6 +424,100 @@ fn show_body_missing_skill_md_errors_clearly() {
     );
 }
 
+/// Two skills installed with names that are BOTH within Levenshtein distance 2
+/// of the queried (mistyped) name. The `closest_match` helper picks the FIRST
+/// candidate at the minimum distance, where "first" is iteration order over the
+/// installed-skill names (alphabetical post-collection).
+///
+/// Pins current behavior: ONE suggestion in the "did you mean" line, not a
+/// list. If the disambiguation policy ever changes (e.g. to print all
+/// equally-close matches), this test will flag it.
+#[test]
+fn show_unknown_name_multi_fuzzy_match_pins_first_alphabetical() {
+    // Two installed skills, both within distance 2 of the typo "kritique":
+    //   - "critic"  → distance 4 → out of cutoff
+    //   - "critik"  → distance 2 → match
+    //   - "krit"    → distance 4 → out of cutoff
+    // Hmm — need names where MULTIPLE are within the cutoff. Let me pick:
+    //   - "critic"  → distance from "critique" is 3 → out
+    //   - "critik"  → distance from "critique" is 3 → out
+    // Better: name-pair where the typo is within distance 1 of BOTH.
+    // Use "critic" vs "critique": query "critiq". distances:
+    //   - "critic"   → 2 (insert 'q', delete nothing — wait: critic→critiq is 1)
+    //   - "critique" → 2 (critique→critiq drops 'u' + 'e' = 2 deletions)
+    // Both within distance 2; first alphabetically is "critic".
+    let dir = TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".tau")).unwrap();
+    let toml = "schema_version = 6\n\
+                generated_by_tau_version = \"0.0.0\"\n\
+                generated_at = \"2026-05-12T10:00:00Z\"\n\n\
+                [[package]]\n\
+                name = \"critic\"\n\
+                active_version = \"0.1.0\"\n\
+                source = \"https://example.com/critic.git\"\n\
+                \n\
+                [package.skill]\n\
+                content_sha256 = \"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\"\n\
+                [package.skill.frontmatter]\n\
+                name = \"critic\"\n\
+                description = \"Reviews drafts.\"\n\
+                \n\
+                [[package.versions]]\n\
+                version = \"0.1.0\"\n\
+                resolved_commit = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+                sha256 = \"\"\n\
+                installed_at = \"2026-05-12T10:00:00Z\"\n\
+                \n\
+                [[package]]\n\
+                name = \"critique\"\n\
+                active_version = \"0.1.0\"\n\
+                source = \"https://example.com/critique.git\"\n\
+                \n\
+                [package.skill]\n\
+                content_sha256 = \"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\"\n\
+                [package.skill.frontmatter]\n\
+                name = \"critique\"\n\
+                description = \"Deeper critique.\"\n\
+                \n\
+                [[package.versions]]\n\
+                version = \"0.1.0\"\n\
+                resolved_commit = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n\
+                sha256 = \"\"\n\
+                installed_at = \"2026-05-12T10:00:00Z\"\n";
+    std::fs::write(dir.path().join("tau-lock.toml"), toml).unwrap();
+
+    let output = run_skill_show(dir.path(), "critiq", &[]);
+
+    let exit_code = output.status.code().unwrap_or(-1);
+    assert_eq!(exit_code, 2, "expected exit code 2; got {exit_code}");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("skill not found: critiq"),
+        "expected 'skill not found: critiq' in stderr; got: {stderr}"
+    );
+    // ONE suggestion line, not multiple. The exact name picked is the
+    // first encountered at the minimum distance — for an alphabetical
+    // input order (`critic` < `critique`) and equal distance from
+    // "critiq", that's `critic`. If the algorithm changes to "show all
+    // equally-close", this assertion's failure mode pins the diff
+    // shape to look at.
+    let did_you_mean_lines: Vec<_> = stderr
+        .lines()
+        .filter(|l| l.contains("did you mean"))
+        .collect();
+    assert_eq!(
+        did_you_mean_lines.len(),
+        1,
+        "expected exactly ONE 'did you mean' line; got: {did_you_mean_lines:?}"
+    );
+    assert!(
+        did_you_mean_lines[0].contains("critic") || did_you_mean_lines[0].contains("critique"),
+        "expected suggestion to be one of the two candidates; got: {}",
+        did_you_mean_lines[0]
+    );
+}
+
 /// critic fixture but tau.toml is replaced with garbage bytes. `tau skill show`
 /// MUST surface a TOML parse error, not panic. Pins: top-line error contains
 /// `parsing` + the tau.toml path.
